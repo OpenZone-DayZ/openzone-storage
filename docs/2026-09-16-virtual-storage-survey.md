@@ -280,6 +280,10 @@ Decisions for the owner:
 - Boot rule for an open box found in engine storage: close it into the store (proposed) or
   leave it open?
 
+**Decided by the owner 2026-09-16:** model C, three boxes of 500 / 1000 / 1500 cells at
+width 10, weapon slots on the box. The remaining choices moved to
+`2026-09-16-storage-box-spec.md`, section 11.
+
 ## 7. The native DLL option (owner's question)
 
 A DLL cannot be *called* from Enforce Script; there is no FFI. The frequency proxy works by
