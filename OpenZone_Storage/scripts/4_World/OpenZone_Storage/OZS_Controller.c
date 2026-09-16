@@ -189,17 +189,22 @@ class OZS_Controller
     // store opens at once.
     bool RequestOpen(OZ_StorageBox box, PlayerBase player, out string why)
     {
+        return RequestOpenAs(box, Who(player), why);
+    }
+
+    bool RequestOpenAs(OZ_StorageBox box, string who, out string why)
+    {
         int state = box.OZS_GetState();
         if (state != OZS_Const.STATE_CLOSED)
         {
             why = "#STR_OZS_OPENING";
             return false;
         }
-        string who = Who(player);
         if (!OZS_Store.HasFiles(box.OZS_GetId()))
         {
             box.OZS_SetState(OZS_Const.STATE_OPEN);
             box.OZS_SetStoredCount(0);
+            box.OZS_SetOpenedAt(GetGame().GetTickTime());
             OZ_Log.Info("storage: box " + box.OZS_GetId() + " opened by " + who + " (no store, empty)");
             return true;
         }
@@ -216,12 +221,14 @@ class OZS_Controller
         return true;
     }
 
-    // The open job finished: the files stay until the engine saves the box.
+    // The open job finished: the files stay until the engine saves the box,
+    // and the auto-close timer starts.
     void OnOpened(OZ_StorageBox box)
     {
         string id = box.OZS_GetId();
         if (m_FilesPending.Find(id) < 0)
             m_FilesPending.Insert(id);
+        box.OZS_SetOpenedAt(GetGame().GetTickTime());
     }
 
     protected OZS_OpenJob FindOpenJob(OZ_StorageBox box)
@@ -262,6 +269,65 @@ class OZS_Controller
             return false;
         m_CloseJobs.Insert(job);
         return true;
+    }
+
+    // Sort = a close whose records carry a sorted layout, then a reopen; the
+    // player who pressed the button keeps their screen open and sees the
+    // items come back in order. Refused while anyone else is looking, and
+    // more than once per SORT_COOLDOWN.
+    void RequestSort(OZ_StorageBox box, PlayerIdentity sender)
+    {
+        if (!sender || !box)
+            return;
+        PlayerBase player = FindPlayer(sender.GetId());
+        string why;
+        if (!RequestSortAs(box, sender.GetName(), sender.GetId(), why))
+        {
+            Notify(player, why);
+            return;
+        }
+        Notify(player, "#STR_OZS_SORTING");
+    }
+
+    bool RequestSortAs(OZ_StorageBox box, string who, string exceptPlayerId, out string why)
+    {
+        if (box.OZS_GetState() != OZS_Const.STATE_OPEN)
+        {
+            why = "#STR_OZS_OPENING";
+            return false;
+        }
+        float now = GetGame().GetTickTime();
+        if (now - box.OZS_GetLastSort() < OZS_Const.SORT_COOLDOWN)
+        {
+            why = "#STR_OZS_SORT_WAIT";
+            return false;
+        }
+        if (HasViewers(box, exceptPlayerId))
+        {
+            why = "#STR_OZS_BUSY";
+            return false;
+        }
+        OZS_CloseJob job = new OZS_CloseJob(box, who + " (sort)", true);
+        string err;
+        if (!job.Begin(err))
+        {
+            OZ_Log.Error("storage: box " + box.OZS_GetId() + " could not be sorted by " + who + ": " + err);
+            why = "#STR_OZS_STORE_FAILED";
+            return false;
+        }
+        box.OZS_SetLastSort(now);
+        m_CloseJobs.Insert(job);
+        return true;
+    }
+
+    // A close job finished; a sort reopens the box at once.
+    void OnClosed(OZ_StorageBox box, bool reopen, string who)
+    {
+        if (!reopen || !box)
+            return;
+        string why;
+        if (!RequestOpenAs(box, who, why))
+            OZ_Log.Warn("storage: box " + box.OZS_GetId() + " could not reopen after the sort: " + why);
     }
 
     // Synchronous close: files, then every entity in this frame. Mission
@@ -414,26 +480,12 @@ class OZS_Controller
         return player.GetIdentity().GetId();
     }
 
-    // Any connected player (other than `except`) within `radius` of the box.
-    static bool AnyPlayerNear(OZ_StorageBox box, float radius, PlayerBase except)
-    {
-        array<Man> players = new array<Man>();
-        GetGame().GetPlayers(players);
-        for (int i = 0; i < players.Count(); i++)
-        {
-            Man m = players.Get(i);
-            if (!m || m == except)
-                continue;
-            if (vector.Distance(m.GetPosition(), box.GetPosition()) <= radius)
-                return true;
-        }
-        return false;
-    }
-
     // ---- auto-close and players leaving --------------------------------
 
-    // Every AUTO_TICK seconds: an OPEN box with nobody looking and nobody
-    // within AutoCloseRadius for AutoCloseQuietSeconds closes itself.
+    // Every AUTO_TICK seconds: an OPEN box closes AutoCloseSeconds after it
+    // was opened -- a plain timer (owner 2026-09-16), no distance and no
+    // player events in it. While someone is still looking at the box the
+    // close waits for them; the tick tries again.
     protected void AutoCloseTick()
     {
         Prune();
@@ -444,53 +496,33 @@ class OZS_Controller
             OZ_StorageBox b = m_Boxes.Get(i);
             if (b.OZS_GetState() != OZS_Const.STATE_OPEN)
             {
-                b.OZS_SetQuietSince(0);
+                b.OZS_SetOpenedAt(0);
                 continue;
             }
-            if (AnyPlayerNear(b, st.AutoCloseRadius, null) || HasViewers(b))
+            if (b.OZS_GetOpenedAt() <= 0)
             {
-                b.OZS_SetQuietSince(0);
+                b.OZS_SetOpenedAt(now);
                 continue;
             }
-            if (b.OZS_GetQuietSince() <= 0)
-            {
-                b.OZS_SetQuietSince(now);
+            if (now - b.OZS_GetOpenedAt() < st.AutoCloseSeconds)
                 continue;
-            }
-            if (now - b.OZS_GetQuietSince() < st.AutoCloseQuietSeconds)
+            if (HasViewers(b))
                 continue;
             string why;
             if (!RequestCloseAs(b, "auto-close", "", why))
                 OZ_Log.Warn("storage: box " + b.OZS_GetId() + " auto-close refused: " + why);
-            b.OZS_SetQuietSince(0);
         }
     }
 
-    // A player disconnects or dies: their viewer entries go, and an open box
-    // within AutoCloseRadius of them with nobody else near or looking closes
-    // now instead of after the quiet period.
-    void OnPlayerGone(PlayerBase player, string how)
+    // A player disconnects or dies: only their viewer entries go. The box
+    // itself is left to the timer.
+    void OnPlayerLeft(PlayerBase player)
     {
         if (!player)
             return;
         string pid = PlayerId(player);
         if (pid != "")
             DropViewersOf(pid);
-        Prune();
-        OZS_Settings st = OZS_Settings.Get();
-        for (int i = 0; i < m_Boxes.Count(); i++)
-        {
-            OZ_StorageBox b = m_Boxes.Get(i);
-            if (b.OZS_GetState() != OZS_Const.STATE_OPEN)
-                continue;
-            if (vector.Distance(b.GetPosition(), player.GetPosition()) > st.AutoCloseRadius)
-                continue;
-            if (AnyPlayerNear(b, st.AutoCloseRadius, player) || HasViewers(b, pid))
-                continue;
-            string why;
-            if (!RequestCloseAs(b, Who(player) + " (" + how + ")", pid, why))
-                OZ_Log.Warn("storage: box " + b.OZS_GetId() + " could not close on " + how + " of " + Who(player) + ": " + why);
-        }
     }
 
     protected OZS_CloseJob FindCloseJob(OZ_StorageBox box)
@@ -605,7 +637,7 @@ class OZS_Controller
         bool files = OZS_Store.HasFiles(id);
         string s = "storage: boot: box " + id + " " + OZS_Const.StateName(state) + " with " + entities + " entities, files=" + files;
         box.OZS_SetRestoring(false);
-        box.OZS_SetQuietSince(0);
+        box.OZS_SetOpenedAt(0);
 
         if (files)
         {

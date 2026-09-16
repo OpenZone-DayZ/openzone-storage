@@ -12,7 +12,11 @@ class CfgPatches
 {
     class OpenZone_Storage
     {
-        units[] = {"OZ_StorageBox_Small", "OZ_StorageBox_Medium", "OZ_StorageBox_Large"};
+        units[] =
+        {
+            "OZ_StorageBox_Small", "OZ_StorageBox_Medium", "OZ_StorageBox_Large",
+            "OZ_StorageBoxKit_Small", "OZ_StorageBoxKit_Medium", "OZ_StorageBoxKit_Large"
+        };
         weapons[] = {};
         requiredVersion = 0.1;
         requiredAddons[] =
@@ -70,6 +74,7 @@ class CfgVehicles
 {
     class WoodenCrate;
     class SeaChest;
+    class Inventory_Base;
 
     // 500 cells at the vanilla width of 10, two weapon slots.
     class OZ_StorageBox_Small: WoodenCrate
@@ -148,6 +153,63 @@ class CfgVehicles
                 view_index = 1;
             };
         };
+    };
+    // The kits a player carries and deploys into a box (OZS_Kit.c). Each has a
+    // "<kit>Placing" twin: the class the hologram projects, with the box's model
+    // and hologram material (Hologram reads them from the projection's class).
+    class OZ_StorageBoxKit_Small: Inventory_Base
+    {
+        scope = 2;
+        displayName = "$STR_OZS_KIT_SMALL";
+        descriptionShort = "$STR_OZS_KIT_SMALL_DESC";
+        model = "\DZ\gear\camping\wooden_case.p3d";
+        rotationFlags = 2;
+        itemSize[] = {5, 4};
+        weight = 5000;
+        itemBehaviour = 0;
+        hologramMaterial = "wooden_case";
+        hologramMaterialPath = "dz\gear\camping\data";
+        class DamageSystem
+        {
+            class GlobalHealth
+            {
+                class Health
+                {
+                    hitpoints = 500;
+                };
+            };
+        };
+    };
+    class OZ_StorageBoxKit_SmallPlacing: OZ_StorageBoxKit_Small
+    {
+        scope = 1;
+        displayName = "This is a hologram";
+    };
+    class OZ_StorageBoxKit_Medium: OZ_StorageBoxKit_Small
+    {
+        displayName = "$STR_OZS_KIT_MEDIUM";
+        descriptionShort = "$STR_OZS_KIT_MEDIUM_DESC";
+        model = "\DZ\gear\camping\sea_chest.p3d";
+        itemSize[] = {6, 5};
+        weight = 7000;
+        hologramMaterial = "sea_chest";
+    };
+    class OZ_StorageBoxKit_MediumPlacing: OZ_StorageBoxKit_Medium
+    {
+        scope = 1;
+        displayName = "This is a hologram";
+    };
+    class OZ_StorageBoxKit_Large: OZ_StorageBoxKit_Medium
+    {
+        displayName = "$STR_OZS_KIT_LARGE";
+        descriptionShort = "$STR_OZS_KIT_LARGE_DESC";
+        itemSize[] = {8, 5};
+        weight = 9000;
+    };
+    class OZ_StorageBoxKit_LargePlacing: OZ_StorageBoxKit_Large
+    {
+        scope = 1;
+        displayName = "This is a hologram";
     };
 };
 

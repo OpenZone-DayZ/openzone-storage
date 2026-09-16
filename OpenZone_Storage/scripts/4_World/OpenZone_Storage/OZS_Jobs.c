@@ -28,13 +28,23 @@ class OZS_CloseJob
     protected float m_CommitMs;
     protected float m_DeleteMs;
     protected float m_MaxStepMs;
+    // A sort: the cargo roots get new cells from OZS_Sorter (aligned with
+    // m_Roots, -1 = keep), and the box reopens when the close is done.
+    protected bool m_Sorted;
+    protected bool m_Reopen;
+    protected ref array<int> m_NewRows;
+    protected ref array<int> m_NewCols;
 
-    void OZS_CloseJob(OZ_StorageBox box, string who)
+    void OZS_CloseJob(OZ_StorageBox box, string who, bool sorted = false)
     {
         m_Box = box;
         m_Who = who;
         m_Roots = new array<EntityAI>();
         m_Phase = PHASE_CAPTURE;
+        m_Sorted = sorted;
+        m_Reopen = sorted;
+        m_NewRows = new array<int>();
+        m_NewCols = new array<int>();
     }
 
     OZ_StorageBox Box()
@@ -56,6 +66,11 @@ class OZS_CloseJob
         m_Entities = 0;
         for (int i = 0; i < m_Roots.Count(); i++)
             m_Entities = m_Entities + OZS_Records.CountTree(m_Roots.Get(i));
+        if (m_Sorted)
+        {
+            int placed = OZS_Sorter.Plan(m_Box, m_Roots, m_NewRows, m_NewCols);
+            OZ_Log.Dbg("storage: box " + m_Box.OZS_GetId() + " sort plan: " + placed + " of " + m_Roots.Count() + " roots placed");
+        }
         m_Writer = new OZS_StoreWriter();
         if (!m_Writer.Open(m_Box, m_Roots.Count(), m_Entities, why))
         {
@@ -81,7 +96,10 @@ class OZS_CloseJob
         {
             while (m_Next < m_Roots.Count())
             {
-                m_Writer.WriteRoot(m_Roots.Get(m_Next));
+                if (m_Sorted)
+                    m_Writer.WriteRoot(m_Roots.Get(m_Next), m_NewRows.Get(m_Next), m_NewCols.Get(m_Next));
+                else
+                    m_Writer.WriteRoot(m_Roots.Get(m_Next));
                 m_Next++;
                 now = GetGame().GetTickTime();
                 if (now - frameStart >= budgetSec)
@@ -164,6 +182,7 @@ class OZS_CloseJob
         string s = "storage: box " + m_Box.OZS_GetId() + " closed by " + m_Who + ": deleted " + m_Deleted + " entities in ";
         s = s + m_DeleteFrames + " frame(s), " + R1(m_DeleteMs) + " ms; longest step " + R1(m_MaxStepMs) + " ms";
         OZ_Log.Info(s);
+        OZS_Controller.Get().OnClosed(m_Box, m_Reopen, m_Who);
     }
 
     static string R1(float v)

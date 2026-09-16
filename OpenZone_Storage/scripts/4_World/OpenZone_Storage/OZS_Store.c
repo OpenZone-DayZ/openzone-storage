@@ -208,13 +208,14 @@ class OZS_StoreWriter
         return true;
     }
 
-    // One root entity with everything under it, into both files.
-    void WriteRoot(EntityAI e)
+    // One root entity with everything under it, into both files; a cell
+    // override (>= 0) puts a cargo root elsewhere in the grid (the sort).
+    void WriteRoot(EntityAI e, int newRow = -1, int newCol = -1)
     {
         if (!m_Open || !e)
             return;
-        m_Written = m_Written + OZS_Records.WriteEntity(m_Bin, e);
-        OZS_Records.WriteListEntity(m_List, e, 0);
+        m_Written = m_Written + OZS_Records.WriteEntity(m_Bin, e, newRow, newCol);
+        OZS_Records.WriteListEntity(m_List, e, 0, newRow, newCol);
     }
 
     int Written()

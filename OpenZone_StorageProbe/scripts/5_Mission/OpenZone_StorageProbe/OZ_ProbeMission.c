@@ -24,6 +24,9 @@ modded class MissionServer
 modded class MissionGameplay
 {
     protected ref OZ_ProbeClientMonitor m_OZ_ProbeMonitor;
+#ifndef NO_GUI
+    protected ref OZ_ProbeClientControl m_OZ_ProbeControl;
+#endif
 
     override void OnInit()
     {
@@ -31,6 +34,9 @@ modded class MissionGameplay
         if (!GetGame() || GetGame().IsDedicatedServer())
             return;
         m_OZ_ProbeMonitor = new OZ_ProbeClientMonitor();
+#ifndef NO_GUI
+        m_OZ_ProbeControl = new OZ_ProbeClientControl();
+#endif
     }
 
     override void OnUpdate(float timeslice)
@@ -38,6 +44,10 @@ modded class MissionGameplay
         super.OnUpdate(timeslice);
         if (m_OZ_ProbeMonitor)
             m_OZ_ProbeMonitor.OnFrame(timeslice);
+#ifndef NO_GUI
+        if (m_OZ_ProbeControl)
+            m_OZ_ProbeControl.OnFrame(timeslice);
+#endif
     }
 
     override void OnMissionFinish()

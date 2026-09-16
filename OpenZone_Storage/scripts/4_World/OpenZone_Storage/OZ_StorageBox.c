@@ -20,9 +20,10 @@ class OZ_StorageBox : DeployableContainer_Base
     // Server only: the controller's job is creating entities in this box, so
     // the receive gates answer yes although the box is not OPEN yet.
     protected bool   m_OZS_Restoring;
-    // Server only: tick time since nobody has been near or looking (0 = not
-    // quiet), for the auto-close.
-    protected float  m_OZS_QuietSince;
+    // Server only: tick time at which the box became OPEN (0 = not open),
+    // for the auto-close timer; and of the last sort, for its cooldown.
+    protected float  m_OZS_OpenedAt;
+    protected float  m_OZS_LastSort;
 
     override void InitItemVariables()
     {
@@ -137,17 +138,27 @@ class OZ_StorageBox : DeployableContainer_Base
         return m_OZS_Restoring;
     }
 
-    float OZS_GetQuietSince()
+    float OZS_GetOpenedAt()
     {
-        return m_OZS_QuietSince;
+        return m_OZS_OpenedAt;
     }
 
-    void OZS_SetQuietSince(float t)
+    void OZS_SetOpenedAt(float t)
     {
-        m_OZS_QuietSince = t;
+        m_OZS_OpenedAt = t;
     }
 
-    // ---- viewer RPC from the client's inventory screen ---------------------
+    float OZS_GetLastSort()
+    {
+        return m_OZS_LastSort;
+    }
+
+    void OZS_SetLastSort(float t)
+    {
+        m_OZS_LastSort = t;
+    }
+
+    // ---- RPCs from the client's inventory screen ---------------------------
 
     override void OnRPC(PlayerIdentity sender, int rpc_type, ParamsReadContext ctx)
     {
@@ -158,6 +169,12 @@ class OZ_StorageBox : DeployableContainer_Base
             Param1<bool> p = new Param1<bool>(false);
             if (ctx.Read(p))
                 OZS_Controller.Get().OnView(this, sender, p.param1);
+            return;
+        }
+        if (rpc_type == OZS_Const.RPC_SORT_ID)
+        {
+            if (GetGame() && GetGame().IsServer())
+                OZS_Controller.Get().RequestSort(this, sender);
             return;
         }
         super.OnRPC(sender, rpc_type, ctx);

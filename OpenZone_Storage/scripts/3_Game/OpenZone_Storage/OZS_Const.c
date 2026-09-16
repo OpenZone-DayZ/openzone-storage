@@ -31,6 +31,12 @@ class OZS_Const
     // free and no id crosses the wire. The number only has to differ from
     // the ids vanilla and other mods handle in ItemBase.OnRPC.
     static const int RPC_VIEW_ID = 20260916;
+    // The sort request from the client's search bar, on the box entity too.
+    static const int RPC_SORT_ID = 20260917;
+    // Seconds a box refuses a second sort after one.
+    static const float SORT_COOLDOWN = 10.0;
+    // Seconds the deploy action of a kit is held (owner 2026-09-16).
+    static const float DEPLOY_SECONDS = 10.0;
     // Client: seconds between "still looking" repeats while the inventory
     // screen shows a box, and the scan cadence of that screen. The server's
     // ViewerTimeoutSeconds must stay above the heartbeat (default 15 s).

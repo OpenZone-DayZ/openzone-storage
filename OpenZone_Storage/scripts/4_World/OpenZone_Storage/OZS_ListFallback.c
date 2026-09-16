@@ -173,6 +173,8 @@ class OZS_ListFallback
         else
         {
             e = parent.GetInventory().CreateEntityInCargoEx(r.type, 0, r.row, r.col, r.flip);
+            if (!e)
+                e = parent.GetInventory().CreateEntityInCargo(r.type);
         }
         if (!e)
         {

@@ -20,7 +20,8 @@ class CfgPatches
         {
             "DZ_Data",
             "DZ_Scripts",
-            "DZ_Gear_Camping"
+            "DZ_Gear_Camping",
+            "OpenZone_Storage"
         };
     };
 };

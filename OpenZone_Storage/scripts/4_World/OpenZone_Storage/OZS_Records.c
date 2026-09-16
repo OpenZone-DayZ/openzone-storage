@@ -48,7 +48,9 @@ class OZS_Records
     // ---- items.bin: write --------------------------------------------------
 
     // Writes the entity's record; returns the number of entities written.
-    static int WriteEntity(FileSerializer f, EntityAI e)
+    // `newRow`/`newCol` >= 0 replace the cell of a cargo root (the sorted
+    // layout); children are always written where they are.
+    static int WriteEntity(FileSerializer f, EntityAI e, int newRow = -1, int newCol = -1)
     {
         int count = 1;
         f.Write(e.GetType());
@@ -66,6 +68,12 @@ class OZS_Records
             row = loc.GetRow();
             col = loc.GetCol();
             flip = loc.GetFlip();
+        }
+        if (newRow >= 0 && newCol >= 0 && lt == InventoryLocationType.CARGO)
+        {
+            row = newRow;
+            col = newCol;
+            flip = false;
         }
         f.Write(lt);
         f.Write(slot);
@@ -220,6 +228,11 @@ class OZS_Records
         else
         {
             e = parent.GetInventory().CreateEntityInCargoEx(type, 0, row, col, flip);
+            // The cell may be taken or wrong (a sorted layout that did not
+            // fit, an item whose size a mod update changed): any free cell
+            // beats a lost item.
+            if (!e)
+                e = parent.GetInventory().CreateEntityInCargo(type);
         }
 
         if (!e)
@@ -387,11 +400,11 @@ class OZS_Records
     // ---- items.list: write -------------------------------------------------
 
     // One line per entity, children indented by depth; returns the number
-    // of lines written.
-    static int WriteListEntity(FileHandle fh, EntityAI e, int depth)
+    // of lines written. `newRow`/`newCol` as in WriteEntity.
+    static int WriteListEntity(FileHandle fh, EntityAI e, int depth, int newRow = -1, int newCol = -1)
     {
         int count = 1;
-        FPrintln(fh, ListLine(e, depth));
+        FPrintln(fh, ListLine(e, depth, newRow, newCol));
         GameInventory inv = e.GetInventory();
         if (!inv)
             return count;
@@ -408,7 +421,7 @@ class OZS_Records
         return count;
     }
 
-    static string ListLine(EntityAI e, int depth)
+    static string ListLine(EntityAI e, int depth, int newRow = -1, int newCol = -1)
     {
         InventoryLocation loc = new InventoryLocation();
         int lt = -1;
@@ -425,6 +438,12 @@ class OZS_Records
             col = loc.GetCol();
             if (loc.GetFlip())
                 flip = 1;
+        }
+        if (newRow >= 0 && newCol >= 0 && lt == InventoryLocationType.CARGO)
+        {
+            row = newRow;
+            col = newCol;
+            flip = 0;
         }
         float quantity = 0;
         int liquid = 0;

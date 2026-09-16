@@ -71,12 +71,9 @@ modded class DZMCP_BridgeCore
         {
             // Runtime overrides of the settings, for the stand only.
             OZS_Settings st = OZS_Settings.Get();
-            string v = OZS_Arg(args, "quiet", "");
+            string v = OZS_Arg(args, "autoclose", "");
             if (v != "")
-                st.AutoCloseQuietSeconds = v.ToInt();
-            v = OZS_Arg(args, "radius", "");
-            if (v != "")
-                st.AutoCloseRadius = v.ToFloat();
+                st.AutoCloseSeconds = v.ToInt();
             v = OZS_Arg(args, "timeout", "");
             if (v != "")
                 st.ViewerTimeoutSeconds = v.ToInt();
@@ -92,7 +89,7 @@ modded class DZMCP_BridgeCore
             v = OZS_Arg(args, "close_budget", "");
             if (v != "")
                 st.CloseFrameBudgetMs = v.ToInt();
-            detail = "autoclose=" + st.AutoCloseRadius + "m/" + st.AutoCloseQuietSeconds + "s viewers=" + st.ViewerTimeoutSeconds + "s/" + st.ViewerMaxDistance + "m rate=" + st.OpenItemsPerSecond;
+            detail = "autoclose=" + st.AutoCloseSeconds + "s viewers=" + st.ViewerTimeoutSeconds + "s/" + st.ViewerMaxDistance + "m rate=" + st.OpenItemsPerSecond;
             detail = detail + " close=" + st.CloseFrameBudgetMs + "ms/" + st.CloseDeletesPerFrame;
             return true;
         }
@@ -164,6 +161,25 @@ modded class DZMCP_BridgeCore
             return true;
         }
 
+        if (op == "sort")
+        {
+            string whySort;
+            if (!c.RequestSortAs(target, "server", "", whySort))
+            {
+                detail = "sort refused: " + whySort;
+                return false;
+            }
+            detail = "sort accepted for " + target.OZS_GetId() + ", state now " + OZS_Const.StateName(target.OZS_GetState());
+            return true;
+        }
+        if (op == "lower")
+        {
+            // What the engine's ToLower does to non-ASCII text (the search).
+            string t = OZS_Arg(args, "text", "");
+            t.ToLower();
+            detail = "[" + t + "] find=" + t.IndexOf(OZS_Arg(args, "find", "x"));
+            return true;
+        }
         if (op == "files")
         {
             string bid = target.OZS_GetId();
@@ -220,7 +236,7 @@ modded class DZMCP_BridgeCore
             return true;
         }
 
-        detail = "unknown op '" + op + "'; known: list, spawn, status, open, close, files, slot, tune";
+        detail = "unknown op '" + op + "'; known: list, spawn, status, open, close, sort, files, slot, tune, lower";
         return false;
     }
 

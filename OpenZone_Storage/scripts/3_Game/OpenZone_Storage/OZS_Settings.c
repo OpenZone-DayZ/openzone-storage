@@ -15,9 +15,10 @@ class OZS_Settings : OZ_ConfigBase
     // written.
     int CloseFrameBudgetMs;
     int CloseDeletesPerFrame;
-    // Auto-close: no viewers and no player within the radius for this long.
-    float AutoCloseRadius;
-    int AutoCloseQuietSeconds;
+    // Auto-close: an open box closes this many seconds after it was opened
+    // (owner 2026-09-16: a plain timer, no distance, no player events); when
+    // someone is still looking at it, the close waits for them to stop.
+    int AutoCloseSeconds;
     // Viewers: the client heartbeat while its inventory screen shows the box,
     // the silence after which a viewer is dropped, and the distance beyond
     // which a viewer is dropped regardless (twice the engine's 2.5 m reach).
@@ -44,8 +45,7 @@ class OZS_Settings : OZ_ConfigBase
         OpenItemsPerSecond = 250;
         CloseFrameBudgetMs = 5;
         CloseDeletesPerFrame = 50;
-        AutoCloseRadius = 15;
-        AutoCloseQuietSeconds = 120;
+        AutoCloseSeconds = 120;
         ViewerHeartbeatSeconds = 5;
         ViewerTimeoutSeconds = 15;
         ViewerMaxDistance = 5;
@@ -85,16 +85,10 @@ class OZS_Settings : OZ_ConfigBase
             CloseDeletesPerFrame = 50;
             warnings++;
         }
-        if (AutoCloseRadius < 3 || AutoCloseRadius > 200)
+        if (AutoCloseSeconds < 10 || AutoCloseSeconds > 86400)
         {
-            OZ_Log.Warn("storage settings: AutoCloseRadius " + AutoCloseRadius + " is outside 3..200, using 15");
-            AutoCloseRadius = 15;
-            warnings++;
-        }
-        if (AutoCloseQuietSeconds < 10 || AutoCloseQuietSeconds > 86400)
-        {
-            OZ_Log.Warn("storage settings: AutoCloseQuietSeconds " + AutoCloseQuietSeconds + " is outside 10..86400, using 120");
-            AutoCloseQuietSeconds = 120;
+            OZ_Log.Warn("storage settings: AutoCloseSeconds " + AutoCloseSeconds + " is outside 10..86400, using 120");
+            AutoCloseSeconds = 120;
             warnings++;
         }
         if (ViewerHeartbeatSeconds < 1 || ViewerHeartbeatSeconds > 60)
@@ -137,7 +131,7 @@ class OZS_Settings : OZ_ConfigBase
         OZ_ConfigLoader<OZS_Settings>.Load(OZS_Const.SETTINGS, OZS_Const.SETTINGS_TAG, s_Inst);
         OZ_Log.SetDebug(s_Inst.DebugLog || OZ_Log.IsDebug());
         string s = "storage settings: budget=" + s_Inst.OpenFrameBudgetMs + "ms rate=" + s_Inst.OpenItemsPerSecond + "/s";
-        s = s + " close=" + s_Inst.CloseFrameBudgetMs + "ms/" + s_Inst.CloseDeletesPerFrame + " autoclose=" + s_Inst.AutoCloseRadius + "m/" + s_Inst.AutoCloseQuietSeconds + "s";
+        s = s + " close=" + s_Inst.CloseFrameBudgetMs + "ms/" + s_Inst.CloseDeletesPerFrame + " autoclose=" + s_Inst.AutoCloseSeconds + "s";
         s = s + " viewers=" + s_Inst.ViewerHeartbeatSeconds + "/" + s_Inst.ViewerTimeoutSeconds + "s/" + s_Inst.ViewerMaxDistance + "m";
         OZ_Log.Info(s);
     }

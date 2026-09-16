@@ -76,6 +76,20 @@ class OZS_ClientViewer
     {
         box.RPCSingleParam(OZS_Const.RPC_VIEW_ID, new Param1<bool>(viewing), true);
     }
+
+    // The Sort button: the first open box the screen shows.
+    void RequestSort()
+    {
+        for (int i = 0; i < m_Viewing.Count(); i++)
+        {
+            OZ_StorageBox b = m_Viewing.Get(i);
+            if (b && b.OZS_GetState() == OZS_Const.STATE_OPEN)
+            {
+                b.RPCSingleParam(OZS_Const.RPC_SORT_ID, new Param1<bool>(true), true);
+                return;
+            }
+        }
+    }
 }
 
 modded class MissionGameplay
