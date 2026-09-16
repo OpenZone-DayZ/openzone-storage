@@ -197,10 +197,14 @@ uses). Two files, written on every Close, read only on Open and at mission start
 
 ## 7. One truth at a time (item 4 of the brief)
 
-*Measured*: `ECE_DYNAMIC_PERSISTENCY` does nothing for items created in a container's cargo
-(99 flagged and 100 unflagged items all came back after autosave + kill + restart), and there
-is no script API that makes an existing entity non-persistent. So the engine WILL save an open
-box's cargo, and the design has to live with two copies for a while:
+*Measured*: neither `ECE_DYNAMIC_PERSISTENCY` (run 5) nor `ECE_NOPERSISTENCY_WORLD` (run 6,
+"do not save this object in world") does anything for items created in a container's cargo --
+99 flagged and 100 / 97 unflagged items came back after autosave + kill + restart both times,
+and a flagged item dropped on the ground came back too. The ECE persistency flags govern
+objects the mod puts into the world itself; a child of a persistent container is saved with
+its parent. There is no script API that makes an existing entity non-persistent
+(agent-report-vanilla-facts.md, Q3). So the engine WILL save an open box's cargo, and the
+design has to live with two copies for a while:
 
 - **OPEN**: the engine is the truth. The store files are kept until the box's next
   `OnStoreSave` after opening (the engine's next save), then deleted -- another mod's
