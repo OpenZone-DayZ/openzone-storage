@@ -148,6 +148,41 @@ class OZ_StorageBox : DeployableContainer_Base
         return n;
     }
 
+    // The same entities, listed: weapon slots first, then the cargo in grid
+    // order. Returns how many were added.
+    int OZS_GetRoots(array<EntityAI> into)
+    {
+        int n = 0;
+        GameInventory inv = GetInventory();
+        if (!inv)
+            return 0;
+        int ac = inv.AttachmentCount();
+        for (int a = 0; a < ac; a++)
+        {
+            EntityAI att = inv.GetAttachmentFromIndex(a);
+            if (att)
+            {
+                into.Insert(att);
+                n++;
+            }
+        }
+        CargoBase cargo = inv.GetCargo();
+        if (cargo)
+        {
+            int cc = cargo.GetItemCount();
+            for (int c = 0; c < cc; c++)
+            {
+                EntityAI item = cargo.GetItem(c);
+                if (item)
+                {
+                    into.Insert(item);
+                    n++;
+                }
+            }
+        }
+        return n;
+    }
+
     // ---- gates -----------------------------------------------------------
 
     override bool IsOpen()

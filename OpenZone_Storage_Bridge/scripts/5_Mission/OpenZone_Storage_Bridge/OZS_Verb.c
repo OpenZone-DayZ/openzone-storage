@@ -5,6 +5,8 @@
 //   world_exec verb=oz_storage args={"op":"open","id":"<box id>"}      (or pos, or nearest to the player)
 //   world_exec verb=oz_storage args={"op":"close","id":"<box id>"}
 //   world_exec verb=oz_storage args={"op":"status","id":"<box id>"}
+//   world_exec verb=oz_storage args={"op":"files","id":"<box id>"}
+//   world_exec verb=oz_storage args={"op":"slot","id":"<box id>","item":"AKM","slot":"OZ_Weapon_1","mag":"Mag_AKM_30Rnd","ammo":"17","chamber":"Bullet_762x39"}
 modded class DZMCP_BridgeCore
 {
     override protected string KnownVerbs()
@@ -131,7 +133,63 @@ modded class DZMCP_BridgeCore
             return true;
         }
 
-        detail = "unknown op '" + op + "'; known: list, spawn, status, open, close";
+        if (op == "files")
+        {
+            string bid = target.OZS_GetId();
+            detail = "box " + bid + " files=" + OZS_Store.HasFiles(bid);
+            detail = detail + " bin=" + FileExist(OZS_Store.BinPath(bid)) + " list=" + FileExist(OZS_Store.ListPath(bid));
+            detail = detail + " lines=" + OZS_Store.ListLines(bid) + " head=[" + OZS_Store.ListHeader(bid) + "]";
+            return true;
+        }
+        if (op == "slot")
+        {
+            // A weapon into a weapon slot of the box, with an optional loaded
+            // magazine and a chambered round -- the composite case of the
+            // store. Refused by the box's own gates unless it is open.
+            string item = OZS_Arg(args, "item", "AKM");
+            string slotName = OZS_Arg(args, "slot", "OZ_Weapon_1");
+            string magType = OZS_Arg(args, "mag", "");
+            int ammo = OZS_Arg(args, "ammo", "0").ToInt();
+            string chamber = OZS_Arg(args, "chamber", "");
+            int slotId = InventorySlots.GetSlotIdFromString(slotName);
+            if (slotId == InventorySlots.INVALID)
+            {
+                detail = "unknown slot " + slotName;
+                return false;
+            }
+            EntityAI weapon = target.GetInventory().CreateAttachmentEx(item, slotId);
+            if (!weapon)
+            {
+                detail = "the box refused " + item + " in " + slotName + " (state " + OZS_Const.StateName(target.OZS_GetState()) + ")";
+                return false;
+            }
+            detail = "attached " + weapon.GetType() + " in " + slotName;
+            if (magType != "")
+            {
+                EntityAI magE = weapon.GetInventory().CreateAttachment(magType);
+                Magazine mag = Magazine.Cast(magE);
+                if (mag)
+                {
+                    if (ammo > 0)
+                        mag.ServerSetAmmoCount(ammo);
+                    detail = detail + ", " + magType + " with " + mag.GetAmmoCount();
+                }
+                else
+                {
+                    detail = detail + ", no " + magType;
+                }
+            }
+            Weapon_Base w = Weapon_Base.Cast(weapon);
+            if (w && chamber != "")
+            {
+                w.PushCartridgeToChamber(0, 0.0, chamber);
+                w.Synchronize();
+                detail = detail + ", chambered " + chamber;
+            }
+            return true;
+        }
+
+        detail = "unknown op '" + op + "'; known: list, spawn, status, open, close, files, slot";
         return false;
     }
 

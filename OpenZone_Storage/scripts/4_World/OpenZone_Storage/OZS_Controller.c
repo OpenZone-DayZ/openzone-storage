@@ -3,9 +3,9 @@
 // and the boot reconciliation. A static singleton, reset at mission finish
 // (statics survive a mission restart inside one process).
 //
-// Task 1 of the implementation: registry, requests without the store (Open
-// flips to OPEN at once, Close is allowed only on an empty box). The jobs,
-// the viewers and the reconciliation arrive with the later tasks.
+// Implemented so far: registry, Close with the store and the paced deletion.
+// Open still flips to OPEN at once; the open job, the viewers and the boot
+// reconciliation arrive with the later tasks.
 class OZS_Controller
 {
     protected static ref OZS_Controller s_Inst;
@@ -14,6 +14,7 @@ class OZS_Controller
     // Weak references on purpose: a deleted box reads null, and Unregister
     // runs from EEDelete anyway.
     protected ref array<OZ_StorageBox> m_Boxes;
+    protected ref array<ref OZS_CloseJob> m_CloseJobs;
 
     static OZS_Controller Get()
     {
@@ -30,6 +31,7 @@ class OZS_Controller
     void OZS_Controller()
     {
         m_Boxes = new array<OZ_StorageBox>();
+        m_CloseJobs = new array<ref OZS_CloseJob>();
     }
 
     // Box ids are the store key and must not repeat across restarts: UTC
@@ -149,6 +151,9 @@ class OZS_Controller
         return true;
     }
 
+    // Close = lock, capture, then delete over frames. The lock (state
+    // CLOSING) comes first so that nothing enters or leaves the box after the
+    // capture; a failed capture unlocks and refuses, and nothing is removed.
     bool RequestClose(OZ_StorageBox box, PlayerBase player, out string why)
     {
         int state = box.OZS_GetState();
@@ -162,16 +167,35 @@ class OZS_Controller
             why = "#STR_OZS_BUSY";
             return false;
         }
-        int n = box.OZS_CountEntities();
-        if (n > 0)
-        {
-            why = "the store is not built yet: " + n + " item(s) would be lost";
+        OZS_CloseJob job = BeginClose(box, Who(player), why);
+        if (!job)
             return false;
-        }
-        box.OZS_SetState(OZS_Const.STATE_CLOSED);
-        box.OZS_SetStoredCount(0);
-        OZ_Log.Info("storage: box " + box.OZS_GetId() + " closed by " + Who(player));
+        m_CloseJobs.Insert(job);
         return true;
+    }
+
+    // Synchronous close: files, then every entity in this frame. Mission
+    // finish and the boot rules use it; players never do.
+    bool CloseNow(OZ_StorageBox box, string who, out string why)
+    {
+        OZS_CloseJob job = BeginClose(box, who, why);
+        if (!job)
+            return false;
+        job.Flush();
+        return true;
+    }
+
+    protected OZS_CloseJob BeginClose(OZ_StorageBox box, string who, out string why)
+    {
+        OZS_CloseJob job = new OZS_CloseJob(box, who);
+        string err;
+        if (!job.Begin(err))
+        {
+            OZ_Log.Error("storage: box " + box.OZS_GetId() + " could not be closed by " + who + ": " + err);
+            why = "#STR_OZS_STORE_FAILED";
+            return null;
+        }
+        return job;
     }
 
     bool HasViewers(OZ_StorageBox box)
@@ -179,10 +203,31 @@ class OZS_Controller
         return false;
     }
 
-    // ---- lifecycle hooks (filled in by the later tasks) ------------------
+    protected OZS_CloseJob FindCloseJob(OZ_StorageBox box)
+    {
+        for (int i = 0; i < m_CloseJobs.Count(); i++)
+        {
+            if (m_CloseJobs.Get(i).IsFor(box))
+                return m_CloseJobs.Get(i);
+        }
+        return null;
+    }
 
+    // ---- lifecycle hooks -------------------------------------------------
+
+    // Every job gets the whole budget: two boxes closing in the same frame
+    // is rare, and the budget is far under the frame criterion anyway.
     void OnFrame(float timeslice)
     {
+        if (m_CloseJobs.Count() == 0)
+            return;
+        OZS_Settings st = OZS_Settings.Get();
+        float budgetSec = st.CloseFrameBudgetMs * 0.001;
+        for (int i = m_CloseJobs.Count() - 1; i >= 0; i--)
+        {
+            if (m_CloseJobs.Get(i).Tick(budgetSec, st.CloseDeletesPerFrame))
+                m_CloseJobs.RemoveOrdered(i);
+        }
     }
 
     void OnBoxSaved(OZ_StorageBox box)
@@ -196,8 +241,29 @@ class OZS_Controller
         OZ_Log.Dbg(s);
     }
 
+    // Mission finish: every open box is closed in this frame; a box already
+    // closing finishes now.
     void CloseAll()
     {
+        Prune();
+        for (int i = 0; i < m_Boxes.Count(); i++)
+        {
+            OZ_StorageBox b = m_Boxes.Get(i);
+            int state = b.OZS_GetState();
+            if (state == OZS_Const.STATE_OPEN)
+            {
+                string why;
+                if (!CloseNow(b, "mission finish", why))
+                    OZ_Log.Error("storage: box " + b.OZS_GetId() + " stays open at mission finish: " + why);
+            }
+            else if (state == OZS_Const.STATE_CLOSING)
+            {
+                OZS_CloseJob job = FindCloseJob(b);
+                if (job)
+                    job.Flush();
+            }
+        }
+        m_CloseJobs.Clear();
     }
 
     // ---- reporting -------------------------------------------------------
@@ -205,7 +271,7 @@ class OZS_Controller
     string Status()
     {
         Prune();
-        string s = "boxes=" + m_Boxes.Count();
+        string s = "boxes=" + m_Boxes.Count() + " closing=" + m_CloseJobs.Count();
         for (int i = 0; i < m_Boxes.Count(); i++)
         {
             OZ_StorageBox b = m_Boxes.Get(i);

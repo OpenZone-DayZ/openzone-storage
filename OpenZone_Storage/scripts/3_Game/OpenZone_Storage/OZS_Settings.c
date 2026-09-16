@@ -10,7 +10,10 @@ class OZS_Settings : OZ_ConfigBase
     // a client, one 5000-burst did).
     int OpenFrameBudgetMs;
     int OpenItemsPerSecond;
-    // CLOSING: entities deleted per frame after the files are written.
+    // CLOSING: how much of one frame the capture may take (0.17 ms per
+    // entity measured), and entities deleted per frame after the files are
+    // written.
+    int CloseFrameBudgetMs;
     int CloseDeletesPerFrame;
     // Auto-close: no viewers and no player within the radius for this long.
     float AutoCloseRadius;
@@ -35,6 +38,7 @@ class OZS_Settings : OZ_ConfigBase
         Version = LatestVersion();
         OpenFrameBudgetMs = 20;
         OpenItemsPerSecond = 250;
+        CloseFrameBudgetMs = 20;
         CloseDeletesPerFrame = 50;
         AutoCloseRadius = 15;
         AutoCloseQuietSeconds = 120;
@@ -63,6 +67,12 @@ class OZS_Settings : OZ_ConfigBase
         {
             OZ_Log.Warn("storage settings: OpenItemsPerSecond " + OpenItemsPerSecond + " is outside 10..5000, using 250");
             OpenItemsPerSecond = 250;
+            warnings++;
+        }
+        if (CloseFrameBudgetMs < 1 || CloseFrameBudgetMs > 100)
+        {
+            OZ_Log.Warn("storage settings: CloseFrameBudgetMs " + CloseFrameBudgetMs + " is outside 1..100, using 20");
+            CloseFrameBudgetMs = 20;
             warnings++;
         }
         if (CloseDeletesPerFrame < 1 || CloseDeletesPerFrame > 1000)
@@ -123,7 +133,7 @@ class OZS_Settings : OZ_ConfigBase
         OZ_ConfigLoader<OZS_Settings>.Load(OZS_Const.SETTINGS, OZS_Const.SETTINGS_TAG, s_Inst);
         OZ_Log.SetDebug(s_Inst.DebugLog || OZ_Log.IsDebug());
         string s = "storage settings: budget=" + s_Inst.OpenFrameBudgetMs + "ms rate=" + s_Inst.OpenItemsPerSecond + "/s";
-        s = s + " deletes=" + s_Inst.CloseDeletesPerFrame + "/frame autoclose=" + s_Inst.AutoCloseRadius + "m/" + s_Inst.AutoCloseQuietSeconds + "s";
+        s = s + " close=" + s_Inst.CloseFrameBudgetMs + "ms/" + s_Inst.CloseDeletesPerFrame + " autoclose=" + s_Inst.AutoCloseRadius + "m/" + s_Inst.AutoCloseQuietSeconds + "s";
         s = s + " viewers=" + s_Inst.ViewerHeartbeatSeconds + "/" + s_Inst.ViewerTimeoutSeconds + "s/" + s_Inst.ViewerMaxDistance + "m";
         OZ_Log.Info(s);
     }

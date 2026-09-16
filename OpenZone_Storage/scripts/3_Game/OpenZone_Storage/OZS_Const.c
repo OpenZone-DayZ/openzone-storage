@@ -15,8 +15,16 @@ class OZS_Const
 
     // Version of the box's own OnStoreSave block (written first, read first).
     static const int SAVE_VERSION = 1;
-    // Version of the items.bin record format.
+    // Version of the items.bin record format, and the trailer that proves
+    // the file was written to the end.
     static const int BIN_VERSION = 1;
+    static const int BIN_END     = 20260916;
+    // The files of one box under DIR/<box id>/; written as .new first and
+    // copied over the live names, so a crash never leaves a half file live.
+    static const string FILE_BIN  = "items.bin";
+    static const string FILE_LIST = "items.list";
+    static const string FILE_NEW  = ".new";
+    static const string LIST_HEAD = "OZS-LIST";
 
     // CF RPC keys: the pair (mod, function) is the whole namespace.
     static const string RPC_MOD  = "OpenZone_Storage";
