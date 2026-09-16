@@ -6,6 +6,13 @@ prefix `OZ`, runs with `OZ_Core` alone (and CF, which the core needs).
 
 ## Status: built and measured on the stand (2026-09-16), not published
 
+Players get a box by deploying a **kit** from the hands (`OZ_StorageBoxKit_Small` /
+`_Medium` / `_Large`): choose placement, turn the hologram with the wheel, hold the action
+for ten seconds. An open box closes itself 120 s after it was opened (a plain timer that
+waits while someone is looking). The inventory screen carries a **search bar** that shades
+every item whose name does not contain the text, and a **Sort** button that lays the
+open box out by name.
+
 Three boxes -- `OZ_StorageBox_Small` (500 cells, 2 weapon slots, wooden crate model),
 `OZ_StorageBox_Medium` (1000 cells, 4 slots, sea chest) and `OZ_StorageBox_Large`
 (1500 cells, 6 slots, sea chest). Two verbs on the box, "Open the box (N)" and
@@ -24,9 +31,9 @@ the numbers: [docs/measurements/2026-09-16/results-implementation.md](docs/measu
 
 | pbo | side | what |
 |---|---|---|
-| `OpenZone_Storage` | client + server | the boxes, the actions, the controller (jobs, viewers, auto-close, boot rules), the store, the client viewer |
-| `OpenZone_Storage_Bridge` | server only, stand | the `oz_storage` verb for the MCP bridge: list, spawn, status, open, close, files, slot, tune |
-| `OpenZone_StorageProbe` | client + server, stand | the measurement probe of the research phase (crate, fill, inspect, blob round trip, frame monitors) |
+| `OpenZone_Storage` | client + server | the boxes, the kits, the actions, the controller (jobs, viewers, auto-close, sort, boot rules), the store, the client viewer, the search bar |
+| `OpenZone_Storage_Bridge` | server only, stand | the `oz_storage` verb for the MCP bridge: list, spawn, status, open, close, sort, files, slot, tune, lower |
+| `OpenZone_StorageProbe` | client + server, stand | the measurement probe (crate, fill, inspect, blob round trip, frame monitors, the hologram diagnostic, the client control file) |
 | `OpenZone_StorageProbe_Bridge` | server only, stand | the `oz_probe` verb |
 
 Only the first pbo is meant for players; the other three are stand tooling.
@@ -35,8 +42,7 @@ Only the first pbo is meant for players; the other three are stand tooling.
 
 - `$profile:OpenZone/OZ_Storage.json` -- the settings, written with defaults on the first
   boot: `OpenFrameBudgetMs` 5, `OpenItemsPerSecond` 250, `CloseFrameBudgetMs` 5,
-  `CloseDeletesPerFrame` 50, `AutoCloseRadius` 15, `AutoCloseQuietSeconds` 120,
-  `ViewerHeartbeatSeconds` 5, `ViewerTimeoutSeconds` 15, `ViewerMaxDistance` 5, `DebugLog`.
+  `CloseDeletesPerFrame` 50, `AutoCloseSeconds` 120, `ViewerHeartbeatSeconds` 5, `ViewerTimeoutSeconds` 15, `ViewerMaxDistance` 5, `DebugLog`.
 - `$profile:OpenZone/Storage/<box id>/items.bin` -- the store: one record per item with its
   `OnStoreSave` blob (every mod's state rides inside), children before parents, a trailer.
 - `.../items.list` -- the same tree without blobs, one readable line per item; the fallback

@@ -370,3 +370,64 @@ tune). The deltas between sections 2--9 and the code that was measured:
 5. A box that the "no files" rule closes at boot is closed synchronously (1468 entities =
    about 0.4 s, once) -- fine for a few boxes; a server with hundreds of open boxes at a crash
    would pay that once at boot.
+
+## 15. Additions of the same night (owner decisions 2026-09-16, late)
+
+The owner answered section 14 the same night: the auto-close is a **plain timer**, players
+get boxes through a **kit deployed from the hands**, and the inventory screen gets a **Sort
+button** and a **live search**. Built and measured:
+
+- **Auto-close**: `AutoCloseSeconds` (120) after the box was opened; no distance, no player
+  events. While somebody is still looking (section 3 viewers) the close waits and the 5 s
+  tick tries again. Disconnect and death only drop the leaving player's viewer entries.
+  `AutoCloseRadius` and the "close on leaving" extension of section 13 are gone.
+- **Kits** `OZ_StorageBoxKit_Small / _Medium / _Large` (`OZS_Kit.c`): `ItemBase` with
+  `IsBasebuildingKit`, `IsDeployable`, `GetDeployTime` = 10 s, the vanilla
+  `ActionTogglePlaceObject` + `ActionDeployObject`. The vanilla placement path does the rest:
+  a tap of the use input shows the hologram, the next/previous-action input (the wheel, the
+  action-menu keys) turns it by 15 degrees, a ten-second hold deploys, the action deletes the
+  kit, and `OnPlacementComplete` creates the box at the hologram's position and orientation
+  (log: "<player> placed OZ_StorageBox_Small id=... at ..."). The hologram projects the
+  `<kit>Placing` twin class, which carries the box's model and the vanilla hologram materials
+  (`wooden_case` / `sea_chest`), so the player sees the box they are about to place. The kit
+  itself uses the box's model, heavy behaviour (carried in front), 5 x 4 / 6 x 5 / 8 x 5 cells,
+  5 / 7 / 9 kg. *Measured*: the hologram counts as "floating" (deploy refused) when its
+  contact point is closer than 1 m or farther than 2 m from the player -- the camera must
+  aim at the ground about a metre and a half ahead; bushes and walls refuse it too, like any
+  vanilla kit. No recipe and no economy entry yet (`types-example.xml` in the repo root).
+- **Sort** (`OZS_Sorter.c`): a close whose records carry a new layout -- cargo roots ordered
+  by display name, class and quantity (fullest first), packed row by row with the items'
+  own sizes -- followed by a reopen; the requester keeps their screen open and watches the
+  items come back in order. Once per `SORT_COOLDOWN` (10 s) per box, refused while anyone
+  else is looking, through the box's entity RPC from the client's button or the stand verb.
+  The order key folds case through `OZS_Case` (tables for ASCII and Cyrillic; the engine's
+  `ToLower` turns non-ASCII into spaces). The open job takes any free cell when a record's
+  cell is taken, so a layout that did not fit never loses an item. *Measured*: 1443 items
+  sorted in one close (57 frames) and one reopen (5.9 s); the grid came back with the
+  battery, rifle, canteen and chip first, then the papers, then the rag, radio and cases.
+- **Search bar** (`OZS_Search.c`, `gui/layouts/ozs_search.layout`): created inside the
+  inventory root on `InventoryMenu.OnShow`, top right above the equipment column: a label, an
+  edit box and the Sort button. The query is kept in four spellings (typed, lower,
+  Capitalized, UPPER) and an icon matches when its localized display name contains any of
+  them; non-matching icons get a dark overlay (`ozs_shade.layout`, a colorable panel created
+  inside the icon at priority 500 above the item render) -- both cargo icons and attachment
+  slots. *Measured*: the icon's own "Color" panel sits behind the render and cannot shade it,
+  the `ItemPreviewWidget` ignores its widget colour, and a panel with `style blank` paints
+  nothing -- `style rover_sim_colorable` does. The Sort button asks the first open box in the
+  vicinity list.
+- **Stand tooling**: the probe's `modded class Hologram` prints every collision check of a kit
+  hologram to the client's .RPT (`ErrorEx`; `Print` reaches no file on the retail client), and
+  `$profile:OpenZone_StorageProbe/control.txt` on the client (`search <text>`, `clear`,
+  `sort n`, `inventory n`) drives the screen without a mouse. Verb ops `sort`, `lower`,
+  `tune autoclose=`.
+
+## 16. Open points after the night
+
+1. A placed box cannot be taken back: no dismantle action, no kit returned. Decide whether an
+   empty box may be dismantled into its kit (and by whom).
+2. The Sort button has no background of its own (style Empty); the bar's placement above the
+   equipment column may need a nudge on the owner's 3840 x 1600 screen.
+3. The search was measured with an English client; the Cyrillic folding tables are in the code
+   but not yet seen on a Ukrainian client.
+4. The search field takes focus by a click only; no key opens it.
+5. Kits have no recipe and no spawn; `types-example.xml` lists them with nominal 0.

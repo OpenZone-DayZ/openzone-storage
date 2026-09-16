@@ -98,3 +98,29 @@ frames, the jobs need far less anyway, and the wall time of a close grows from 0
 `ActionConstructor.RegisterActions`; the box's Open/Close actions were not, so players
 would never have seen the prompt (the error goes to the .RPT only). Fixed by
 `OZS_ActionRegister.c`; the skill's actions reference now says so first.
+
+## Second evening: timer auto-close, kits, sort, search
+
+- Auto-close timer: the sorted Large box (1443 items) closed itself 120 s after its reopen
+  ("closing by auto-close ... written in 58 frame(s), 297 ms + commit 4 ms").
+- Sort of the Large box: plan 1436 of 1443 roots placed (the six rifles keep their slots, one
+  cargo item found no block and took a free cell at the reopen), close 57 frames 309 ms +
+  commit 3 ms, delete 30 frames 104 ms, reopen 5.9 s with 2 ms steps; the dump after the
+  reopen starts with the battery, the rifle, the canteen and the chip, then 1400 papers,
+  then the rag, the radio and the three cases -- the row-major sorted layout. The small box
+  (10 items) sorted from the client's button: close 1 frame, reopen 54 frames.
+- Kit placement (client at Balota, pad): the use input tapped shows the hologram, the hold
+  of 10.8 s deployed it; "Survivor placed OZ_StorageBox_Small id=90916-194045-6-3720". The
+  probe's hologram diagnostic showed every check green except `floating`, which is true
+  when the contact point is under 1 m or over 2 m from the player (`SetHologramPosition`);
+  at 1.3 m the deploy was offered. In a bushy forest the vanilla FenceKit was refused at
+  the same spot as the kit (bbox), so that is the vanilla rule, not ours.
+- Search bar: "search pap" through the client control file shaded the four rags, the KA-101's
+  parts, the coat's items and the flashlight, and left the six papers bright (screenshot
+  `.dayz-mcp/shots/client-1789588999677.png` of the stand, not kept in the repo). Three
+  dead ends before it worked: the icon's "Color" panel (behind the render), the render's
+  own colour (ignored), and a `style blank` panel (paints nothing).
+- The retail client writes no script log: `Print` from client code reaches nothing,
+  `ErrorEx(..., WARNING)` reaches the .RPT, INFO does not. After every connect the client
+  sits in the pause menu until "back" is pressed; the pad's first press after an attach is
+  swallowed.
