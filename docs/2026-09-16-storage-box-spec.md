@@ -39,35 +39,59 @@ three box sizes of 500 / 1000 / 1500 cells, weapon slots on the box. Everything 
 
 ## 2. Actions
 
-Two `ActionInteractBase` actions on the box, target-only (`CCTObject`), vanilla interaction
-distance (`UAMaxDistances.DEFAULT`), server logic in `OnExecuteServer` (details of the vanilla
-open/close-barrel pair to be pinned from the source report, section 12):
+The vanilla template is the barrel (`Barrel_ColorBase`, `4_world/entities/itembase/barrel_colorbase.c`,
+and `ActionOpenBarrel` / `ActionCloseBarrel`, `.../actions/interact/actionopenbarrel.c`), read
+through the knowledge base:
 
-- **Open** -- shown when the state is CLOSED. Text: `Open (N items)`; N comes from the store's
-  header, which the box reads once at load. Starts an OPENING job (section 4).
-- **Close** -- shown when the state is OPEN. Refused, with a message, while the box has viewers
-  (section 3) or an OPENING job is still running. Starts CLOSING (section 5).
+- The barrel keeps an `OpenableBehaviour m_Openable`; `Open()` / `Close()` flip it, call
+  `SetTakeable(false/true)` and `UpdateVisualState()`, which drives the lid with
+  `SetAnimationPhase("Lid", 1 or 0)`; `OpenLoad()` / `CloseLoad()` are the same plus
+  `SetSynchDirty()`, used from `OnStoreLoad`; `OnStoreSave` writes `m_Openable.IsOpened()`.
+  `CanReceiveItemIntoCargo` and `CanReleaseCargo` return false unless `IsOpen()`;
+  `CanPutInCargo` / `CanPutIntoHands` only when empty and closed (barrel_colorbase.c:490-523).
+- `ActionOpenBarrel: ActionInteractBase` sets `m_CommandUID = CMD_ACTIONMOD_INTERACTONCE`,
+  `m_StanceMask = ERECT | CROUCH`, `m_Text = "#open"`; `ActionCondition` casts the target and
+  returns `!IsLocked() && !IsOpen()`; `OnExecuteServer` calls `ntarget.Open()` and plays the
+  soundset. 39 lines in total.
 
-There is no third action; the auto-close of section 3 is insurance, not a verb.
+The box has the same two actions, `OZ_ActionOpenBox` and `OZ_ActionCloseBox`, with three
+differences: the condition reads the box's four-state `m_OZ_State` (Open only from CLOSED, Close
+only from OPEN), the text carries the stored count (`Open (N items)`, N from the store header
+read once at load), and `OnExecuteServer` does not flip the state itself but hands the box to
+`OZ_BoxController` which runs the OPENING / CLOSING jobs of sections 4 and 5 and flips the
+state when they finish. Close is refused with a message while the box has viewers (section 3)
+or an OPENING job runs. There is no third action; the auto-close is insurance, not a verb.
 
 ## 3. Viewers and auto-close (item 1 of the brief)
 
-The server has no notion of "player X is looking at container Y" (to be confirmed in the
-source report; nothing in `GameInventory`/`CargoBase` names a viewer). The mod builds one:
+Facts from the sources: the server enforces reach on every inventory move --
+`GameInventory.c_MaxItemDistanceRadius = 2.5` with `CheckRequestSrc / CheckTakeItemRequest /
+CheckMoveToDstRequest(requestingPlayer, src, dst, radius)` (inventory.c:815-819) -- but it
+keeps no record of who is looking at a container; nothing in `GameInventory` or `CargoBase`
+names a viewer. The client does know: `Inventory: LayoutHolder` has `OnShow()` / `OnHide()`
+(5_mission/gui/inventorynew/inventory.c:1234, 1266) and `VicinityItemManager.GetInstance()`
+exposes `GetVicinityItems()` / `GetVicinityCargos()`, refreshed every 0.25 s within 0.5 m for
+items, 2 m for actors, 3 m for large actors (vicinityitemmanager.c:3-8). The mod builds the
+server-side notion on top:
 
-- The client half sends `OZ_Storage.View(boxId, on)` when its inventory screen opens or
-  closes with a box in the vicinity list (`VicinityItemManager`), and a heartbeat every 5 s
-  while it stays open. The server keeps `map<box, set<playerId>>` with the last heartbeat.
-- A viewer is dropped when: the client says so, the heartbeat is older than 15 s, the player is
-  farther than 5 m from the box (server-side check on every heartbeat and on Close), the
-  player disconnects or dies (`PlayerBase.EEKilled`, `MissionServer.InvokeOnDisconnect`).
+- The client half sends `OZ_Storage.View(boxId, on)` from `Inventory.OnShow` / `OnHide` for
+  every `OZ_StorageBox` in `GetVicinityItems()`, re-sends it when the vicinity list changes
+  while the screen is open, and a heartbeat every 5 s. The server keeps
+  `map<box, map<playerId, lastSeen>>`.
+- A viewer is dropped when the client says so, when the heartbeat is older than 15 s, when the
+  player is farther than 5 m from the box (checked on every heartbeat and on Close -- twice the
+  engine's 2.5 m reach, so a player who can still move items is never dropped), when the
+  player disconnects (`MissionServer.InvokeOnDisconnect`) or dies (`PlayerBase.EEKilled`).
 - **Close is refused while viewers > 0.** The one who wants to close sees "someone is using
   the box".
 - **Auto-close** (*owner*: numbers): every 10 s the server checks open boxes; a box with no
   viewers and no player within `AutoCloseRadius` (default 15 m) for `AutoCloseQuietSeconds`
   (default 120 s) closes itself. The opener dying or leaving is not a trigger by itself, only a
-  reason the viewer set empties. `MissionServer.OnMissionFinish` closes every open box
-  synchronously, without pacing.
+  reason the viewer set empties.
+- `MissionServer.OnMissionFinish` (declared on `Mission`, gameplay.c:702, not overridden by
+  `MissionServer`) runs on a graceful shutdown or `#shutdown`, not on a killed process; it
+  closes every open box synchronously, without pacing. A kill is covered by the boot rules of
+  section 7.
 - A client without the mod cannot join (the pbo is in `-mod`), so the RPC is always present.
 
 ## 4. Open: paced materialisation
@@ -199,10 +223,22 @@ vests must be empty to enter, as in vanilla. Every child counts for the pacing b
 4. Pacing defaults 20 ms per frame and 250 items/s -- agree, or faster for small boxes.
 5. Donor models until own art (WoodenCrate / SeaChest), or wait for dayz-3d.
 
-## 12. Facts still to pin from the vanilla sources
+## 12. Sources
 
-The vanilla open/close action pair used as the template, the exact interaction distance
-constant, the client-side hook for "inventory screen opened with these containers in
-vicinity", and the `MissionServer` lifecycle order at a graceful shutdown. A source report
-is being written into `docs/measurements/2026-09-16/agent-report-vanilla-facts.md`; this
-section is replaced by its findings.
+- Vanilla scripts, build of 2026-08-12, read through the `dayz` MCP knowledge base (core
+  layer, 131 697 declarations): `barrel_colorbase.c`, `actionopenbarrel.c`,
+  `openablebehaviour.c`, `inventory.c` (reach checks 815-819, move natives 553-592),
+  `inventorylocation.c`, `cargo.c`, `container_base.c` (children of a container in cargo),
+  `clothing_base.c:38-56` (clothing enters cargo only empty), `vicinityitemmanager.c`,
+  `inventory.c:1234/1266` (`OnShow` / `OnHide`), `centraleconomy.c` (ECE flags),
+  `objectspawner.c:48` (the object spawner's use of `ECE_DYNAMIC_PERSISTENCY`),
+  `transmitterbase.c:10-33` (the radio's frequency in `OnStoreSave`), `serializer.c:103`
+  (`FileSerializer`), `game.c:434` (`SaveVersion`).
+- `Addons/dz.pbo` `config.bin` converted with CfgConvert: `Rifle_Base` 4033, `Pistol_Base` 4285
+  (`inventorySlot[]` arrays); `OpenZone_PDA/config.cpp:23-70` for the `CfgSlots` shape.
+- another mod `another storage.c` and `another container storage/.../ItemBase.c` (record
+  order, restore order, the keep-file-until-persisted rule); another mod `another barrel.c`
+  (persistent id as the box key, autoclose timer); another mod `another world class.c`
+  (mark / commit protocol, session journal).
+- Stand runs of 2026-09-16, `docs/measurements/2026-09-16/`: results-run1..5, client-run3/4,
+  the profiler reports; the survey `2026-09-16-virtual-storage-survey.md`.
