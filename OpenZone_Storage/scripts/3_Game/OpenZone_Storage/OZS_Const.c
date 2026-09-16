@@ -26,9 +26,23 @@ class OZS_Const
     static const string FILE_NEW  = ".new";
     static const string LIST_HEAD = "OZS-LIST";
 
-    // CF RPC keys: the pair (mod, function) is the whole namespace.
-    static const string RPC_MOD  = "OpenZone_Storage";
-    static const string RPC_VIEW = "OZS_View";
+    // The viewer RPC rides on the box entity itself (Object.RPCSingleParam ->
+    // OZ_StorageBox.OnRPC), so the sender's identity and the box come for
+    // free and no id crosses the wire. The number only has to differ from
+    // the ids vanilla and other mods handle in ItemBase.OnRPC.
+    static const int RPC_VIEW_ID = 20260916;
+    // Client: seconds between "still looking" repeats while the inventory
+    // screen shows a box, and the scan cadence of that screen. The server's
+    // ViewerTimeoutSeconds must stay above the heartbeat (default 15 s).
+    static const float VIEW_HEARTBEAT = 4.0;
+    static const float VIEW_SCAN      = 0.5;
+    // Server: seconds between auto-close checks, and how long after the
+    // engine saved an open box its files are kept (the save is still being
+    // written when OnStoreSave runs).
+    static const float AUTO_TICK     = 5.0;
+    static const float RELEASE_DELAY = 3.0;
+    // Seconds after mission start before the boot summary is written.
+    static const float SUMMARY_DELAY = 15.0;
 
     // How many weapon slots the largest box declares (CfgSlots Slot_OZ_Weapon_1..6).
     static const int SLOT_COUNT = 6;

@@ -20,6 +20,9 @@ class OZ_StorageBox : DeployableContainer_Base
     // Server only: the controller's job is creating entities in this box, so
     // the receive gates answer yes although the box is not OPEN yet.
     protected bool   m_OZS_Restoring;
+    // Server only: tick time since nobody has been near or looking (0 = not
+    // quiet), for the auto-close.
+    protected float  m_OZS_QuietSince;
 
     override void InitItemVariables()
     {
@@ -132,6 +135,32 @@ class OZ_StorageBox : DeployableContainer_Base
     bool OZS_IsRestoring()
     {
         return m_OZS_Restoring;
+    }
+
+    float OZS_GetQuietSince()
+    {
+        return m_OZS_QuietSince;
+    }
+
+    void OZS_SetQuietSince(float t)
+    {
+        m_OZS_QuietSince = t;
+    }
+
+    // ---- viewer RPC from the client's inventory screen ---------------------
+
+    override void OnRPC(PlayerIdentity sender, int rpc_type, ParamsReadContext ctx)
+    {
+        if (rpc_type == OZS_Const.RPC_VIEW_ID)
+        {
+            if (!GetGame() || !GetGame().IsServer())
+                return;
+            Param1<bool> p = new Param1<bool>(false);
+            if (ctx.Read(p))
+                OZS_Controller.Get().OnView(this, sender, p.param1);
+            return;
+        }
+        super.OnRPC(sender, rpc_type, ctx);
     }
 
     // Entities directly in the box: cargo items plus items in the weapon slots.

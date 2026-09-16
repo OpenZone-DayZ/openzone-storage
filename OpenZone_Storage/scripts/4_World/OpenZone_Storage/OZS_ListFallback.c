@@ -235,7 +235,11 @@ class OZS_ListFallback
             ItemBase item = ItemBase.Cast(e);
             if (item)
             {
-                if (item.HasQuantity() && r.quantity > 0)
+                // A battery's quantity is its energy: it goes through the
+                // energy manager, or the item reads full again.
+                if (item.HasEnergyManager())
+                    item.GetCompEM().SetEnergy(r.quantity);
+                else if (item.HasQuantity() && r.quantity > 0)
                     item.SetQuantity(r.quantity);
                 if (r.liquid > 0)
                     item.SetLiquidType(r.liquid);

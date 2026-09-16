@@ -67,6 +67,36 @@ modded class DZMCP_BridgeCore
             return true;
         }
 
+        if (op == "tune")
+        {
+            // Runtime overrides of the settings, for the stand only.
+            OZS_Settings st = OZS_Settings.Get();
+            string v = OZS_Arg(args, "quiet", "");
+            if (v != "")
+                st.AutoCloseQuietSeconds = v.ToInt();
+            v = OZS_Arg(args, "radius", "");
+            if (v != "")
+                st.AutoCloseRadius = v.ToFloat();
+            v = OZS_Arg(args, "timeout", "");
+            if (v != "")
+                st.ViewerTimeoutSeconds = v.ToInt();
+            v = OZS_Arg(args, "distance", "");
+            if (v != "")
+                st.ViewerMaxDistance = v.ToFloat();
+            v = OZS_Arg(args, "rate", "");
+            if (v != "")
+                st.OpenItemsPerSecond = v.ToInt();
+            v = OZS_Arg(args, "deletes", "");
+            if (v != "")
+                st.CloseDeletesPerFrame = v.ToInt();
+            v = OZS_Arg(args, "close_budget", "");
+            if (v != "")
+                st.CloseFrameBudgetMs = v.ToInt();
+            detail = "autoclose=" + st.AutoCloseRadius + "m/" + st.AutoCloseQuietSeconds + "s viewers=" + st.ViewerTimeoutSeconds + "s/" + st.ViewerMaxDistance + "m rate=" + st.OpenItemsPerSecond;
+            detail = detail + " close=" + st.CloseFrameBudgetMs + "ms/" + st.CloseDeletesPerFrame;
+            return true;
+        }
+
         if (op == "spawn")
         {
             string size = OZS_Arg(args, "size", "large");
@@ -108,7 +138,7 @@ modded class DZMCP_BridgeCore
         {
             detail = target.GetType() + " id=" + target.OZS_GetId() + " state=" + OZS_Const.StateName(target.OZS_GetState());
             detail = detail + " entities=" + target.OZS_CountEntities() + " stored=" + target.OZS_GetStoredCount();
-            detail = detail + " slots=[" + OZS_Slots(target) + "]";
+            detail = detail + " slots=[" + OZS_Slots(target) + "] viewers=" + c.ViewerCount(target);
             return true;
         }
         if (op == "open")
@@ -190,7 +220,7 @@ modded class DZMCP_BridgeCore
             return true;
         }
 
-        detail = "unknown op '" + op + "'; known: list, spawn, status, open, close, files, slot";
+        detail = "unknown op '" + op + "'; known: list, spawn, status, open, close, files, slot, tune";
         return false;
     }
 

@@ -364,13 +364,16 @@ class OZS_OpenJob
             return;
         }
         EntityAI made;
+        int missedBefore = OZS_Records.s_Missed;
         if (OZS_Records.ReadEntity(m_Bin, m_Box, m_SaveVer, made))
         {
             m_Next++;
             return;
         }
-        // The stream broke inside root m_Next: drop the half-built tree,
-        // keep the blob for a look, continue from the list.
+        // The stream broke inside root m_Next: drop the half-built tree
+        // (the list restores this root, so it is not a miss), keep the blob
+        // for a look, continue from the list.
+        OZS_Records.s_Missed = missedBefore;
         if (made)
             GetGame().ObjectDelete(made);
         CloseBin();

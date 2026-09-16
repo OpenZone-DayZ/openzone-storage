@@ -110,6 +110,19 @@ class OZS_Store
         return line;
     }
 
+    // The root count from the items.list header, or -1.
+    static int HeaderRoots(string id)
+    {
+        string head = ListHeader(id);
+        if (head == "")
+            return -1;
+        array<string> p = new array<string>();
+        head.Split("|", p);
+        if (p.Count() < 8 || p.Get(0) != OZS_Const.LIST_HEAD)
+            return -1;
+        return p.Get(6).ToInt();
+    }
+
     // Lines in items.list beyond the header, or -1.
     static int ListLines(string id)
     {
