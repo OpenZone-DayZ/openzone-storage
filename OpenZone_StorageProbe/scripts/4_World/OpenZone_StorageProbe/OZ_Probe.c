@@ -388,10 +388,12 @@ class OZ_Probe
             return false;
         }
 
-        EntityAI crate = NearestCrate(pos, 100);
+        // class= lets the probe drive any container, the storage boxes included.
+        string kind = Arg(args, "class", "OZ_ProbeCrate");
+        EntityAI crate = NearestCrate(pos, 100, kind);
         if (!crate)
         {
-            detail = "no OZ_ProbeCrate within 100 m of " + pos.ToString();
+            detail = "no " + kind + " within 100 m of " + pos.ToString();
             return false;
         }
         m_Crate = crate;
@@ -940,7 +942,7 @@ class OZ_Probe
         return true;
     }
 
-    protected EntityAI NearestCrate(vector pos, float radius)
+    protected EntityAI NearestCrate(vector pos, float radius, string kind)
     {
         array<Object> objects = new array<Object>();
         array<CargoBase> proxies = new array<CargoBase>();
@@ -950,7 +952,7 @@ class OZ_Probe
         for (int i = 0; i < objects.Count(); i++)
         {
             Object o = objects.Get(i);
-            if (!o.IsKindOf("OZ_ProbeCrate"))
+            if (!o.IsKindOf(kind))
                 continue;
             float d = vector.Distance(o.GetPosition(), pos);
             if (d < bestDist)

@@ -13,11 +13,19 @@ name = "openzone-storage"
 #                                 EEInit counters and the frame monitors.
 # OpenZone_StorageProbe_Bridge -- server only: the `oz_probe` verb for the MCP
 #                                 bridge (world_exec). Requires @DZMCP_Bridge.
-mods = ["OpenZone_StorageProbe", "OpenZone_StorageProbe_Bridge"]
+#
+# OpenZone_Storage        -- the mod (boxes, actions, controller, store).
+# OpenZone_Storage_Bridge -- server only: the `oz_storage` verb for the MCP
+#                            bridge (world_exec). Requires @DZMCP_Bridge.
+mods = ["OpenZone_Storage", "OpenZone_Storage_Bridge", "OpenZone_StorageProbe", "OpenZone_StorageProbe_Bridge"]
 
 [expect]
-ready_line   = "storage probe loaded"
+# Printed by OZS_Mission at OnMissionStart with the box counts.
+ready_line   = "storage loaded"
 max_warnings = 0
 forbid       = ["Bad type", "Can't compile", "NULL pointer to instance"]
-error_regex  = ["SCRIPT\\s+\\(E\\).*OZ_", "\\[OpenZone\\] ERROR"]
-noise        = []
+error_regex  = ["SCRIPT\\s+\\(E\\).*OZ_", "SCRIPT\\s+\\(E\\).*OZS_", "\\[OpenZone\\] ERROR"]
+# The core warns on every boot of the stand that the bridge URL is http and
+# that the PDA's optional radio module and faction page are absent -- state,
+# not events, on a stand without those mods.
+noise        = ["Bridge.Url is not https", "is not registered", "is not in CfgVehicles", "v1/poll failed"]
