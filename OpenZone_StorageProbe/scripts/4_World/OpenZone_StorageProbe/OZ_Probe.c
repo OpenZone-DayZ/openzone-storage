@@ -105,6 +105,7 @@ class OZ_Probe
     protected string   m_AttachText;
     protected string   m_CargoText;
     protected string   m_CargoMode;
+    protected string   m_Persist;
     protected int      m_Children;
     protected int      m_ChildMiss;
     protected ref OZ_ProbeFrameStats   m_Frame;
@@ -213,6 +214,27 @@ class OZ_Probe
         if (op == "find")
             return CmdFind(args, detail);
 
+        // Immediate research ops (items 2-4 of the brief); all need a crate.
+        if (op == "stock" || op == "inspect" || op == "blob_save" || op == "blob_load" || op == "nest" || op == "give")
+        {
+            if (!RequireCrate(detail))
+                return false;
+            return CmdImmediate(op, args, detail);
+        }
+        if (op == "player_count")
+        {
+            array<Man> players = new array<Man>();
+            GetGame().GetPlayers(players);
+            if (players.Count() == 0)
+            {
+                detail = "nobody is connected";
+                return false;
+            }
+            string what = Arg(args, "item", "Paper");
+            detail = "player carries " + OZ_ProbeState.PlayerCount(players.Get(0), what) + " x " + what;
+            return true;
+        }
+
         if (m_Op != "")
         {
             detail = "job " + m_JobId + " (" + m_Op + ") is still running: " + m_Done + "/" + m_Target + "; wait for it";
@@ -237,6 +259,72 @@ class OZ_Probe
 
         detail = "unknown op '" + op + "'; known: status, baseline, crate, find, fill, clear, capture, load, restore, delete_crate";
         return false;
+    }
+
+    protected bool CmdImmediate(string op, map<string, string> args, out string detail)
+    {
+        float t0 = GetGame().GetTickTime();
+        bool ok = true;
+        string extra = "";
+        if (op == "stock")
+        {
+            detail = OZ_ProbeState.Stock(m_Crate);
+        }
+        else if (op == "inspect")
+        {
+            int hash;
+            string text = OZ_ProbeState.Inspect(m_Crate, hash);
+            array<string> lines = new array<string>();
+            text.Split("\n", lines);
+            for (int i = 0; i < lines.Count(); i++)
+            {
+                if (lines.Get(i) != "")
+                    AppendLine(RESULTS, "inspect " + lines.Get(i));
+            }
+            detail = "inspected " + lines.Count() + " item(s), hash=" + hash + ", cargo=" + CargoCount(m_Crate);
+            extra = ",\"hash\":" + hash;
+        }
+        else if (op == "blob_save")
+        {
+            ok = OZ_ProbeState.SaveBlob(m_Crate, detail);
+        }
+        else if (op == "blob_load")
+        {
+            int created;
+            int failed;
+            int loadFails;
+            ok = OZ_ProbeState.LoadBlob(m_Crate, detail, created, failed, loadFails);
+            extra = ",\"created\":" + created + ",\"missed\":" + failed + ",\"load_refusals\":" + loadFails;
+        }
+        else if (op == "nest")
+        {
+            string bagType = Arg(args, "item", "TaloonBag_Blue");
+            string childType = Arg(args, "child", "Paper");
+            int children = Arg(args, "children", "10").ToInt();
+            int bags = Arg(args, "n", "5").ToInt();
+            detail = OZ_ProbeState.Nest(m_Crate, bagType, childType, children, bags);
+        }
+        else if (op == "give")
+        {
+            array<Man> players = new array<Man>();
+            GetGame().GetPlayers(players);
+            if (players.Count() == 0)
+            {
+                detail = "nobody is connected";
+                ok = false;
+            }
+            else
+            {
+                detail = OZ_ProbeState.Give(m_Crate, players.Get(0));
+            }
+        }
+        float ms = (GetGame().GetTickTime() - t0) * 1000;
+        detail = detail + " [" + OZ_ProbeFrameStats.R1(ms) + " ms]";
+        string line = "{\"op\":\"" + op + "\",\"ok\":" + BoolText(ok) + ",\"ms\":" + OZ_ProbeFrameStats.R1(ms);
+        line = line + extra + ",\"detail\":\"" + Escape(detail) + "\"}";
+        AppendLine(RESULTS, line);
+        Print("[OpenZone] storage probe " + op + ": " + detail);
+        return ok;
     }
 
     protected bool CmdCrate(map<string, string> args, out string detail)
@@ -376,6 +464,9 @@ class OZ_Probe
         m_AttachText = attachText;
         m_CargoText = cargoText;
         m_CargoMode = Arg(args, "cargo_mode", "find");
+        // persist=dyn creates with ECE_DYNAMIC_PERSISTENCY (mode=loc only): the
+        // engine's own "not saved until a player takes it" flag, see objectspawner.c.
+        m_Persist = Arg(args, "persist", "normal");
 
         int n = Arg(args, "n", "100").ToInt();
         int batch = Arg(args, "batch", "0").ToInt();
@@ -626,7 +717,10 @@ class OZ_Probe
         {
             InventoryLocation loc = new InventoryLocation();
             loc.SetCargo(m_Crate, null, 0, row, col, false);
-            created = GameInventory.LocationCreateEntity(loc, m_ItemType, ECE_IN_INVENTORY, RF_DEFAULT);
+            int flags = ECE_IN_INVENTORY;
+            if (m_Persist == "dyn")
+                flags = flags | ECE_DYNAMIC_PERSISTENCY;
+            created = GameInventory.LocationCreateEntity(loc, m_ItemType, flags, RF_DEFAULT);
         }
 
         if (!created)
@@ -763,7 +857,7 @@ class OZ_Probe
             line = line + ",\"item\":\"" + m_ItemType + "\",\"item_size\":\"" + m_ItemW + "x" + m_ItemH + "\"";
             line = line + ",\"mode\":\"" + m_Mode + "\",\"attach\":\"" + m_AttachText + "\"";
             line = line + ",\"cargo\":\"" + m_CargoText + "\",\"cargo_mode\":\"" + m_CargoMode + "\",\"children\":" + m_Children;
-            line = line + ",\"children_missed\":" + m_ChildMiss;
+            line = line + ",\"children_missed\":" + m_ChildMiss + ",\"persist\":\"" + m_Persist + "\"";
         }
         line = line + ",\"target\":" + m_Target + ",\"done\":" + m_Done + ",\"missed\":" + m_Failed;
         line = line + ",\"first_miss_at\":" + m_FirstFailAt + ",\"batch\":" + m_Batch + ",\"batches\":" + m_Batches;
