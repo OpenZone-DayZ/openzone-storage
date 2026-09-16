@@ -171,12 +171,15 @@ class OZS_Records
 
     // ---- items.bin: read ---------------------------------------------------
 
-    // Reads the next record and creates the entity under `parent`. False when
-    // the stream can no longer be followed: a class that does not exist and
-    // could not even be stood in for, or an OnStoreLoad that refused (the
-    // blob's length is unknown, so nothing behind it can be read either).
-    static bool ReadEntity(FileSerializer f, EntityAI parent, int saveVer)
+    // Reads the next record and creates the entity under `parent`; `made` is
+    // that entity (null for a stand-in), so the caller can remove a half-built
+    // tree. False when the stream can no longer be followed: a class that does
+    // not exist and could not even be stood in for, or an OnStoreLoad that
+    // refused (the blob's length is unknown, so nothing behind it can be read
+    // either).
+    static bool ReadEntity(FileSerializer f, EntityAI parent, int saveVer, out EntityAI made)
     {
+        made = null;
         string type;
         int lt;
         int slot;
@@ -232,17 +235,28 @@ class OZS_Records
                 return false;
             standIn = true;
         }
+        if (!standIn)
+            made = e;
 
         // Children first: attachments, then cargo, each a full record.
+        EntityAI child;
         for (int a = 0; a < ac; a++)
         {
-            if (!ReadEntity(f, e, saveVer))
+            if (!ReadEntity(f, e, saveVer, child))
+            {
+                if (standIn)
+                    GetGame().ObjectDelete(e);
                 return false;
+            }
         }
         for (int c = 0; c < cc; c++)
         {
-            if (!ReadEntity(f, e, saveVer))
+            if (!ReadEntity(f, e, saveVer, child))
+            {
+                if (standIn)
+                    GetGame().ObjectDelete(e);
                 return false;
+            }
         }
 
         bool bodyOk = ReadBody(f, e, saveVer);

@@ -56,6 +56,21 @@ class OZS_Store
         return t;
     }
 
+    // "20260916-173118": the stamp without the characters a file name refuses.
+    static string FileStamp()
+    {
+        int y;
+        int mo;
+        int d;
+        int h;
+        int mi;
+        int s;
+        GetYearMonthDayUTC(y, mo, d);
+        GetHourMinuteSecondUTC(h, mi, s);
+        string t = y.ToString() + Pad2(mo) + Pad2(d) + "-" + Pad2(h) + Pad2(mi) + Pad2(s);
+        return t;
+    }
+
     static string Pad2(int v)
     {
         if (v < 10)

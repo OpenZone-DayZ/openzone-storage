@@ -108,6 +108,7 @@ modded class DZMCP_BridgeCore
         {
             detail = target.GetType() + " id=" + target.OZS_GetId() + " state=" + OZS_Const.StateName(target.OZS_GetState());
             detail = detail + " entities=" + target.OZS_CountEntities() + " stored=" + target.OZS_GetStoredCount();
+            detail = detail + " slots=[" + OZS_Slots(target) + "]";
             return true;
         }
         if (op == "open")
@@ -221,6 +222,35 @@ modded class DZMCP_BridgeCore
         if (!near)
             detail = "no box within 100 m of " + pos.ToString();
         return near;
+    }
+
+    // What hangs in the weapon slots: "AKM[Mag_AKM_30Rnd:17,+1]" per slot.
+    protected string OZS_Slots(OZ_StorageBox box)
+    {
+        string s = "";
+        GameInventory inv = box.GetInventory();
+        if (!inv)
+            return s;
+        for (int a = 0; a < inv.AttachmentCount(); a++)
+        {
+            EntityAI att = inv.GetAttachmentFromIndex(a);
+            if (!att)
+                continue;
+            if (s != "")
+                s = s + " ";
+            s = s + att.GetType();
+            Weapon_Base w = Weapon_Base.Cast(att);
+            if (!w)
+                continue;
+            Magazine mag = w.GetMagazine(0);
+            string inside = "";
+            if (mag)
+                inside = mag.GetType() + ":" + mag.GetAmmoCount();
+            if (!w.IsChamberEmpty(0))
+                inside = inside + ",+1";
+            s = s + "[" + inside + "]";
+        }
+        return s;
     }
 
     protected bool OZS_PlayerPos(out vector pos)

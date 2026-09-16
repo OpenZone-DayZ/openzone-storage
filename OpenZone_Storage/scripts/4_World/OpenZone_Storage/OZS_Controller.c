@@ -3,9 +3,10 @@
 // and the boot reconciliation. A static singleton, reset at mission finish
 // (statics survive a mission restart inside one process).
 //
-// Implemented so far: registry, Close with the store and the paced deletion.
-// Open still flips to OPEN at once; the open job, the viewers and the boot
-// reconciliation arrive with the later tasks.
+// Implemented so far: registry, Close (store + paced deletion), Open (paced
+// materialisation with the list fallback), the deferred release of the files.
+// The viewers, the auto-close and the boot reconciliation arrive with the
+// later tasks.
 class OZS_Controller
 {
     protected static ref OZS_Controller s_Inst;
@@ -15,6 +16,10 @@ class OZS_Controller
     // runs from EEDelete anyway.
     protected ref array<OZ_StorageBox> m_Boxes;
     protected ref array<ref OZS_CloseJob> m_CloseJobs;
+    protected ref array<ref OZS_OpenJob> m_OpenJobs;
+    // Boxes opened since the engine last saved them: their files are still
+    // the truth and go only after that save (spec section 7).
+    protected ref array<string> m_FilesPending;
 
     static OZS_Controller Get()
     {
@@ -32,6 +37,8 @@ class OZS_Controller
     {
         m_Boxes = new array<OZ_StorageBox>();
         m_CloseJobs = new array<ref OZS_CloseJob>();
+        m_OpenJobs = new array<ref OZS_OpenJob>();
+        m_FilesPending = new array<string>();
     }
 
     // Box ids are the store key and must not repeat across restarts: UTC
@@ -138,6 +145,8 @@ class OZS_Controller
 
     // ---- requests --------------------------------------------------------
 
+    // Open = OPENING and a paced job that reads the store; a box without a
+    // store opens at once.
     bool RequestOpen(OZ_StorageBox box, PlayerBase player, out string why)
     {
         int state = box.OZS_GetState();
@@ -146,9 +155,43 @@ class OZS_Controller
             why = "#STR_OZS_OPENING";
             return false;
         }
-        box.OZS_SetState(OZS_Const.STATE_OPEN);
-        OZ_Log.Info("storage: box " + box.OZS_GetId() + " opened by " + Who(player) + " (" + box.OZS_GetStoredCount() + " stored)");
+        string who = Who(player);
+        if (!OZS_Store.HasFiles(box.OZS_GetId()))
+        {
+            box.OZS_SetState(OZS_Const.STATE_OPEN);
+            box.OZS_SetStoredCount(0);
+            OZ_Log.Info("storage: box " + box.OZS_GetId() + " opened by " + who + " (no store, empty)");
+            return true;
+        }
+        OZS_OpenJob job = new OZS_OpenJob(box, who);
+        string err;
+        if (!job.Begin(err))
+        {
+            OZ_Log.Error("storage: box " + box.OZS_GetId() + " cannot be opened by " + who + ": " + err);
+            why = "#STR_OZS_OPEN_FAILED";
+            return false;
+        }
+        m_OpenJobs.Insert(job);
+        OZ_Log.Info("storage: box " + box.OZS_GetId() + " opening by " + who + " (" + box.OZS_GetStoredCount() + " stored)");
         return true;
+    }
+
+    // The open job finished: the files stay until the engine saves the box.
+    void OnOpened(OZ_StorageBox box)
+    {
+        string id = box.OZS_GetId();
+        if (m_FilesPending.Find(id) < 0)
+            m_FilesPending.Insert(id);
+    }
+
+    protected OZS_OpenJob FindOpenJob(OZ_StorageBox box)
+    {
+        for (int i = 0; i < m_OpenJobs.Count(); i++)
+        {
+            if (m_OpenJobs.Get(i).IsFor(box))
+                return m_OpenJobs.Get(i);
+        }
+        return null;
     }
 
     // Close = lock, capture, then delete over frames. The lock (state
@@ -219,19 +262,38 @@ class OZS_Controller
     // is rare, and the budget is far under the frame criterion anyway.
     void OnFrame(float timeslice)
     {
-        if (m_CloseJobs.Count() == 0)
+        if (m_CloseJobs.Count() == 0 && m_OpenJobs.Count() == 0)
             return;
         OZS_Settings st = OZS_Settings.Get();
-        float budgetSec = st.CloseFrameBudgetMs * 0.001;
+        float closeSec = st.CloseFrameBudgetMs * 0.001;
         for (int i = m_CloseJobs.Count() - 1; i >= 0; i--)
         {
-            if (m_CloseJobs.Get(i).Tick(budgetSec, st.CloseDeletesPerFrame))
+            if (m_CloseJobs.Get(i).Tick(closeSec, st.CloseDeletesPerFrame))
                 m_CloseJobs.RemoveOrdered(i);
+        }
+        float openSec = st.OpenFrameBudgetMs * 0.001;
+        for (int j = m_OpenJobs.Count() - 1; j >= 0; j--)
+        {
+            if (m_OpenJobs.Get(j).Tick(openSec, st.OpenItemsPerSecond, timeslice))
+                m_OpenJobs.RemoveOrdered(j);
         }
     }
 
+    // The engine is saving the box. Once it has saved an OPEN box, its cargo
+    // is in the engine's own store and the files may go.
     void OnBoxSaved(OZ_StorageBox box)
     {
+        if (m_FilesPending.Count() == 0)
+            return;
+        if (box.OZS_GetState() != OZS_Const.STATE_OPEN)
+            return;
+        string id = box.OZS_GetId();
+        int i = m_FilesPending.Find(id);
+        if (i < 0)
+            return;
+        m_FilesPending.Remove(i);
+        OZS_Store.Delete(id);
+        OZ_Log.Dbg("storage: box " + id + " saved open by the engine; its files are released");
     }
 
     void Reconcile(OZ_StorageBox box)
@@ -262,8 +324,15 @@ class OZS_Controller
                 if (job)
                     job.Flush();
             }
+            else if (state == OZS_Const.STATE_OPENING)
+            {
+                OZS_OpenJob opening = FindOpenJob(b);
+                if (opening)
+                    opening.Cancel("mission finish");
+            }
         }
         m_CloseJobs.Clear();
+        m_OpenJobs.Clear();
     }
 
     // ---- reporting -------------------------------------------------------
@@ -271,7 +340,7 @@ class OZS_Controller
     string Status()
     {
         Prune();
-        string s = "boxes=" + m_Boxes.Count() + " closing=" + m_CloseJobs.Count();
+        string s = "boxes=" + m_Boxes.Count() + " closing=" + m_CloseJobs.Count() + " opening=" + m_OpenJobs.Count() + " files_pending=" + m_FilesPending.Count();
         for (int i = 0; i < m_Boxes.Count(); i++)
         {
             OZ_StorageBox b = m_Boxes.Get(i);
