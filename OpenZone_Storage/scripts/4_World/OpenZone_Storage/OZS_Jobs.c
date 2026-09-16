@@ -202,9 +202,9 @@ class OZS_OpenJob
     protected int m_Frames;
     protected float m_WorkMs;
     protected float m_MaxStepMs;
-    protected int m_Created0;
-    protected int m_Missed0;
-    protected int m_Fails0;
+    protected int m_Created;
+    protected int m_Missed;
+    protected int m_Fails;
 
     void OZS_OpenJob(OZ_StorageBox box, string who)
     {
@@ -212,6 +212,9 @@ class OZS_OpenJob
         m_Who = who;
         m_Mode = MODE_NONE;
         m_FallbackFrom = -1;
+        m_Created = 0;
+        m_Missed = 0;
+        m_Fails = 0;
     }
 
     bool IsFor(OZ_StorageBox box)
@@ -225,9 +228,6 @@ class OZS_OpenJob
     {
         m_Id = m_Box.OZS_GetId();
         m_Started = GetGame().GetTickTime();
-        m_Created0 = OZS_Records.s_Created;
-        m_Missed0 = OZS_Records.s_Missed;
-        m_Fails0 = OZS_Records.s_LoadFails;
         m_Box.OZS_SetState(OZS_Const.STATE_OPENING);
         m_Box.OZS_SetRestoring(true);
         m_Tokens = 0;
@@ -328,12 +328,19 @@ class OZS_OpenJob
         float now = frameStart;
         while (m_Mode != MODE_NONE && m_Tokens >= 1)
         {
-            int before = OZS_Records.s_Created + OZS_Records.s_Missed;
+            // The record counters are static and shared by every job in
+            // flight, so each step's delta is credited to this job at once.
+            int created0 = OZS_Records.s_Created;
+            int missed0 = OZS_Records.s_Missed;
+            int fails0 = OZS_Records.s_LoadFails;
             if (m_Mode == MODE_BIN)
                 StepBin();
             else
                 StepList();
-            int made = OZS_Records.s_Created + OZS_Records.s_Missed - before;
+            int made = OZS_Records.s_Created + OZS_Records.s_Missed - created0 - missed0;
+            m_Created = m_Created + OZS_Records.s_Created - created0;
+            m_Missed = m_Missed + OZS_Records.s_Missed - missed0;
+            m_Fails = m_Fails + OZS_Records.s_LoadFails - fails0;
             if (made < 1)
                 made = 1;
             m_Tokens = m_Tokens - made;
@@ -436,13 +443,10 @@ class OZS_OpenJob
         m_Box.OZS_SetRestoring(false);
         m_Box.OZS_SetState(OZS_Const.STATE_OPEN);
         OZS_Controller.Get().OnOpened(m_Box);
-        int created = OZS_Records.s_Created - m_Created0;
-        int missed = OZS_Records.s_Missed - m_Missed0;
-        int fails = OZS_Records.s_LoadFails - m_Fails0;
         float wall = GetGame().GetTickTime() - m_Started;
-        string s = "storage: box " + m_Id + " opened by " + m_Who + ": " + m_Next + " items (" + created + " entities) in " + m_Frames + " frame(s),";
+        string s = "storage: box " + m_Id + " opened by " + m_Who + ": " + m_Next + " items (" + m_Created + " entities) in " + m_Frames + " frame(s),";
         s = s + " work " + OZS_CloseJob.R1(m_WorkMs) + " ms, longest step " + OZS_CloseJob.R1(m_MaxStepMs) + " ms, wall " + OZS_CloseJob.R1(wall) + " s";
-        s = s + ", missed " + missed + ", refusals " + fails;
+        s = s + ", missed " + m_Missed + ", refusals " + m_Fails;
         if (m_FallbackFrom >= 0)
             s = s + ", items.list from root " + m_FallbackFrom;
         OZ_Log.Info(s);

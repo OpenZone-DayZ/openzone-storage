@@ -35,10 +35,14 @@ class OZS_Settings : OZ_ConfigBase
 
     override void LoadDefaults()
     {
+        // 5 ms: the sampling profiler (script-profile.ps1, 200 Hz) merges
+        // back-to-back frames of 20 ms into one "freeze" of their sum, and
+        // resolves frames of 5 ms (measured 2026-09-16); the jobs need far
+        // less per frame anyway (an open at 250/s takes about 2 ms).
         Version = LatestVersion();
-        OpenFrameBudgetMs = 20;
+        OpenFrameBudgetMs = 5;
         OpenItemsPerSecond = 250;
-        CloseFrameBudgetMs = 20;
+        CloseFrameBudgetMs = 5;
         CloseDeletesPerFrame = 50;
         AutoCloseRadius = 15;
         AutoCloseQuietSeconds = 120;
@@ -59,8 +63,8 @@ class OZS_Settings : OZ_ConfigBase
         warnings = 0;
         if (OpenFrameBudgetMs < 1 || OpenFrameBudgetMs > 100)
         {
-            OZ_Log.Warn("storage settings: OpenFrameBudgetMs " + OpenFrameBudgetMs + " is outside 1..100, using 20");
-            OpenFrameBudgetMs = 20;
+            OZ_Log.Warn("storage settings: OpenFrameBudgetMs " + OpenFrameBudgetMs + " is outside 1..100, using 5");
+            OpenFrameBudgetMs = 5;
             warnings++;
         }
         if (OpenItemsPerSecond < 10 || OpenItemsPerSecond > 5000)
@@ -71,8 +75,8 @@ class OZS_Settings : OZ_ConfigBase
         }
         if (CloseFrameBudgetMs < 1 || CloseFrameBudgetMs > 100)
         {
-            OZ_Log.Warn("storage settings: CloseFrameBudgetMs " + CloseFrameBudgetMs + " is outside 1..100, using 20");
-            CloseFrameBudgetMs = 20;
+            OZ_Log.Warn("storage settings: CloseFrameBudgetMs " + CloseFrameBudgetMs + " is outside 1..100, using 5");
+            CloseFrameBudgetMs = 5;
             warnings++;
         }
         if (CloseDeletesPerFrame < 1 || CloseDeletesPerFrame > 1000)

@@ -1,0 +1,127 @@
+start 21:31:20.803
+pid 45012, DayZServer_x64.exe at 0x7FF778120000; interpreter and script context match the known build
+main thread 41468
+
+main thread: 11369 samples
+   68.0%  engine only, no script on the stack (of which 0.9% entering/leaving the VM)
+   25.2%  interpreting script
+    6.9%  engine natives called from script
+
+script time by mod (the innermost script function's file; natives count for the script that called them):
+   27.36%    3110  vanilla                  (5.16% of it in engine code)
+    1.79%     203  OpenZone_Storage         (0.82% of it in engine code)
+    1.59%     181  OpenZone_StorageProbe    (0.53% of it in engine code)
+    1.15%     131  JM/CF                    (0.22% of it in engine code)
+    0.15%      17  DZMCP_Bridge             (0.15% of it in engine code)
+
+top functions on the script stack, self time:
+     self  engine    incl  function  (mod  file:line)
+    3.37%   0.88%   7.20%  ModifiersManager.OnScheduledTick  (vanilla  scripts/4_World/classes/playermodifiers/modifiersmanager.c:206)
+    2.47%   0.00%   2.47%  ModifierBase.Tick  (vanilla  scripts/4_World/classes/playermodifiers/modifierbase.c:93)
+    1.40%   0.00%   1.70%  TimerBase.Tick  (vanilla  scripts/3_Game/tools/tools.c:274)
+    1.25%   0.16%  27.30%  DayZGame.OnUpdate  (vanilla  scripts/3_Game/dayzgame.c:2976)
+    1.20%   0.26%  11.97%  MissionServer.TickScheduler  (vanilla  scripts/5_Mission/mission/missionserver.c:755)
+    1.19%   0.08%  10.41%  PlayerBase.OnScheduledTick  (vanilla  scripts/4_World/entities/manbase/playerbase.c:2823)
+    1.15%   0.17%   1.15%  BoatScript.EOnFrame  (vanilla  scripts/4_World/entities/vehicles/boatscript.c:403)
+    1.15%   0.25%   1.91%  PluginManager.MainOnUpdate  (vanilla  scripts/4_World/plugins/pluginmanager.c:144)
+    1.13%   0.23%   1.13%  EntityAI.EOnFrame  (vanilla  scripts/3_Game/entities/entityai.c:3289)
+    0.91%   0.01%   3.31%  TimerQueue.Tick  (vanilla  scripts/3_Game/tools/tools.c:409)
+    0.80%   0.59%   2.71%  ScriptInvoker.Invoke  ([engine native])
+    0.76%   0.64%   0.76%  map<typename,@PluginBase>.GetElement  ([engine native])
+    0.69%   0.36%   0.69%  array<TimerBase>.Get  ([engine native])
+    0.61%   0.10%   0.61%  array<@ModifierBase>.Get  ([engine native])
+    0.57%   0.05%   0.78%  NotifiersManager.TickNotifiers  (vanilla  scripts/4_World/classes/playernotifiers/notifiersmanager.c:115)
+    0.50%   0.00%  13.96%  MissionServer.OnUpdate  (vanilla  scripts/5_Mission/mission/missionserver.c:114)
+    0.49%   0.03%   0.78%  DayZGame.OnPostUpdate  (vanilla  scripts/3_Game/dayzgame.c:3063)
+    0.44%   0.02%   0.82%  HeatBufferMdfr.Tick  (vanilla  scripts/4_World/classes/playermodifiers/modifiers/conditions/heatbuffer.c:49)
+    0.44%   0.44%   0.44%  OZ_Probe.AppendLine  (OpenZone_StorageProbe  OpenZone_StorageProbe/scripts/4_World/openzone_storageprobe/oz_probe.c:1000)
+    0.44%   0.03%   2.12%  OZS_Controller.OnFrame  (OpenZone_Storage  OpenZone_Storage/scripts/4_World/openzone_storage/ozs_controller.c:512)
+    0.38%   0.36%   0.38%  Serializer.Write  ([engine native])
+    0.38%   0.34%   0.98%  OZS_Records.ReadEntity  (OpenZone_Storage  OpenZone_Storage/scripts/4_World/openzone_storage/ozs_records.c:182)
+    0.37%   0.03%  18.10%  MissionServer.OnUpdate  (OpenZone_StorageProbe  OpenZone_StorageProbe/scripts/5_Mission/openzone_storageprobe/oz_probemission.c:13)
+    0.34%   0.06%   0.34%  MissionBase.CF_OnUpdate  (JM/CF  JM/CF/Scripts/5_Mission/communityframework/mission/missionbase.c:39)
+    0.33%   0.32%   0.33%  string.Split  (vanilla  scripts/1_Core/proto/enstring.c:398)
+    0.32%   0.01%  17.10%  MissionServer.OnUpdate  (OpenZone_Storage  OpenZone_Storage/scripts/5_Mission/openzone_storage/ozs_mission.c:26)
+    0.31%   0.01%   0.31%  MissionServer.UpdateLogoutPlayers  (vanilla  scripts/5_Mission/mission/missionserver.c:269)
+    0.30%   0.03%   0.53%  OZ_Probe.OnFrame  (OpenZone_StorageProbe  OpenZone_StorageProbe/scripts/4_World/openzone_storageprobe/oz_probe.c:157)
+    0.29%   0.06%   0.29%  SEffectManager.OnUpdate  (vanilla  scripts/3_Game/effectmanager.c:642)
+    0.29%   0.00%   0.29%  TimerBase.IsRunning  (vanilla  scripts/3_Game/tools/tools.c:266)
+
+top script functions, inclusive (anywhere on the stack):
+   27.54%  DayZGame.OnUpdate  (JM/CF)
+   27.30%  DayZGame.OnUpdate  (vanilla)
+   18.10%  MissionServer.OnUpdate  (OpenZone_StorageProbe)
+   17.10%  MissionServer.OnUpdate  (OpenZone_Storage)
+   14.42%  MissionServer.OnUpdate  (JM/CF)
+   13.96%  MissionServer.OnUpdate  (vanilla)
+   11.97%  MissionServer.TickScheduler  (vanilla)
+   10.69%  PlayerBase.OnTick  (vanilla)
+   10.41%  PlayerBase.OnScheduledTick  (vanilla)
+    7.20%  ModifiersManager.OnScheduledTick  (vanilla)
+    3.31%  TimerQueue.Tick  (vanilla)
+    2.71%  ScriptInvoker.Invoke  (native)
+    2.47%  ModifierBase.Tick  (vanilla)
+    2.12%  OZS_Controller.OnFrame  (OpenZone_Storage)
+    1.91%  PluginManager.MainOnUpdate  (vanilla)
+    1.70%  TimerBase.Tick  (vanilla)
+    1.30%  DZMCP_BridgeCore.OnTick  (DZMCP_Bridge)
+    1.30%  MissionServer.DZMCP_OnTick  (DZMCP_Bridge)
+    1.20%  DZMCP_BridgeCore.ClaimOne  (DZMCP_Bridge)
+    1.17%  DZMCP_BridgeCore.HandleClaimed  (DZMCP_Bridge)
+    1.15%  DZMCP_BridgeCore.Dispatch  (OpenZone_StorageProbe_Bridge)
+    1.15%  OZ_Probe.Command  (OpenZone_StorageProbe)
+    1.15%  OZ_Probe.CmdImmediate  (OpenZone_StorageProbe)
+    1.15%  BoatScript.EOnFrame  (vanilla)
+    1.13%  EntityAI.EOnFrame  (vanilla)
+    1.01%  OZS_OpenJob.Tick  (OpenZone_Storage)
+    0.99%  NotifiersManager.OnScheduledTick  (vanilla)
+    0.98%  OZS_Records.ReadEntity  (OpenZone_Storage)
+    0.98%  OZS_OpenJob.StepBin  (OpenZone_Storage)
+    0.82%  HeatBufferMdfr.Tick  (vanilla)
+
+who calls the hottest functions:
+  ModifiersManager.OnScheduledTick                 <- PlayerBase.OnScheduledTick 100%
+  ModifierBase.Tick                                <- ModifiersManager.OnScheduledTick 98%; HeatBufferMdfr.Tick 2%
+  TimerBase.Tick                                   <- TimerQueue.Tick 100%
+  DayZGame.OnUpdate                                <- DayZGame.OnUpdate 100%
+  MissionServer.TickScheduler                      <- MissionServer.OnUpdate 100%
+  PlayerBase.OnScheduledTick                       <- PlayerBase.OnTick 100%
+  BoatScript.EOnFrame                              <- <engine> 100%
+  PluginManager.MainOnUpdate                       <- ScriptInvoker.Invoke 100%
+  EntityAI.EOnFrame                                <- <engine> 100%
+  TimerQueue.Tick                                  <- DayZGame.OnUpdate 100%
+
+stretches >= 150 ms where the main thread stayed in one piece of work (what a player feels as a freeze): 2, 925 ms in all
+  2026-09-16 21:32:02      693 ms  script entered at DayZGame.OnUpdate (JM/CF); inside: OZ_Probe.AppendLine 38%, string.Split 28%, Object.GetType 18%
+  2026-09-16 21:31:34      232 ms  script entered at DayZGame.OnUpdate (JM/CF); inside: Serializer.Write 80%, ItemBase.GetQuantityMax 5%, OZS_Records.WriteListEntity 5%
+  (engine addresses are named by resolve-samples.py against the same exe)
+
+main-thread engine time with no script on the stack (68.0%), by place:
+   10.78%  [module] ntdll.dll
+    0.99%  [module] ucrtbase.dll
+    0.49%  [module] KERNEL32.DLL
+    0.46%  [module] steamclient64.dll
+    2.05%  +0x873680
+    1.14%  +0x77CBE
+    0.84%  +0x87368C
+    0.82%  +0x736BD
+    0.78%  +0x7EBDD
+    0.77%  +0x736B0
+    0.69%  +0x7C243
+    0.68%  +0x4C746D
+
+other threads (samples at 1/4 of the main thread's rate; 'exe' = busy in the engine, the rest is waiting in system code):
+  tid 18820  enfWorkShort 1      2842 samples  exe   1.8%  +0xAD8458 0.3%, +0xAD884E 0.3%, +0xAD845F 0.2%  | ntdll.dll 98%
+  tid 43472  DebugThreadWatch    2842 samples  exe   0.0%  +0x2F242D 0.0%  | ntdll.dll 100%
+  tid 44256  CHTTPClientThreadPool:0   2842 samples  exe   0.0%  -  | ntdll.dll 100%
+  tid 45140                      2842 samples  exe   0.0%  -  | ntdll.dll 100%
+  tid 44972  CJobMgr::m_WorkThreadPool:0   2842 samples  exe   0.0%  -  | ntdll.dll 100%
+  tid 46172  SteamEngineWatchdogThread   2842 samples  exe   0.0%  -  | ntdll.dll 100%
+  tid 30744  CFileWriterThread   2842 samples  exe   0.0%  -  | ntdll.dll 100%
+  tid 46164  IPC:CSteamEngine    2842 samples  exe   0.0%  -  | ntdll.dll 100%
+  tid 9648   CHTTPCacheFileThreadPool:0   2842 samples  exe   0.0%  -  | ntdll.dll 100%
+  tid 34572  CNet Encrypt:0      2842 samples  exe   0.0%  -  | ntdll.dll 100%
+
+end 21:32:21.513
+
+[exited with code 0]

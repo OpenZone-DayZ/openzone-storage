@@ -523,18 +523,33 @@ class OZS_Controller
         }
         if (m_CloseJobs.Count() == 0 && m_OpenJobs.Count() == 0)
             return;
+        // The budgets are per frame and per server, not per box: several
+        // boxes in flight share them, so four boxes opening at once cost the
+        // frame the same as one.
         OZS_Settings st = OZS_Settings.Get();
-        float closeSec = st.CloseFrameBudgetMs * 0.001;
-        for (int i = m_CloseJobs.Count() - 1; i >= 0; i--)
+        int closing = m_CloseJobs.Count();
+        if (closing > 0)
         {
-            if (m_CloseJobs.Get(i).Tick(closeSec, st.CloseDeletesPerFrame))
-                m_CloseJobs.RemoveOrdered(i);
+            float closeSec = st.CloseFrameBudgetMs * 0.001 / closing;
+            int deletes = st.CloseDeletesPerFrame / closing;
+            if (deletes < 1)
+                deletes = 1;
+            for (int i = closing - 1; i >= 0; i--)
+            {
+                if (m_CloseJobs.Get(i).Tick(closeSec, deletes))
+                    m_CloseJobs.RemoveOrdered(i);
+            }
         }
-        float openSec = st.OpenFrameBudgetMs * 0.001;
-        for (int j = m_OpenJobs.Count() - 1; j >= 0; j--)
+        int opening = m_OpenJobs.Count();
+        if (opening > 0)
         {
-            if (m_OpenJobs.Get(j).Tick(openSec, st.OpenItemsPerSecond, timeslice))
-                m_OpenJobs.RemoveOrdered(j);
+            float openSec = st.OpenFrameBudgetMs * 0.001 / opening;
+            float rate = st.OpenItemsPerSecond / opening;
+            for (int j = opening - 1; j >= 0; j--)
+            {
+                if (m_OpenJobs.Get(j).Tick(openSec, rate, timeslice))
+                    m_OpenJobs.RemoveOrdered(j);
+            }
         }
     }
 

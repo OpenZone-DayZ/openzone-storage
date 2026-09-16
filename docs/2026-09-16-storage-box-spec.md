@@ -1,6 +1,8 @@
-# OpenZone Storage: the box (specification, draft 1)
+# OpenZone Storage: the box (specification, draft 2)
 
-Date: 2026-09-16. Status: **draft for the owner**. Decided by the owner the same day: model C
+Date: 2026-09-16. Status: **built and measured; draft 2 for the owner**. Sections 1--12 are the
+research and the design as decided; section 13 is the delta between that design and the code
+as built and measured the same evening (`docs/measurements/2026-09-16/results-implementation.md`). Decided by the owner the same day: model C
 of the survey (real cargo, items exist only while the box is open, materialisation paced),
 three box sizes of 500 / 1000 / 1500 cells, weapon slots on the box. Everything marked
 *owner* below is still theirs to decide; everything marked *measured* is a stand result
@@ -286,3 +288,85 @@ vests must be empty to enter, as in vanilla. Every child counts for the pacing b
   the profiler reports; the survey `2026-09-16-virtual-storage-survey.md`.
 - `docs/measurements/2026-09-16/agent-report-vanilla-facts.md`: the source report behind
   sections 2, 3, 4, 6 and 7 (eight questions, every fact with file and line).
+
+## 13. As built (2026-09-16, evening)
+
+Code: `OpenZone_Storage` (3_Game / 4_World / 5_Mission) plus the stand-only
+`OpenZone_Storage_Bridge` (verb `oz_storage`: list, spawn, status, open, close, files, slot,
+tune). The deltas between sections 2--9 and the code that was measured:
+
+- Names: `OZ_StorageBox` with `OZ_StorageBox_Small / _Medium / _Large`, `OZS_ActionOpenBox` /
+  `OZS_ActionCloseBox`, `OZS_Controller`, `OZS_CloseJob` / `OZS_OpenJob`, `OZS_Store` /
+  `OZS_StoreWriter`, `OZS_Records`, `OZS_ListFallback`, `OZS_ClientViewer`, `OZS_Player`,
+  `OZS_ActionRegister`, `OZS_Settings`, `OZS_Const`.
+- Actions (section 2): registered in `ActionConstructor.RegisterActions` -- without that
+  `ItemBase.AddAction` drops an action silently (the error goes to the .RPT only); the stored
+  count is a netsynced int on the box (`m_OZS_StoredCount`), so the Open text reads no file;
+  the state `m_OZS_State` is netsynced 0..3. Both actions were run by a connected player on
+  the stand (`world_action`): "opening by Survivor (1443 stored)", "closing by Survivor".
+- Viewers (section 3): the RPC rides on the box entity
+  (`Object.RPCSingleParam(OZS_Const.RPC_VIEW_ID)` -> `OZ_StorageBox.OnRPC`), no CF RPC and no
+  box id on the wire; the client scans `VicinityItemManager.GetVicinityItems()` twice a second
+  while `InventoryMenu.IsOpened()` (*measured*: `FindMenu(MENU_INVENTORY)` answers the hidden
+  menu too, so the first cut reported "looking" from a closed screen), sends "looking" when a
+  box enters the list and every 4 s, "gone" when it leaves or the screen closes; the server
+  prunes by 15 s silence, 5 m distance and presence. Auto-close ticks every 5 s. Extension of
+  the draft: a player's disconnect (`PlayerBase.OnDisconnect`) or death (`EEKilled`) closes an
+  OPEN box within `AutoCloseRadius` of them at once when nobody else is within the radius or
+  looking -- the draft made leaving only a reason for the viewer set to empty. The requester's
+  own stale entry never blocks their Close (actions run from the world view, not the screen).
+- Open (section 4): a token bucket of `OpenItemsPerSecond` and a frame budget of
+  `OpenFrameBudgetMs`, both shared by every box opening at the same time (four boxes at once
+  cost the frame the same as one); a class that no longer exists is read by a LOCAL stand-in
+  that consumes its blob and is deleted (the probe's method) instead of `ConfigIsExisting` +
+  skipping through the list; a broken stream (an `OnStoreLoad` that refuses, a truncated file)
+  drops the half-built root, keeps the blob as `items.bin.failed-<stamp>` and continues from
+  `items.list`; a `SaveVersion` difference is NOT a fallback trigger -- the file's version is
+  handed to `OnStoreLoad`, as the engine does with older saves.
+- Close (section 5): the capture is paced too, `CloseFrameBudgetMs` per frame (*measured*:
+  0.17 ms per entity in the `FileSerializer`, 1430 entities = 238 ms in one frame), through an
+  `OZS_StoreWriter` that keeps both files open across frames; the OLD live files are deleted
+  when the writer opens, so a close in flight has no store and a crash inside it falls under
+  the "no files" boot rule; the lock (state CLOSING, gates shut both ways) comes first.
+- Store (section 6): `items.bin` header = format version, game `SaveVersion`, UTC stamp, box
+  class, box id, roots, entities; a trailer `BIN_END` proves the file was written to the end;
+  `items.list` header `OZS-LIST|1|saveVer|stamp|class|id|roots|entities`, one line per
+  entity `depth|type|loctype|slot|row|col|flip|health|quantity|liquid|ammo|chambers|zones`;
+  the fallback restores the native layer, a battery's energy through its energy manager. The
+  box id is `<yyyymmdd-hhmmss>-<serial>-<random>` from `GetYearMonthDayUTC` (whose year reads
+  as one digit on this build; uniqueness does not depend on it), not the engine's persistent id.
+- One truth (section 7), `OZS_Controller.Reconcile` per loaded box: files present -> files
+  win (a half-done transition's cargo is deleted, the stored count comes from the list header);
+  no files -> the engine's cargo is the truth and is closed into files synchronously at boot;
+  no files and no cargo -> CLOSED and empty (a warning when items were recorded). The files of
+  an opened box are released 3 s after the engine has saved it (`OnStoreSave` runs while that
+  save is still being written). `OnMissionFinish` closes open boxes synchronously, cancels
+  opening boxes (files stay, half-restored items go) and flushes closing ones. The world's
+  persistent entities load a few frames after `OnMissionStart`, so the boot summary waits 15 s.
+- Configuration (section 9), `$profile:OpenZone/OZ_Storage.json`: `OpenFrameBudgetMs` **5**,
+  `OpenItemsPerSecond` 250, `CloseFrameBudgetMs` **5**, `CloseDeletesPerFrame` 50,
+  `AutoCloseRadius` 15, `AutoCloseQuietSeconds` 120, `ViewerHeartbeatSeconds` 5 (server-side
+  arithmetic; the client repeats every 4 s), `ViewerTimeoutSeconds` 15, `ViewerMaxDistance` 5,
+  `DebugLog`. Five milliseconds rather than the draft's twenty because the sampling profiler
+  merges back-to-back frames of 20 ms into one "freeze" (a 232 ms stretch for a 14-frame
+  capture) and resolves frames of 5 ms; the jobs need far less per frame anyway.
+- Acceptance (section 10): met -- server frames max 24 ms (one full Large box) and 33 ms (four
+  Large boxes at once), no stretch >= 150 ms from the mod at the shipped budget, client frames
+  max 57 / 67 ms next to the boxes, four restart scenarios without a loss or a duplicate, the
+  cargo dump identical before and after, the radio's frequency, the CF carrier's notes and the
+  loaded rifles through the mod's own code. Numbers and log lines:
+  `docs/measurements/2026-09-16/results-implementation.md`.
+
+## 14. Open points after draft 2
+
+1. The defaults of section 11 are in the code (2 / 4 / 6 slots, 15 m / 120 s, no journal,
+   5 ms + 250/s, donor models) -- each still one number away for the owner.
+2. Disconnect or death closing the box next to the leaving player at once: keep, or leave it
+   to the quiet period only.
+3. How players get boxes: today a box is spawned by an admin (the stand verb or a spawner);
+   there is no recipe, no `types.xml` entry, and the box is never takeable. Craftable or
+   placeable boxes and the economy entry are a separate task.
+4. Import of the live server's the previous mod stores (item 6 of the brief): waits for sample files.
+5. A box that the "no files" rule closes at boot is closed synchronously (1468 entities =
+   about 0.4 s, once) -- fine for a few boxes; a server with hundreds of open boxes at a crash
+   would pay that once at boot.
