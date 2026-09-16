@@ -1,0 +1,84 @@
+client monitor started; inits so far 73
+t=60.3 inits=93 d_inits=20 d_deletes=1 crate_cargo=-1 dist=-1 frames=12 avg=198.9ms max=1706ms >100ms=2 >150ms=2 >500ms=1
+burst items=20 secs=0.1 crate_cargo=-1 frames=70 avg=77.7ms max=1706ms >100ms=2 >150ms=2 >500ms=1
+burst_json {"items":20,"secs":0.1,"crate_cargo":-1,"frame_frames":70,"frame_avg_ms":77.7,"frame_max_ms":1706,"frame_over100":2,"frame_over150":2,"frame_over500":1}
+t=81.8 inits=94 d_inits=1 d_deletes=0 crate_cargo=-1 dist=-1 frames=19 avg=53.1ms max=56ms >100ms=0 >150ms=0 >500ms=0
+burst items=1 secs=0.1 crate_cargo=-1 frames=78 avg=52.9ms max=56ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":1,"secs":0.1,"crate_cargo":-1,"frame_frames":78,"frame_avg_ms":52.9,"frame_max_ms":56,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=86 inits=94 d_inits=0 d_deletes=1 crate_cargo=-1 dist=-1 frames=20 avg=52.6ms max=57ms >100ms=0 >150ms=0 >500ms=0
+burst items=0 secs=0.1 crate_cargo=-1 frames=79 avg=52.5ms max=57ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":0,"secs":0.1,"crate_cargo":-1,"frame_frames":79,"frame_avg_ms":52.5,"frame_max_ms":57,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=104.4 inits=98 d_inits=4 d_deletes=36 crate_cargo=-1 dist=-1 frames=19 avg=54.1ms max=87ms >100ms=0 >150ms=0 >500ms=0
+t=105.4 inits=98 d_inits=0 d_deletes=42 crate_cargo=-1 dist=-1 frames=20 avg=52ms max=54ms >100ms=0 >150ms=0 >500ms=0
+burst items=4 secs=1.1 crate_cargo=-1 frames=97 avg=52.9ms max=87ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":4,"secs":1.1,"crate_cargo":-1,"frame_frames":97,"frame_avg_ms":52.9,"frame_max_ms":87,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=132.9 inits=100 d_inits=2 d_deletes=0 crate_cargo=-1 dist=-1 frames=19 avg=52.8ms max=68ms >100ms=0 >150ms=0 >500ms=0
+burst items=2 secs=0 crate_cargo=-1 frames=76 avg=52.8ms max=68ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":2,"secs":0,"crate_cargo":-1,"frame_frames":76,"frame_avg_ms":52.8,"frame_max_ms":68,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=149.3 inits=136 d_inits=36 d_deletes=0 crate_cargo=30 dist=4.6 frames=19 avg=52.9ms max=61ms >100ms=0 >150ms=0 >500ms=0
+t=150.3 inits=446 d_inits=310 d_deletes=0 crate_cargo=340 dist=4.6 frames=20 avg=52.4ms max=55ms >100ms=0 >150ms=0 >500ms=0
+t=151.4 inits=746 d_inits=300 d_deletes=0 crate_cargo=640 dist=4.6 frames=20 avg=52.1ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=152.4 inits=1056 d_inits=310 d_deletes=0 crate_cargo=950 dist=4.6 frames=20 avg=52.5ms max=57ms >100ms=0 >150ms=0 >500ms=0
+t=153.5 inits=1366 d_inits=310 d_deletes=0 crate_cargo=1260 dist=4.6 frames=20 avg=52.1ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=154.5 inits=1676 d_inits=310 d_deletes=0 crate_cargo=1570 dist=4.6 frames=20 avg=52.4ms max=55ms >100ms=0 >150ms=0 >500ms=0
+t=155.6 inits=1976 d_inits=300 d_deletes=0 crate_cargo=1870 dist=4.6 frames=20 avg=52.1ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=156.6 inits=2286 d_inits=310 d_deletes=0 crate_cargo=2180 dist=4.6 frames=20 avg=52.3ms max=55ms >100ms=0 >150ms=0 >500ms=0
+t=157.7 inits=2596 d_inits=310 d_deletes=0 crate_cargo=2490 dist=4.6 frames=20 avg=52.2ms max=77ms >100ms=0 >150ms=0 >500ms=0
+t=158.7 inits=2886 d_inits=290 d_deletes=0 crate_cargo=2780 dist=4.6 frames=19 avg=52.8ms max=55ms >100ms=0 >150ms=0 >500ms=0
+t=159.7 inits=3196 d_inits=310 d_deletes=0 crate_cargo=3090 dist=4.6 frames=20 avg=52.2ms max=55ms >100ms=0 >150ms=0 >500ms=0
+t=160.8 inits=3506 d_inits=310 d_deletes=0 crate_cargo=3400 dist=4.6 frames=20 avg=52.4ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=161.8 inits=3816 d_inits=310 d_deletes=0 crate_cargo=3710 dist=4.6 frames=20 avg=52.4ms max=56ms >100ms=0 >150ms=0 >500ms=0
+t=162.8 inits=4116 d_inits=300 d_deletes=0 crate_cargo=4010 dist=4.6 frames=20 avg=52.4ms max=57ms >100ms=0 >150ms=0 >500ms=0
+t=163.9 inits=4426 d_inits=310 d_deletes=0 crate_cargo=4320 dist=4.6 frames=20 avg=52.2ms max=55ms >100ms=0 >150ms=0 >500ms=0
+t=164.9 inits=4736 d_inits=310 d_deletes=0 crate_cargo=4630 dist=4.6 frames=20 avg=52.4ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=166 inits=5046 d_inits=310 d_deletes=0 crate_cargo=4940 dist=4.6 frames=20 avg=52.5ms max=55ms >100ms=0 >150ms=0 >500ms=0
+t=167 inits=5108 d_inits=62 d_deletes=0 crate_cargo=5000 dist=4.6 frames=20 avg=52.4ms max=57ms >100ms=0 >150ms=0 >500ms=0
+burst items=5008 secs=17.8 crate_cargo=5000 frames=417 avg=52.4ms max=77ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":5008,"secs":17.8,"crate_cargo":5000,"frame_frames":417,"frame_avg_ms":52.4,"frame_max_ms":77,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=187.8 inits=5111 d_inits=3 d_deletes=0 crate_cargo=5000 dist=4.6 frames=20 avg=52.4ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=189.8 inits=5112 d_inits=1 d_deletes=0 crate_cargo=5000 dist=4.6 frames=20 avg=52.4ms max=54ms >100ms=0 >150ms=0 >500ms=0
+burst items=4 secs=2.1 crate_cargo=5000 frames=118 avg=52.4ms max=56ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":4,"secs":2.1,"crate_cargo":5000,"frame_frames":118,"frame_avg_ms":52.4,"frame_max_ms":56,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=209.6 inits=5115 d_inits=3 d_deletes=3494 crate_cargo=1512 dist=4.6 frames=20 avg=52.5ms max=62ms >100ms=0 >150ms=0 >500ms=0
+t=210.7 inits=5175 d_inits=60 d_deletes=1524 crate_cargo=-1 dist=-1 frames=20 avg=52.2ms max=56ms >100ms=0 >150ms=0 >500ms=0
+burst items=63 secs=1.2 crate_cargo=-1 frames=100 avg=52.4ms max=62ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":63,"secs":1.2,"crate_cargo":-1,"frame_frames":100,"frame_avg_ms":52.4,"frame_max_ms":62,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=240.8 inits=5176 d_inits=1 d_deletes=0 crate_cargo=-1 dist=-1 frames=20 avg=52.5ms max=59ms >100ms=0 >150ms=0 >500ms=0
+burst items=1 secs=0.1 crate_cargo=-1 frames=79 avg=52.6ms max=59ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":1,"secs":0.1,"crate_cargo":-1,"frame_frames":79,"frame_avg_ms":52.6,"frame_max_ms":59,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=269.8 inits=5179 d_inits=3 d_deletes=0 crate_cargo=-1 dist=-1 frames=20 avg=52.4ms max=55ms >100ms=0 >150ms=0 >500ms=0
+burst items=3 secs=0.1 crate_cargo=-1 frames=79 avg=52.5ms max=60ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":3,"secs":0.1,"crate_cargo":-1,"frame_frames":79,"frame_avg_ms":52.5,"frame_max_ms":60,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=286.3 inits=5185 d_inits=6 d_deletes=13 crate_cargo=-1 dist=-1 frames=20 avg=52.6ms max=57ms >100ms=0 >150ms=0 >500ms=0
+t=287.3 inits=5474 d_inits=289 d_deletes=54 crate_cargo=284 dist=4.6 frames=20 avg=52ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=288.4 inits=5784 d_inits=310 d_deletes=0 crate_cargo=594 dist=4.6 frames=20 avg=52.3ms max=63ms >100ms=0 >150ms=0 >500ms=0
+t=289.4 inits=6094 d_inits=310 d_deletes=0 crate_cargo=904 dist=4.6 frames=20 avg=52ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=290.5 inits=6404 d_inits=310 d_deletes=0 crate_cargo=1214 dist=4.6 frames=20 avg=52.5ms max=55ms >100ms=0 >150ms=0 >500ms=0
+t=291.5 inits=6704 d_inits=300 d_deletes=0 crate_cargo=1514 dist=4.6 frames=20 avg=52.4ms max=55ms >100ms=0 >150ms=0 >500ms=0
+t=292.6 inits=7024 d_inits=320 d_deletes=0 crate_cargo=1834 dist=4.6 frames=20 avg=52.5ms max=68ms >100ms=0 >150ms=0 >500ms=0
+t=293.6 inits=7324 d_inits=300 d_deletes=0 crate_cargo=2134 dist=4.6 frames=20 avg=52.5ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=294.7 inits=7635 d_inits=311 d_deletes=0 crate_cargo=2444 dist=4.6 frames=20 avg=52.5ms max=57ms >100ms=0 >150ms=0 >500ms=0
+t=295.7 inits=7945 d_inits=310 d_deletes=0 crate_cargo=2754 dist=4.6 frames=20 avg=52.3ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=296.7 inits=8255 d_inits=310 d_deletes=0 crate_cargo=3064 dist=4.6 frames=20 avg=52.3ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=297.8 inits=8565 d_inits=310 d_deletes=0 crate_cargo=3374 dist=4.6 frames=20 avg=52.1ms max=55ms >100ms=0 >150ms=0 >500ms=0
+t=298.8 inits=8865 d_inits=300 d_deletes=0 crate_cargo=3674 dist=4.6 frames=20 avg=52.3ms max=56ms >100ms=0 >150ms=0 >500ms=0
+t=299.9 inits=9165 d_inits=300 d_deletes=0 crate_cargo=3974 dist=4.6 frames=19 avg=53.8ms max=73ms >100ms=0 >150ms=0 >500ms=0
+t=300.9 inits=9475 d_inits=310 d_deletes=0 crate_cargo=4284 dist=4.6 frames=20 avg=52.4ms max=54ms >100ms=0 >150ms=0 >500ms=0
+t=302 inits=9785 d_inits=310 d_deletes=0 crate_cargo=4594 dist=4.6 frames=20 avg=52.3ms max=56ms >100ms=0 >150ms=0 >500ms=0
+t=303 inits=10095 d_inits=310 d_deletes=0 crate_cargo=4904 dist=4.6 frames=20 avg=52.3ms max=55ms >100ms=0 >150ms=0 >500ms=0
+t=304 inits=10196 d_inits=101 d_deletes=0 crate_cargo=5000 dist=4.6 frames=19 avg=52.9ms max=65ms >100ms=0 >150ms=0 >500ms=0
+burst items=5017 secs=17.9 crate_cargo=5000 frames=418 avg=52.5ms max=73ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":5017,"secs":17.9,"crate_cargo":5000,"frame_frames":418,"frame_avg_ms":52.5,"frame_max_ms":73,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=321.5 inits=10197 d_inits=1 d_deletes=0 crate_cargo=5000 dist=4.6 frames=20 avg=52.6ms max=62ms >100ms=0 >150ms=0 >500ms=0
+burst items=1 secs=0.1 crate_cargo=5000 frames=79 avg=52.6ms max=64ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":1,"secs":0.1,"crate_cargo":5000,"frame_frames":79,"frame_avg_ms":52.6,"frame_max_ms":64,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=350.6 inits=10199 d_inits=2 d_deletes=0 crate_cargo=5000 dist=4.6 frames=19 avg=52.7ms max=56ms >100ms=0 >150ms=0 >500ms=0
+t=352.6 inits=10199 d_inits=0 d_deletes=3600 crate_cargo=1400 dist=4.6 frames=20 avg=52.9ms max=61ms >100ms=0 >150ms=0 >500ms=0
+t=353.7 inits=10199 d_inits=0 d_deletes=1400 crate_cargo=0 dist=4.6 frames=20 avg=52.1ms max=54ms >100ms=0 >150ms=0 >500ms=0
+burst items=2 secs=3.2 crate_cargo=0 frames=138 avg=52.5ms max=61ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":2,"secs":3.2,"crate_cargo":0,"frame_frames":138,"frame_avg_ms":52.5,"frame_max_ms":61,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=376.5 inits=10200 d_inits=1 d_deletes=0 crate_cargo=0 dist=4.6 frames=20 avg=52.4ms max=54ms >100ms=0 >150ms=0 >500ms=0
+burst items=1 secs=0.1 crate_cargo=0 frames=80 avg=52.3ms max=58ms >100ms=0 >150ms=0 >500ms=0
+burst_json {"items":1,"secs":0.1,"crate_cargo":0,"frame_frames":80,"frame_avg_ms":52.3,"frame_max_ms":58,"frame_over100":0,"frame_over150":0,"frame_over500":0}
+t=441.2 inits=15200 d_inits=5000 d_deletes=0 crate_cargo=5000 dist=4.6 frames=10 avg=3963ms max=39187ms >100ms=1 >150ms=1 >500ms=1
+burst interrupted items=5000 frames=13 avg=8560.6ms max=71553ms >100ms=2 >150ms=2 >500ms=2

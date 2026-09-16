@@ -19,7 +19,9 @@ published:
 | `OpenZone_StorageProbe_Bridge` | server only | the `oz_probe` verb for the MCP bridge (`world_exec`) |
 
 Results land as JSON lines in `$profile:OpenZone_StorageProbe/results.log`
-(server) and `$profile:OpenZone_StorageProbe/client.log` (client).
+(server) and `$profile:OpenZone_StorageProbe/client.log` (client). The runs of
+2026-09-16 are kept in `docs/measurements/2026-09-16/` (as `.jsonl` / `.txt`,
+because the repository ignores `*.log` as build output).
 
 ## Build and run
 

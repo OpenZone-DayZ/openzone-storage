@@ -148,8 +148,8 @@ no other mods; client = retail `DayZ_x64.exe` windowed 1600x900 in the backgroun
 Probe: `OpenZone_StorageProbe` (this repository). Items are `Paper` (1x1) unless stated.
 "Script ms" is `GetTickTime()` around the creating loop; "frame ms" is the longest frame
 during the job and 3 s after it, from `GetTickTime()` deltas in `MissionServer.OnUpdate`.
-Every row is a JSON line in `docs/measurements/2026-09-16/results-run{1,2,3,4}.log`; the
-client's per-second lines are in `client-run{3,4}.log` there, the profiler reports in
+Every row is a JSON line in `docs/measurements/2026-09-16/results-run{1,2,3,4}.jsonl`; the
+client's per-second lines are in `client-run{3,4}.txt` there, the profiler reports in
 `profiler-*.txt`.
 
 ### 4.1 Server, everything in one frame
