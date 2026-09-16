@@ -6,9 +6,13 @@ prefix `OZ`, runs with `OZ_Core` alone.
 
 ## Status: research (2026-09-16)
 
-No storage mod yet. The box model is being decided; the comparison of existing
+No storage mod yet. The owner chose model C of the survey on 2026-09-16 (real cargo,
+items exist only while the box is open, paced materialisation), three boxes of
+500 / 1000 / 1500 cells and weapon slots on the box. The comparison of existing
 implementations and the stand measurements behind the recommendation are in
-[docs/2026-09-16-virtual-storage-survey.md](docs/2026-09-16-virtual-storage-survey.md).
+[docs/2026-09-16-virtual-storage-survey.md](docs/2026-09-16-virtual-storage-survey.md);
+the design, with the decisions still open, in
+[docs/2026-09-16-storage-box-spec.md](docs/2026-09-16-storage-box-spec.md).
 
 What exists is the **measurement probe**, two pbos that are built but never
 published:
