@@ -1,0 +1,21 @@
+# signing key — a leak lets anyone sign a mod as you
+*.biprivatekey
+keys/*.biprivatekey
+
+# build output
+build/out/
+# every built mod folder, the file-patching junction inside it included
+@OpenZone_*/
+*.pbo
+*.bisign
+*.log
+*.RPT
+
+# local
+.compile-check-profile/
+.dayz-mcp/
+Thumbs.db
+desktop.ini
+
+# машинний профіль MCP: шляхи цієї машини, не комітиться
+dayz-mcp.local.toml

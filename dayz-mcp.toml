@@ -1,0 +1,23 @@
+# Portable half of the dayz-agentic-modding-mcp profile.
+# Machine paths live in dayz-mcp.local.toml, which is not committed.
+
+[project]
+name = "openzone-storage"
+
+[build]
+# Research phase (2026-09-16): only the measurement probe exists so far. The
+# storage mod itself is added here once the owner approves the box model
+# (docs/2026-09-16-virtual-storage-survey.md).
+#
+# OpenZone_StorageProbe        -- client + server: the 10x500 probe crate, the
+#                                 EEInit counters and the frame monitors.
+# OpenZone_StorageProbe_Bridge -- server only: the `oz_probe` verb for the MCP
+#                                 bridge (world_exec). Requires @DZMCP_Bridge.
+mods = ["OpenZone_StorageProbe", "OpenZone_StorageProbe_Bridge"]
+
+[expect]
+ready_line   = "storage probe loaded"
+max_warnings = 0
+forbid       = ["Bad type", "Can't compile", "NULL pointer to instance"]
+error_regex  = ["SCRIPT\\s+\\(E\\).*OZ_", "\\[OpenZone\\] ERROR"]
+noise        = []
