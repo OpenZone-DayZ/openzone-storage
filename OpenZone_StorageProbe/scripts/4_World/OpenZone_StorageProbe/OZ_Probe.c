@@ -221,7 +221,7 @@ class OZ_Probe
                 return false;
             return CmdImmediate(op, args, detail);
         }
-        if (op == "player_count")
+        if (op == "player_count" || op == "drop")
         {
             array<Man> players = new array<Man>();
             GetGame().GetPlayers(players);
@@ -231,7 +231,10 @@ class OZ_Probe
                 return false;
             }
             string what = Arg(args, "item", "Paper");
-            detail = "player carries " + OZ_ProbeState.PlayerCount(players.Get(0), what) + " x " + what;
+            if (op == "drop")
+                detail = OZ_ProbeState.Drop(players.Get(0), what);
+            else
+                detail = "player carries " + OZ_ProbeState.PlayerCount(players.Get(0), what) + " x " + what;
             return true;
         }
 
@@ -720,6 +723,10 @@ class OZ_Probe
             int flags = ECE_IN_INVENTORY;
             if (m_Persist == "dyn")
                 flags = flags | ECE_DYNAMIC_PERSISTENCY;
+            else if (m_Persist == "noworld")
+                flags = flags | ECE_NOPERSISTENCY_WORLD;
+            else if (m_Persist == "nochar")
+                flags = flags | ECE_NOPERSISTENCY_CHAR;
             created = GameInventory.LocationCreateEntity(loc, m_ItemType, flags, RF_DEFAULT);
         }
 

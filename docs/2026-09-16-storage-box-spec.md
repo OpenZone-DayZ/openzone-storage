@@ -22,12 +22,20 @@ three box sizes of 500 / 1000 / 1500 cells, weapon slots on the box. Everything 
 - **Weapon slots** are attachment slots `OZ_Weapon_1..N` declared in `CfgSlots`
   (`class Slot_OZ_Weapon_1 { name = "OZ_Weapon_1"; displayName = "$STR_OZ_SLOT_WEAPON"; }`, the
   shape OpenZone_PDA already uses) and listed in the box's `attachments[]`; a
-  `GUIInventoryAttachmentsProps` group shows them as one "Weapons" row. Vanilla weapons accept
-  them through a config patch: `Rifle_Base` declares `inventorySlot[] = {"Shoulder","Melee"}`
-  and `Pistol_Base` `{"Pistol"}` as ARRAYS (*measured*: `dz/config.bin` 4033 / 4285), so
-  `inventorySlot[] += {"OZ_Weapon_1", ...}` on `Rifle_Base` and `Pistol_Base` works without the
-  T148506 string trap. Modded weapons that redeclare `inventorySlot[]` themselves need the same
-  patch in a glue pbo, or they simply do not fit the slots; both are acceptable.
+  `GUIInventoryAttachmentsProps` group shows them as one "Weapons" row, and
+  `CanDisplayAttachmentCategory` hides the row while the box is closed (entityai.c:1781). The
+  engine resolves a slot by the CLASS name `Slot_<name>` (inventoryslots.c:23-42) and
+  pre-populates constants only for the first 32 vanilla slots, so the mod always resolves its
+  ids at runtime with `InventorySlots.GetSlotIdFromString("OZ_Weapon_1")`. Vanilla weapons
+  accept the slots through a config patch: `Rifle_Base` declares
+  `inventorySlot[] = {"Shoulder","Melee"}` and `Pistol_Base` `{"Pistol"}` as ARRAYS
+  (*measured*: `dz/config.bin` 4033 / 4285) and the concrete rifles (AKM, M4A1, Mosin) inherit
+  without redeclaring, so `inventorySlot[] += {"OZ_Weapon_1", ...}` on `Rifle_Base` and
+  `Pistol_Base` works without the T148506 string trap. Four vanilla attachment classes declare
+  `inventorySlot` as a string (AUG optic, SCAR-H front sight, SSG82 optic, splint) -- irrelevant
+  for the weapon slots, but the reason the patch targets the two bases only. Modded weapons that
+  redeclare `inventorySlot[]` themselves need the same patch in a glue pbo, or they simply do
+  not fit the slots; both are acceptable.
 - Closed box: cargo and slots are hidden and refuse everything --
   `GetInventory().LockInventory(HIDE_INV_FROM_SCRIPT)` on close, unlock on open (MMG's
   pattern), plus `CanReceiveItemIntoCargo`, `CanReceiveAttachment`, `CanDisplayCargo`,
@@ -43,16 +51,30 @@ The vanilla template is the barrel (`Barrel_ColorBase`, `4_world/entities/itemba
 and `ActionOpenBarrel` / `ActionCloseBarrel`, `.../actions/interact/actionopenbarrel.c`), read
 through the knowledge base:
 
-- The barrel keeps an `OpenableBehaviour m_Openable`; `Open()` / `Close()` flip it, call
-  `SetTakeable(false/true)` and `UpdateVisualState()`, which drives the lid with
-  `SetAnimationPhase("Lid", 1 or 0)`; `OpenLoad()` / `CloseLoad()` are the same plus
-  `SetSynchDirty()`, used from `OnStoreLoad`; `OnStoreSave` writes `m_Openable.IsOpened()`.
+- The barrel keeps an `OpenableBehaviour m_Openable` and netsyncs the bool by path:
+  `RegisterNetSyncVariableBool("m_Openable.m_IsOpened")` (barrel_colorbase.c:21). `Open()` /
+  `Close()` flip it, call `SetTakeable(false/true)` and `UpdateVisualState()`, which drives the
+  lid with `SetAnimationPhase("Lid", 1 or 0)`; `OpenLoad()` / `CloseLoad()` are the same plus
+  `SetSynchDirty()`, used from `OnStoreLoad`; `OnStoreSave` writes `m_Openable.IsOpened()`; the
+  client redraws the lid from `OnVariablesSynchronized` (lines 158-163) and that is the whole
+  replication path. Sounds go through `StartItemSoundServer(id)` + `ItemSoundHandler`, a synced
+  int; `SoundSynchRemote` is a deprecated stub in this build (itembase.c:4857-4876).
+- Gates: `ItemBase.CanDisplayCargo()` is generic and returns `IsOpen()` (itembase.c:4148-4156),
+  so a box that overrides `IsOpen()` hides its cargo in every client UI for free;
   `CanReceiveItemIntoCargo` and `CanReleaseCargo` return false unless `IsOpen()`;
   `CanPutInCargo` / `CanPutIntoHands` only when empty and closed (barrel_colorbase.c:490-523).
+  **`CanLoadItemIntoCargo` must stay ungated**: it runs at server start when the storage is
+  loaded (entityai.c:1567-1576), and gating it on "closed" would drop a box's cargo at boot --
+  vanilla removed a ruined-check from the receive gate for exactly that reason
+  (itembase.c:4193).
 - `ActionOpenBarrel: ActionInteractBase` sets `m_CommandUID = CMD_ACTIONMOD_INTERACTONCE`,
   `m_StanceMask = ERECT | CROUCH`, `m_Text = "#open"`; `ActionCondition` casts the target and
   returns `!IsLocked() && !IsOpen()`; `OnExecuteServer` calls `ntarget.Open()` and plays the
-  soundset. 39 lines in total.
+  soundset. 39 lines in total. `ActionCloseBarrel` calls `DetermineAction(player)` instead,
+  a server-side hook that may consume or mutate cargo before `Close()` -- the slot our capture
+  takes. `ActionInteractBase.CreateConditionComponents` is `CCINone` + `CCTObject(UAMaxDistances.DEFAULT)`,
+  `DEFAULT = 2.0` (actionconstants.c:109-119). `OnStartServer` fires when the action is
+  accepted, `OnExecuteServer` on the animation's event frame (animatedactionbase.c:175-190).
 
 The box has the same two actions, `OZ_ActionOpenBox` and `OZ_ActionCloseBox`, with three
 differences: the condition reads the box's four-state `m_OZ_State` (Open only from CLOSED, Close
@@ -74,14 +96,21 @@ exposes `GetVicinityItems()` / `GetVicinityCargos()`, refreshed every 0.25 s wit
 items, 2 m for actors, 3 m for large actors (vicinityitemmanager.c:3-8). The mod builds the
 server-side notion on top:
 
-- The client half sends `OZ_Storage.View(boxId, on)` from `Inventory.OnShow` / `OnHide` for
-  every `OZ_StorageBox` in `GetVicinityItems()`, re-sends it when the vicinity list changes
-  while the screen is open, and a heartbeat every 5 s. The server keeps
-  `map<box, map<playerId, lastSeen>>`.
+- The client half sends `OZ_Storage.View(boxId, on)` from `PlayerBase.OnInventoryMenuOpen()` /
+  `OnInventoryMenuClose()` -- empty vanilla declarations (playerbase.c:6012-6013) that
+  `MissionGameplay.ShowInventory` / `HideInventory` call on the client only
+  (missiongameplay.c:1153-1184) -- for every `OZ_StorageBox` in `GetVicinityItems()`, re-sends
+  it when the vicinity list changes while the screen is open, and a heartbeat every 5 s. The
+  server keeps `map<box, map<playerId, lastSeen>>`. The server's own reach check adds the
+  root's collision radius to the 2.5 m (`PlayerCheckRequestSrc`, dayzplayerinventory.c:2848-2853).
 - A viewer is dropped when the client says so, when the heartbeat is older than 15 s, when the
   player is farther than 5 m from the box (checked on every heartbeat and on Close -- twice the
   engine's 2.5 m reach, so a player who can still move items is never dropped), when the
-  player disconnects (`MissionServer.InvokeOnDisconnect`) or dies (`PlayerBase.EEKilled`).
+  player dies (`PlayerBase.EEKilled`) or disconnects. The disconnect hook is
+  `PlayerBase.OnDisconnect()` (playerbase.c:7320-7339), which `MissionServer.PlayerDisconnected`
+  calls after the logout timer and right before `player.Save()`; `OnClientDisconnectedEvent` is
+  too early because the logout can still be cancelled (missionserver.c:628-711, and CF's
+  measured order in cf_modstoragemodule.c:53-61).
 - **Close is refused while viewers > 0.** The one who wants to close sees "someone is using
   the box".
 - **Auto-close** (*owner*: numbers): every 10 s the server checks open boxes; a box with no
@@ -89,9 +118,10 @@ server-side notion on top:
   (default 120 s) closes itself. The opener dying or leaving is not a trigger by itself, only a
   reason the viewer set empties.
 - `MissionServer.OnMissionFinish` (declared on `Mission`, gameplay.c:702, not overridden by
-  `MissionServer`) runs on a graceful shutdown or `#shutdown`, not on a killed process; it
-  closes every open box synchronously, without pacing. A kill is covered by the boot rules of
-  section 7.
+  vanilla `MissionServer` but by CF's modded one, cf missionserver.c:40-45) runs on a graceful
+  shutdown or `#shutdown`, not on a killed process; it closes every open box synchronously,
+  without pacing. A kill has no script hook at all (CF detects one only by a `.lock` file left
+  behind, cf_modstoragemodule.c:191-196); it is covered by the boot rules of section 7.
 - A client without the mod cannot join (the pbo is in `-mod`), so the RPC is always present.
 
 ## 4. Open: paced materialisation
@@ -109,11 +139,19 @@ beside it at 900--1700/s without frame drops, but one 5000-item burst stalled a 
   last entity exists; until then the cargo stays locked.
 - Creation order per record: the entity first, then its attachments (recursively), then its
   cargo children. A container that has cargo children is created **on the ground beside the
-  box, filled, then moved into its cell** with `FindFreeLocationFor` +
-  `GameInventory.LocationSyncMoveEntity` -- the engine refuses children to a container that
-  already sits in cargo (*measured*: 0 of 1000/500/500 with all three creation calls; 3 of 3
-  cases restored with contents through the ground path). Backpacks with contents cannot enter
-  a box at all: `Clothing_Base.CanPutInCargoClothingConditions` (vanilla, unchanged).
+  box, filled, then moved into its cell** with
+  `box.GetInventory().TakeEntityToCargoEx(InventoryMode.SERVER, item, idx, row, col)` -- the
+  SERVER mode does `LocationSyncMoveEntity` and also sends the `SYNC_MOVE` inventory command
+  to clients (inventory.c:1050-1073), which the bare `LocationSyncMoveEntity` the probe used
+  does not. The engine refuses children to a container that already sits in cargo
+  (*measured*: 0 of 1000/500/500 with all three creation calls; 3 of 3 cases restored with
+  contents through the ground path). Two more vanilla vetoes on the move: a container never
+  enters a container of its own type (`Container_Base.CanPutInCargo`, container_base.c:8-17),
+  and backpacks with contents cannot enter a box at all
+  (`Clothing_Base.CanPutInCargoClothingConditions`). Both unchanged.
+- The move runs the script gates (`CanPutInCargo`, `CanReceiveItemIntoCargo`) inside the
+  native, so the box must count as open for its own restore: the OPENING state answers
+  `IsOpen()` true to the gates and false to the actions.
 - Cells and slots come from the record: `CreateEntityInCargoEx(type, idx, row, col, flip)` for
   cargo (the only call that restores `flip`), `LocationCreateEntity(SetAttachment(parent, null,
   slot), type, ECE_IN_INVENTORY, RF_DEFAULT)` for weapon slots and attachments.
@@ -242,3 +280,5 @@ vests must be empty to enter, as in vanilla. Every child counts for the pacing b
   (mark / commit protocol, session journal).
 - Stand runs of 2026-09-16, `docs/measurements/2026-09-16/`: results-run1..5, client-run3/4,
   the profiler reports; the survey `2026-09-16-virtual-storage-survey.md`.
+- `docs/measurements/2026-09-16/agent-report-vanilla-facts.md`: the source report behind
+  sections 2, 3, 4, 6 and 7 (eight questions, every fact with file and line).

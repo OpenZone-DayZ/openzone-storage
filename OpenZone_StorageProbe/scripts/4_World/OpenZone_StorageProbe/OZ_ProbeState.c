@@ -667,6 +667,22 @@ class OZ_ProbeState
         return "gave " + type + " to the player: " + ok;
     }
 
+    // Drop the first item of `type` the player carries onto the ground beside them.
+    static string Drop(Man player, string type)
+    {
+        array<EntityAI> items = new array<EntityAI>();
+        player.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, items);
+        for (int i = 0; i < items.Count(); i++)
+        {
+            EntityAI e = items.Get(i);
+            if (e.GetType() != type)
+                continue;
+            bool ok = player.ServerDropEntity(e);
+            return "dropped " + type + ": " + ok;
+        }
+        return "the player carries no " + type;
+    }
+
     static int PlayerCount(Man player, string type)
     {
         array<EntityAI> items = new array<EntityAI>();
