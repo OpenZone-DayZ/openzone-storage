@@ -194,8 +194,10 @@ uses). Two files, written on every Close, read only on Open and at mission start
   a player connected), so the engine's own save is the journal and the boot rules below
   turn it back into a store. The owner's journal from the brief can be added later if a
   restart test finds a gap; the SQLite sidecar (phase 2) stays unnecessary for these sizes.
-- Import from the previous mod (item 6): a converter reads the live server's JSON into `items.list`
-  records (their format has no blobs to convert) -- as soon as sample files are available.
+- **No import** (*owner*, 2026-09-17). Item 6 of the brief is dropped. Nothing but logs
+  will ever leave the live server, and the owner decided the boxes are not replaced in
+  place: players carry their things over by hand. So there is no converter, and the
+  the previous mod pbo stays unopened.
 
 ## 7. One truth at a time (item 4 of the brief)
 
@@ -367,6 +369,7 @@ tune). The deltas between sections 2--9 and the code that was measured:
    there is no recipe, no `types.xml` entry, and the box is never takeable. Craftable or
    placeable boxes and the economy entry are a separate task.
 4. Import of the live server's the previous mod stores (item 6 of the brief): waits for sample files.
+   **Closed 2026-09-17**: no files will be given and no boxes are replaced in place (section 17).
 5. A box that the "no files" rule closes at boot is closed synchronously (1468 entities =
    about 0.4 s, once) -- fine for a few boxes; a server with hundreds of open boxes at a crash
    would pay that once at boot.
@@ -431,3 +434,99 @@ button** and a **live search**. Built and measured:
    but not yet seen on a Ukrainian client.
 4. The search field takes focus by a click only; no key opens it.
 5. Kits have no recipe and no spawn; `types-example.xml` lists them with nominal 0.
+
+## 17. Additions of 2026-09-17 (owner decisions during his own test)
+
+The owner ran the stand himself with his own client. Four of the five changes below come
+from what he saw there; the fifth from a box of his that vanished overnight.
+
+- **Restored items now reach the clients.** The open job moved each restored root with the
+  bare `LocationSyncMoveEntity`, which succeeds on the server and tells no client
+  (`inventory.c:1056-1073`). Protective cases restored into a box therefore stayed drawn
+  where the client had last seen them, on the ground around the box, and vanished when the
+  box closed; on the server they had been inside it all along. Fixed by
+  `TakeToDst(InventoryMode.SERVER, ...)`, which does the same move and sends the SYNC_MOVE
+  command, with `TakeEntityToCargoEx(InventoryMode.SERVER, ...)` as the fallback and
+  `CreateEntityInCargo` as the last resort when the recorded cell is taken. Section 4 of
+  this spec had named that exact trap before the code was written, and the code took the
+  other branch anyway -- the same fix went into `OZS_ListFallback.c`.
+- **The auto-close counts idle, not age** (*owner*). The 120 s restart on every item that
+  goes into, out of or across the box: `EECargoIn`, `EECargoOut`, `EECargoMove`,
+  `EEItemAttached`, `EEItemDetached` all call `OZS_Touch`. The paced jobs do not count,
+  because OPENING is not OPEN and the restore sets `m_OZS_Restoring`. Before this an
+  opened box closed itself under a player who was still standing at it, and the contents
+  read as lost although they were in the store the whole time.
+- **The screen opens at once, locked** (*owner*). `CanDisplayCargo` and the two attachment
+  gates answer yes from the first frame of OPENING, so the grid is drawn while it fills
+  instead of after; `CanReleaseCargo` and `CanReleaseAttachment` stay on `IsOpen`, so
+  nothing can be taken out of a box that is still filling. While OPENING the bar shows a
+  loading line with the count in place of the field and the button.
+- **The search bar belongs to the box** (*owner*). It is built in `SetEntity` of
+  `ContainerWithCargo` and `ContainerWithCargoAndAttachments`, inside that container's own
+  main widget with `SetSort(0)`, so it rides the head of the box's panel and not the
+  inventory root. `InventoryMenu.OnHide` clears the query, so a closed screen never leaves
+  items shaded.
+- **A placed box no longer disappears.** `OZS_Kit.OnPlacementComplete` created the box with
+  `ECE_PLACE_ON_SURFACE` and no `ECE_NOLIFETIME`, and our classes are not in `types.xml`,
+  so the central economy removed the owner's box overnight. Now `OZS_Const.BOX_LIFETIME`
+  (45 days) is set at placement and again in `EEInit` on every boot, and `EEDelete` writes
+  a warning naming the box, its state, its contents and the fact that its files are kept.
+  An admin can still override the lifetime through `types.xml`; this is the floor that
+  works without one.
+
+### Measured on 2026-09-17
+
+Default `OpenItemsPerSecond` raised from 250 to 500. The Large box, 1443 roots and 1468
+entities, no client connected:
+
+| Step | Wall | Script work | Longest step |
+|---|---|---|---|
+| Open at 500/s | 2.9 s | 20 ms total | 2 ms |
+| Close, write | 283 ms | -- | within the 5 ms budget |
+| Close, commit | 2 ms | -- | -- |
+| Close, delete 1468 entities | 72 ms | -- | 6 ms |
+
+Nothing refused, nothing missed, `items.list` back to 1468 lines. The longest delete step
+of 6 ms overruns the 5 ms budget because the budget is checked before a step and not
+inside it: one entity's deletion is the grain.
+
+`blobtime` (probe op) times the engine's own serialization of the same 1443 entities:
+
+| What | Total | Per item |
+|---|---|---|
+| `OnStoreSave` into memory | 9 ms | 0.01 ms |
+| `OnStoreLoad` from memory | 2 ms | 0 ms |
+| `OnStoreSave` into a file | 86 ms | 0.06 ms |
+
+The 1351 load refusals are expected: a blob written by one entity is read back by a fresh
+one only when the classes match, and the probe feeds them all to one reader. The point of
+the run was the cost, and the cost says the blob is not what makes a close take 283 ms --
+the file does.
+
+## 18. Open points after 2026-09-17
+
+Carried over from section 16, still undecided:
+
+1. A placed box cannot be taken back: no dismantle action, no kit returned. Decide whether
+   an empty box may be dismantled into its kit, and by whom.
+2. The Sort button has no background of its own (style Empty).
+3. The search was measured with an English client; the Cyrillic folding tables are in the
+   code but have not been seen on a Ukrainian client.
+4. The search field takes focus by a click only; no key opens it.
+5. Kits have no recipe and no spawn; `types-example.xml` lists them with nominal 0.
+
+New:
+
+6. When a box is destroyed its store directory stays on disk as an orphan (the `EEDelete`
+   warning is the only trace). Decide: delete it, move it to a grave folder, or keep it.
+7. The half-commit hole: `items.bin` and `items.list` carry the same stamp, and nothing
+   compares them at load. A crash between the two copies would leave a new `items.bin`
+   beside an old `items.list` and the fallback would restore the wrong contents. The check
+   is about ten lines and is not written yet.
+8. Vanilla destroys Cyrillic in container headers (`ToUpper` turns non-ASCII into spaces).
+   Our `OZS_Case` tables fix it for the search; a `modded class Header` fix was tried,
+   blanked the header for a reason never found, and was reverted.
+
+**Closed 2026-09-17**: item 6 of the brief, the import of the live server's stores. Nothing
+but logs will leave that server, and the owner decided the boxes are not replaced in place:
+players move their things across by hand.

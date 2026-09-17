@@ -124,3 +124,63 @@ would never have seen the prompt (the error goes to the .RPT only). Fixed by
   `ErrorEx(..., WARNING)` reaches the .RPT, INFO does not. After every connect the client
   sits in the pause menu until "back" is pressed; the pad's first press after an attach is
   swallowed.
+
+## Third session (2026-09-17): the owner's own test
+
+The owner played on the stand with his own client. What he found, and what it cost.
+
+### The ghost containers
+
+Reported with screenshots: protective cases lying on the ground around an open box,
+gone the moment the box closed. Cause: the open job tried `LocationSyncMoveEntity`
+first and it succeeded, so the SERVER-mode `TakeToDst` behind it never ran. The bare
+call moves the item on the server and sends nothing to the clients (`inventory.c:1056-1073`),
+so every client kept drawing the restored containers at their last known position on the
+ground. Nothing was ever lost: a dump of the box showed them inside it. Fixed in
+`OZS_Records.c` and `OZS_ListFallback.c` by asking `TakeToDst(InventoryMode.SERVER, ...)`
+first.
+
+### The items that "disappeared" near the box
+
+Three apples dropped beside an open box survived a full open/close/open cycle, so the
+box was never eating them. The real event was the auto-close: the box the owner had
+opened and walked away from closed on its 120 s timer, and its contents went back into
+the store. The owner chose the idle timer instead: every item in, out or across the box
+restarts the count.
+
+### The round trip at the new default rate
+
+`OpenItemsPerSecond` 250 -> 500. Large box, 1443 roots, 1468 entities, no client connected:
+
+```
+opened by server: 1443 items (1468 entities) in 16901 frame(s), work 20 ms,
+                  longest step 2 ms, wall 2.9 s, missed 0, refusals 0
+closing by server: 1443 items (1468 entities) written in 56 frame(s), 283.2 ms + commit 2 ms
+closed by server: deleted 1468 entities in 30 frame(s), 72 ms; longest step 6 ms
+```
+
+`items.list` came back with 1468 lines under the same header. The earlier 250/s figure in
+this file (wall 5.9 s, work 110 ms) was taken with a client connected, so the two "work"
+numbers are not a clean comparison of the rate alone: creating an entity while somebody is
+watching costs the network sync as well.
+
+### The engine's own serialization, isolated (`blobtime`)
+
+```
+blobtime: n=1443 save_mem=9ms (0.01 per item) load_mem=2ms (0 per item)
+          save_file=86ms (0.06 per item) load_refusals=1351
+```
+
+`OnStoreSave` into a memory context costs 0.01 ms per item; the same save into a
+`FileSerializer` costs 0.06 ms. So of the 283 ms a close spends, the blob itself is about
+15 ms and the file is the rest. The 1351 refusals are an artefact of the probe feeding
+every blob to one reader; the run was about the cost, not the round trip.
+
+### The box that vanished overnight
+
+The box the owner deployed from a kit at Balota (id `90916-194045-6-3720`) was gone by
+morning, its store directory intact with 10 items. `OZS_Kit.OnPlacementComplete` used
+`CreateObjectEx(..., ECE_PLACE_ON_SURFACE)` without `ECE_NOLIFETIME`, and our classes are
+not in `types.xml`, so the central economy cleaned it up. Now `BOX_LIFETIME` (45 days) is
+set at placement and on every boot in `EEInit`, and `EEDelete` logs a warning whenever a
+box leaves the world, so the next disappearance leaves a trace instead of a puzzle.
