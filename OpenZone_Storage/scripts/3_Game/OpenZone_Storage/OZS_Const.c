@@ -25,6 +25,9 @@ class OZS_Const
     static const string FILE_LIST = "items.list";
     static const string FILE_NEW  = ".new";
     static const string LIST_HEAD = "OZS-LIST";
+    // Written into a box's directory when the box leaves the world, so an
+    // orphan store is visible in a file listing and not only in the log.
+    static const string FILE_REMOVED = "removed.txt";
 
     // The viewer RPC rides on the box entity itself (Object.RPCSingleParam ->
     // OZ_StorageBox.OnRPC), so the sender's identity and the box come for

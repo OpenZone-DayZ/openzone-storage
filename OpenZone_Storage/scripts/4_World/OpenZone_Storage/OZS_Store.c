@@ -123,6 +123,42 @@ class OZS_Store
         return p.Get(6).ToInt();
     }
 
+    // The stamp from the items.list header, or "" when there is no readable
+    // header. Both files are written with the SAME stamp in one OZS_StoreWriter
+    // pass, so a pair whose stamps differ is not a pair: it is a new file next
+    // to a survivor of an older commit, which can only happen when the delete
+    // of the old live file failed. Splicing such a list onto a truncated blob
+    // would duplicate or lose items, so the open job refuses it.
+    static string ListStamp(string id)
+    {
+        string head = ListHeader(id);
+        if (head == "")
+            return "";
+        array<string> p = new array<string>();
+        head.Split("|", p);
+        if (p.Count() < 8 || p.Get(0) != OZS_Const.LIST_HEAD)
+            return "";
+        return p.Get(3);
+    }
+
+    // A box that left the world leaves its files behind; this marks the
+    // directory so an admin can tell an orphan store from a live one without
+    // reading the log. Appends, so a directory reused later keeps its history.
+    static void MarkRemoved(string id, string text)
+    {
+        if (id == "")
+            return;
+        // No MakeDirectory and no existence test: FileExist is documented for
+        // files only, and OpenFile simply returns 0 when the directory is not
+        // there -- a box that never had a store leaves nothing to mark.
+        string dir = BoxDir(id);
+        FileHandle fh = OpenFile(dir + "\\" + OZS_Const.FILE_REMOVED, FileMode.APPEND);
+        if (fh == 0)
+            return;
+        FPrintln(fh, Stamp() + " " + text);
+        CloseFile(fh);
+    }
+
     // Lines in items.list beyond the header, or -1.
     static int ListLines(string id)
     {

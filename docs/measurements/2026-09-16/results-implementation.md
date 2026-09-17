@@ -184,3 +184,63 @@ morning, its store directory intact with 10 items. `OZS_Kit.OnPlacementComplete`
 not in `types.xml`, so the central economy cleaned it up. Now `BOX_LIFETIME` (45 days) is
 set at placement and on every boot in `EEInit`, and `EEDelete` logs a warning whenever a
 box leaves the world, so the next disappearance leaves a trace instead of a puzzle.
+
+## The stamp check and the orphan mark (2026-09-17, later)
+
+### Stamp check, A/B
+
+Two Large boxes of 1410 roots, `items.bin` truncated to 60000 bytes in both so the blob
+breaks at root 639. One kept its list stamp, the other had it aged by fifteen hours.
+
+Matching pair, the fallback behaves as before:
+
+```
+items.bin cannot be followed at root 639 of 1410; kept as ...items.bin.failed-90917-043625
+roots 639..1409 come from items.list without script state
+opened by server: 1410 items (1430 entities) ... wall 2.9 s, missed 0, refusals 0
+```
+
+Mismatched pair, the fallback is refused and both files are copied aside:
+
+```
+items.bin cannot be followed at root 639 of 1410; kept as ...items.bin.failed-90917-044041
+items.list is stamped 2026-09-16 09:00:00 but items.bin is stamped 2026-09-17 00:45:25;
+  the pair does not match, the fallback is refused and the list is kept as
+  ...items.list.failed-90917-044041
+opened by server: 639 items (640 entities) ... wall 1.3 s, missed 0, refusals 0
+```
+
+The copy of the list was added because of what the first run of this test showed. Without
+it the refusal protected nothing: the box stayed open with 639 roots, the idle timer closed
+it two minutes later, and the close wrote a 639-root pair over the 1410-root list the
+refusal had just declined to trust. The `items.bin.failed-` copy alone does not help,
+because that blob is the truncated one.
+
+The matching-pair box needs no such care: it self-heals. Its auto-close wrote a fresh,
+complete 1410-root pair over the truncated blob.
+
+### Orphan mark
+
+A box spawned, filled with one rifle, closed, then deleted from the running world:
+
+```
+removed.txt:
+2026-09-17 04:38:40 OZ_StorageBox_Small removed from the world as CLOSED
+                    with 0 entities, 1 stored at 4800.000000 7.729843 2400.000000
+log:
+WARNING: storage: box 90917-043752-6-9869 removed from the world as CLOSED
+         with 0 entities, 1 stored; its files are kept
+```
+
+Then the guard: a full stop of the server with five boxes standing added no marks at all,
+the count stayed at one. Without `OZS_Controller.s_Shutdown` every restart would have
+marked every store, because the engine's teardown deletes boxes through the same
+`EEDelete` as a box somebody destroys.
+
+`oz_storage files` now answers with both new facts:
+
+```
+box 90916-182944-4-6414 files=true bin=true list=true lines=1430
+head=[OZS-LIST|1|142|2026-09-16 09:00:00|OZ_StorageBox_Large|...|1410|1430]
+list_stamp=2026-09-16 09:00:00 removed=false
+```

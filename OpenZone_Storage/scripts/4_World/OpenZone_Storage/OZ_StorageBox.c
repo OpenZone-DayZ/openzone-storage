@@ -53,15 +53,22 @@ class OZ_StorageBox : DeployableContainer_Base
         OZS_Controller.Get().Register(this);
     }
 
-    // A box leaving the world is worth a line: its store stays on disk, and
-    // without this the only trace of a vanished box is its orphan directory.
+    // A box leaving the world is worth a line AND a mark in its own directory:
+    // the store stays on disk either way, and an admin looking at the files
+    // has no other way to tell an orphan from a box that is merely closed.
+    // The mission teardown deletes every entity too, and EEDelete cannot tell
+    // the two apart, so the controller's shutdown flag decides.
     override void EEDelete(EntityAI parent)
     {
         if (GetGame() && GetGame().IsServer())
         {
-            string s = "storage: box " + m_OZS_Id + " removed from the world as " + OZS_Const.StateName(m_OZS_State);
-            s = s + " with " + OZS_CountEntities() + " entities, " + m_OZS_StoredCount + " stored; its files are kept";
-            OZ_Log.Warn(s);
+            if (!OZS_Controller.IsShuttingDown())
+            {
+                string what = "removed from the world as " + OZS_Const.StateName(m_OZS_State);
+                what = what + " with " + OZS_CountEntities() + " entities, " + m_OZS_StoredCount + " stored";
+                OZ_Log.Warn("storage: box " + m_OZS_Id + " " + what + "; its files are kept");
+                OZS_Store.MarkRemoved(m_OZS_Id, GetType() + " " + what + " at " + GetPosition().ToString(false));
+            }
             OZS_Controller.Get().Unregister(this);
         }
         super.EEDelete(parent);

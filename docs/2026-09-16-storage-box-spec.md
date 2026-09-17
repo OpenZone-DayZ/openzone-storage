@@ -519,10 +519,12 @@ New:
 
 6. When a box is destroyed its store directory stays on disk as an orphan (the `EEDelete`
    warning is the only trace). Decide: delete it, move it to a grave folder, or keep it.
+   **Half closed 2026-09-17**: it is now marked with `removed.txt` and kept (section 19);
+   what to do with a marked directory afterwards is still the owner's call.
 7. The half-commit hole: `items.bin` and `items.list` carry the same stamp, and nothing
    compares them at load. A crash between the two copies would leave a new `items.bin`
    beside an old `items.list` and the fallback would restore the wrong contents. The check
-   is about ten lines and is not written yet.
+   is about ten lines and is not written yet. **Closed 2026-09-17** (section 19).
 8. Vanilla destroys Cyrillic in container headers (`ToUpper` turns non-ASCII into spaces).
    Our `OZS_Case` tables fix it for the search; a `modded class Header` fix was tried,
    blanked the header for a reason never found, and was reverted.
@@ -530,3 +532,52 @@ New:
 **Closed 2026-09-17**: item 6 of the brief, the import of the live server's stores. Nothing
 but logs will leave that server, and the owner decided the boxes are not replaced in place:
 players move their things across by hand.
+
+## 19. The stamp check and the orphan mark (2026-09-17, owner)
+
+Two points of section 18 are closed.
+
+### The half-commit hole (point 7)
+
+Both files of a store are written in one `OZS_StoreWriter` pass and carry the SAME stamp,
+so a pair whose stamps differ is not a pair. It can only arise when the delete of the old
+live file fails and a new blob lands beside a survivor of an older commit. Splicing such a
+list onto a blob that broke at root N restores the wrong items from N on, and where the two
+disagree about the first N roots it duplicates them.
+
+`OZS_OpenJob` now keeps the blob's stamp (`m_BinStamp`) and `OpenList` compares it with
+`OZS_Store.ListStamp`. On a mismatch it refuses the fallback, names both stamps and copies
+the list aside as `items.list.failed-<stamp>`, next to the `items.bin.failed-<stamp>` the
+blob failure already leaves. Without that copy the refusal would save nothing: the box goes
+on with the roots the blob delivered, and its next close overwrites the very list the
+refusal was protecting. That was watched happening before the copy was added. When the blob
+cannot be opened at all its stamp is unknown, nothing is compared, and the list is used as
+before: a store whose blob is unreadable has only the list to offer.
+
+*Measured*, two Large boxes of 1410 roots, each with `items.bin` truncated to 60000 bytes
+so it breaks at root 639:
+
+| Box | List stamp | Result |
+|---|---|---|
+| Matching pair | same as the blob | fallback taken at root 639, all 1410 items back, 0 missed |
+| Mismatched pair | aged by 15 hours | fallback refused, box opened with the 639 roots the blob held, both files copied aside |
+
+### Orphan stores (point 6)
+
+A box leaving the world now writes `removed.txt` into its own store directory: the UTC
+stamp, the class, the state it was in, its entity and stored counts, and its position. The
+directory and its files are untouched, so an admin can tell an orphan from a closed box by
+listing the folder instead of searching the log, and `oz_storage files` reports
+`removed=true` and the list's stamp.
+
+The trap is the mission teardown: the engine deletes every entity when the world goes down,
+and `EEDelete` cannot tell that from a box somebody blew up. Unguarded, a clean restart
+would mark every store as orphaned. `OZS_Controller` therefore carries a static
+`s_Shutdown`, set in `MissionServer.OnMissionFinish` before `CloseAll` and cleared in
+`OnMissionStarted`, because statics survive a mission restart. *Measured*: one box deleted
+in a running world left exactly one `removed.txt`; a full stop of the server with five boxes
+standing added none.
+
+What the owner has still not decided is what to do with a marked directory afterwards. It is
+kept, which is the safe default; deleting it or moving it to a grave folder is a policy
+choice, and the mark is what makes either possible later.

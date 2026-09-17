@@ -210,6 +210,9 @@ class OZS_OpenJob
     protected int m_Mode;
     protected ref FileSerializer m_Bin;
     protected int m_SaveVer;
+    // The stamp of the items.bin header, kept so the list fallback can prove
+    // the two files are the same commit before it splices one onto the other.
+    protected string m_BinStamp;
     protected int m_Roots;
     protected int m_Entities;
     protected int m_Next;
@@ -231,6 +234,7 @@ class OZS_OpenJob
         m_Who = who;
         m_Mode = MODE_NONE;
         m_FallbackFrom = -1;
+        m_BinStamp = "";
         m_Created = 0;
         m_Missed = 0;
         m_Fails = 0;
@@ -259,7 +263,7 @@ class OZS_OpenJob
             {
                 m_Box.OZS_SetRestoring(false);
                 m_Box.OZS_SetState(OZS_Const.STATE_CLOSED);
-                why = binWhy + ", and items.list is not readable either";
+                why = binWhy + ", and items.list cannot be used either";
                 return false;
             }
         }
@@ -288,11 +292,10 @@ class OZS_OpenJob
             why = "items.bin format version " + ver + " is not " + OZS_Const.BIN_VERSION;
             return false;
         }
-        string stamp;
         string type;
         string id;
         m_Bin.Read(m_SaveVer);
-        m_Bin.Read(stamp);
+        m_Bin.Read(m_BinStamp);
         m_Bin.Read(type);
         m_Bin.Read(id);
         m_Bin.Read(m_Roots);
@@ -314,6 +317,31 @@ class OZS_OpenJob
         {
             m_Mode = MODE_NONE;
             return false;
+        }
+        // The two files of a store are written in one pass with one stamp, so
+        // a list whose stamp differs from the blob's belongs to an older
+        // commit: the delete of the old live file must have failed and the new
+        // blob landed beside a survivor. Splicing it on from root `fromRoot`
+        // would restore the wrong items, and where the roots overlap it would
+        // duplicate them. Refuse, keep both files, and say both stamps.
+        if (m_BinStamp != "")
+        {
+            string listStamp = OZS_Store.ListStamp(m_Id);
+            if (listStamp != m_BinStamp)
+            {
+                // The blob is already copied aside as .failed-<stamp>; the
+                // list must be too, or the box's next close overwrites the
+                // only copy of the state this list describes and the refusal
+                // will have saved nothing.
+                string keep = OZS_Store.ListPath(m_Id) + ".failed-" + OZS_Store.FileStamp();
+                CopyFile(OZS_Store.ListPath(m_Id), keep);
+                string e = "storage: box " + m_Id + " items.list is stamped " + listStamp;
+                e = e + " but items.bin is stamped " + m_BinStamp;
+                e = e + "; the pair does not match, the fallback is refused and the list is kept as " + keep;
+                OZ_Log.Error(e);
+                m_Mode = MODE_NONE;
+                return false;
+            }
         }
         int listRoots = OZS_ListFallback.RootCount(m_List);
         if (m_Roots == 0)

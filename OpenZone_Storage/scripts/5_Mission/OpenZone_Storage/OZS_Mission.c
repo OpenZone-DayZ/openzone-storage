@@ -32,6 +32,10 @@ modded class MissionServer
     {
         if (GetGame() && GetGame().IsDedicatedServer())
         {
+            // Before anything else: from here the world is coming down, and
+            // every box the engine deletes is teardown and not a removal, so
+            // EEDelete must not mark their stores as orphaned.
+            OZS_Controller.SetShuttingDown(true);
             OZS_Controller.Get().CloseAll();
             OZS_Controller.Reset();
         }

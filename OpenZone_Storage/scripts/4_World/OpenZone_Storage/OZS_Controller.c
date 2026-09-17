@@ -21,6 +21,12 @@ class OZS_Controller
 {
     protected static ref OZS_Controller s_Inst;
     protected static int s_IdSerial = 0;
+    // True from OnMissionFinish on. The engine deletes every entity when the
+    // world goes down, and EEDelete cannot tell that teardown from a box
+    // somebody blew up; without this flag a clean restart would mark all the
+    // stores as orphaned. Statics survive a mission restart, so it is cleared
+    // on the way in as well as set on the way out.
+    protected static bool s_Shutdown = false;
 
     // Weak references on purpose: a deleted box reads null, and Unregister
     // runs from EEDelete anyway.
@@ -55,6 +61,16 @@ class OZS_Controller
         s_Inst = null;
     }
 
+    static bool IsShuttingDown()
+    {
+        return s_Shutdown;
+    }
+
+    static void SetShuttingDown(bool on)
+    {
+        s_Shutdown = on;
+    }
+
     void OZS_Controller()
     {
         m_Boxes = new array<OZ_StorageBox>();
@@ -70,6 +86,7 @@ class OZS_Controller
     // Mission start: the summary line goes out once the world has loaded.
     void OnMissionStarted()
     {
+        s_Shutdown = false;
         m_SummaryDue = GetGame().GetTickTime() + OZS_Const.SUMMARY_DELAY;
     }
 

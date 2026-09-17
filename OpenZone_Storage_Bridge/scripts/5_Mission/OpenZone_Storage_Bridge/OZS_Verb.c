@@ -186,6 +186,10 @@ modded class DZMCP_BridgeCore
             detail = "box " + bid + " files=" + OZS_Store.HasFiles(bid);
             detail = detail + " bin=" + FileExist(OZS_Store.BinPath(bid)) + " list=" + FileExist(OZS_Store.ListPath(bid));
             detail = detail + " lines=" + OZS_Store.ListLines(bid) + " head=[" + OZS_Store.ListHeader(bid) + "]";
+            // The two stamps an admin needs when the pair is suspect, and the
+            // orphan mark if a box with this id ever left the world.
+            detail = detail + " list_stamp=" + OZS_Store.ListStamp(bid);
+            detail = detail + " removed=" + FileExist(OZS_Store.BoxDir(bid) + "\\" + OZS_Const.FILE_REMOVED);
             return true;
         }
         if (op == "slot")
