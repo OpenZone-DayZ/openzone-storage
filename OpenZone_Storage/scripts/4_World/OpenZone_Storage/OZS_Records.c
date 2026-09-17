@@ -287,7 +287,13 @@ class OZS_Records
             e.GetInventory().GetCurrentInventoryLocation(src);
             InventoryLocation dst = new InventoryLocation();
             dst.SetCargo(parent, e, 0, row, col, flip);
-            bool placed = GameInventory.LocationSyncMoveEntity(src, dst);
+            // TakeToDst in SERVER mode, never the bare LocationSyncMoveEntity:
+            // both move the item on the server, but only the SERVER mode sends
+            // the SYNC_MOVE command to the clients (inventory.c:1056-1073).
+            // Without it the item sits in the box for the server and stays
+            // drawn on the ground for every client -- a ghost that vanishes
+            // when the box closes (seen by the owner 2026-09-17).
+            bool placed = parent.GetInventory().TakeToDst(InventoryMode.SERVER, src, dst);
             if (!placed)
                 placed = parent.GetInventory().TakeEntityToCargoEx(InventoryMode.SERVER, e, 0, row, col);
             if (!placed)

@@ -1,20 +1,19 @@
-// Client: the search bar on the inventory screen and the sort button.
+// Client: the box's own panel in the inventory screen -- a search field, a
+// Sort button, and a loading line while the box is still filling up.
 //
-// The bar (gui/layouts/ozs_search.layout) hangs off the inventory's root
-// widget while the screen is shown. Typing filters live: every item icon
-// whose localized display name does not contain the text has its item
-// render tinted dark (the icon's "Color" panel sits behind the render and
-// cannot shade it -- measured 2026-09-16); the tint is re-applied every
-// update while a search is active. The Sort button asks the nearest open
-// box in the vicinity list to sort itself (an entity RPC, like the viewer
-// heartbeat).
+// The bar belongs to the BOX, not to the player (owner 2026-09-17): it is
+// created inside the body of the container the vicinity builds for an
+// OZ_StorageBox, above the cargo grid, and the Sort button asks that box and
+// no other. Typing shades every icon whose localized name does not contain
+// the text; the shade is a dark panel created inside the icon above its item
+// render, because the icon's own "Color" panel sits behind the render, the
+// render ignores its widget colour, and a panel with style "blank" paints
+// nothing at all (all three measured 2026-09-16).
 #ifndef NO_GUI
 class OZS_Search
 {
     static string s_Text;
     static int    s_Version;
-    // The first few shades of a session are logged, for the stand.
-    static int    s_Diag;
     // The query in the four spellings a name may use (typed, lower,
     // Capitalized, UPPER): the names are never case-folded themselves, so a
     // match costs a few IndexOf per icon and no engine casing touches
@@ -58,10 +57,6 @@ class OZS_Search
         return n.IndexOf(s_Q3) >= 0;
     }
 
-    // The shade is a dark panel created inside the icon above its item
-    // render (gui/layouts/ozs_shade.layout, priority 500 against the
-    // render's 151): the icon's own "Color" panel sits behind the render, and
-    // the render ignores its widget colour (both measured 2026-09-16).
     static Widget MakeShade(Widget parent)
     {
         if (!parent)
@@ -73,24 +68,33 @@ class OZS_Search
     }
 }
 
-class OZS_SearchBar : ScriptedWidgetEventHandler
+// One bar, belonging to one box's container.
+class OZS_BoxBar : ScriptedWidgetEventHandler
 {
+    protected OZ_StorageBox m_Box;
     protected Widget        m_Root;
     protected EditBoxWidget m_Edit;
     protected ButtonWidget  m_Sort;
     protected TextWidget    m_Label;
+    protected TextWidget    m_Loading;
+    protected bool          m_WasLoading;
+    protected int           m_WasCount = -1;
 
-    void OZS_SearchBar(Widget parent)
+    void OZS_BoxBar(OZ_StorageBox box, Widget parent)
     {
+        m_Box = box;
         m_Root = GetGame().GetWorkspace().CreateWidgets("OpenZone_Storage/gui/layouts/ozs_search.layout", parent);
         if (!m_Root)
         {
-            OZ_Log.Warn("storage: the search bar layout could not be created");
+            ErrorEx("[OpenZone] storage: the search bar layout could not be created", ErrorExSeverity.WARNING);
             return;
         }
+        // Above the attachments (sort 1) and the cargo grid (sort 2).
+        m_Root.SetSort(0);
         m_Edit = EditBoxWidget.Cast(m_Root.FindAnyWidget("Search"));
         m_Sort = ButtonWidget.Cast(m_Root.FindAnyWidget("Sort"));
         m_Label = TextWidget.Cast(m_Root.FindAnyWidget("Label"));
+        m_Loading = TextWidget.Cast(m_Root.FindAnyWidget("Loading"));
         if (m_Label)
             m_Label.SetText(Widget.TranslateString("#STR_OZS_SEARCH"));
         if (m_Sort)
@@ -98,6 +102,7 @@ class OZS_SearchBar : ScriptedWidgetEventHandler
         if (m_Edit)
             m_Edit.SetText(OZS_Search.s_Text);
         m_Root.SetHandler(this);
+        Refresh();
     }
 
     void Destroy()
@@ -107,7 +112,44 @@ class OZS_SearchBar : ScriptedWidgetEventHandler
             m_Root.Unlink();
             m_Root = null;
         }
-        OZS_Search.Set("");
+    }
+
+    // Called every frame by the container. While the box is OPENING the bar
+    // turns into a progress line and the controls go away, so nobody types
+    // into a box that is still half there.
+    void Refresh()
+    {
+        if (!m_Root || !m_Box)
+            return;
+        bool loading = m_Box.OZS_GetState() == OZS_Const.STATE_OPENING;
+        int have = 0;
+        if (loading)
+        {
+            CargoBase cargo = m_Box.GetInventory().GetCargo();
+            if (cargo)
+                have = cargo.GetItemCount();
+        }
+        if (loading == m_WasLoading && have == m_WasCount)
+            return;
+        m_WasLoading = loading;
+        m_WasCount = have;
+
+        if (m_Edit)
+            m_Edit.Show(!loading);
+        if (m_Sort)
+            m_Sort.Show(!loading);
+        if (m_Label)
+            m_Label.Show(!loading);
+        if (m_Loading)
+        {
+            m_Loading.Show(loading);
+            if (loading)
+            {
+                string s = Widget.TranslateString("#STR_OZS_LOADING");
+                s = s + " " + have + " / " + m_Box.OZS_GetStoredCount();
+                m_Loading.SetText(s);
+            }
+        }
     }
 
     override bool OnChange(Widget w, int x, int y, bool finished)
@@ -122,40 +164,74 @@ class OZS_SearchBar : ScriptedWidgetEventHandler
 
     override bool OnClick(Widget w, int x, int y, int button)
     {
-        if (w == m_Sort)
+        if (w == m_Sort && m_Box)
         {
-            OZS_ClientViewer.Get().RequestSort();
+            m_Box.RPCSingleParam(OZS_Const.RPC_SORT_ID, new Param1<bool>(true), true);
             return true;
         }
         return false;
     }
 }
 
-modded class InventoryMenu
+// The two containers the vicinity builds for a ground container: with cargo
+// only, and with cargo plus attachment slots. A storage box has weapon slots,
+// so it is normally the second, but both are hooked.
+modded class ContainerWithCargo
 {
-    protected ref OZS_SearchBar m_OZS_Bar;
+    protected ref OZS_BoxBar m_OZS_Bar;
 
-    override void OnShow()
+    override void SetEntity(EntityAI entity, int cargo_index = 0, bool immedUpdate = true)
     {
-        super.OnShow();
-        if (!m_OZS_Bar && layoutRoot)
-            m_OZS_Bar = new OZS_SearchBar(layoutRoot);
+        super.SetEntity(entity, cargo_index, immedUpdate);
+        if (m_OZS_Bar)
+            return;
+        OZ_StorageBox box = OZ_StorageBox.Cast(entity);
+        if (box)
+            m_OZS_Bar = new OZS_BoxBar(box, GetMainWidget());
     }
 
+    override void UpdateInterval()
+    {
+        super.UpdateInterval();
+        if (m_OZS_Bar)
+            m_OZS_Bar.Refresh();
+    }
+}
+
+modded class ContainerWithCargoAndAttachments
+{
+    protected ref OZS_BoxBar m_OZS_Bar;
+
+    override void SetEntity(EntityAI entity, bool immedUpdate = true)
+    {
+        super.SetEntity(entity, immedUpdate);
+        if (m_OZS_Bar)
+            return;
+        OZ_StorageBox box = OZ_StorageBox.Cast(entity);
+        if (box)
+            m_OZS_Bar = new OZS_BoxBar(box, GetMainWidget());
+    }
+
+    override void UpdateInterval()
+    {
+        super.UpdateInterval();
+        if (m_OZS_Bar)
+            m_OZS_Bar.Refresh();
+    }
+}
+
+// The query belongs to one visit to the inventory screen.
+modded class InventoryMenu
+{
     override void OnHide()
     {
         super.OnHide();
-        if (m_OZS_Bar)
-        {
-            m_OZS_Bar.Destroy();
-            m_OZS_Bar = null;
-        }
+        OZS_Search.Set("");
     }
 }
 
 // Cargo icons: the match is computed when the query or the item changes,
-// the shade is painted on every update while a search is on (vanilla resets
-// the colour panel on hover).
+// the shade is painted above the item render.
 modded class Icon
 {
     protected int    m_OZS_Applied = -1;
@@ -180,14 +256,7 @@ modded class Icon
         m_OZS_Applied = OZS_Search.s_Version;
         bool shaded = OZS_Search.Active() && !OZS_Search.Matches(m_Obj);
         if (shaded && !m_OZS_ShadeW)
-        {
             m_OZS_ShadeW = OZS_Search.MakeShade(GetMainWidget());
-            if (m_OZS_ShadeW && m_Obj && OZS_Search.s_Diag < 3)
-            {
-                OZS_Search.s_Diag++;
-                ErrorEx("[OpenZone] storage: shade on " + m_Obj.GetDisplayName(), ErrorExSeverity.WARNING);
-            }
-        }
         if (m_OZS_ShadeW)
             m_OZS_ShadeW.Show(shaded);
     }

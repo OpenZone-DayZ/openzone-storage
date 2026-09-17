@@ -215,7 +215,7 @@ class OZ_Probe
             return CmdFind(args, detail);
 
         // Immediate research ops (items 2-4 of the brief); all need a crate.
-        if (op == "stock" || op == "inspect" || op == "blob_save" || op == "blob_load" || op == "nest" || op == "give")
+        if (op == "stock" || op == "inspect" || op == "blob_save" || op == "blob_load" || op == "blobtime" || op == "nest" || op == "give")
         {
             if (!RequireCrate(detail))
                 return false;
@@ -290,6 +290,10 @@ class OZ_Probe
         else if (op == "blob_save")
         {
             ok = OZ_ProbeState.SaveBlob(m_Crate, detail);
+        }
+        else if (op == "blobtime")
+        {
+            detail = OZ_ProbeState.BlobTime(m_Crate);
         }
         else if (op == "blob_load")
         {

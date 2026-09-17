@@ -20,9 +20,11 @@ class OZ_StorageBox : DeployableContainer_Base
     // Server only: the controller's job is creating entities in this box, so
     // the receive gates answer yes although the box is not OPEN yet.
     protected bool   m_OZS_Restoring;
-    // Server only: tick time at which the box became OPEN (0 = not open),
-    // for the auto-close timer; and of the last sort, for its cooldown.
-    protected float  m_OZS_OpenedAt;
+    // Server only: tick time of the last activity in this box, which is the
+    // opening itself or any item going in, out or across (0 = not open);
+    // the auto-close counts idle time from it. And the time of the last
+    // sort, for its cooldown.
+    protected float  m_OZS_TouchedAt;
     protected float  m_OZS_LastSort;
 
     override void InitItemVariables()
@@ -45,13 +47,23 @@ class OZ_StorageBox : DeployableContainer_Base
         if (m_OZS_Id == "")
             m_OZS_Id = OZS_Controller.NewId();
         SetTakeable(false);
+        // Every boot renews the lifetime, so a box outlives the central
+        // economy's cleanup without an entry in types.xml.
+        SetLifetime(OZS_Const.BOX_LIFETIME);
         OZS_Controller.Get().Register(this);
     }
 
+    // A box leaving the world is worth a line: its store stays on disk, and
+    // without this the only trace of a vanished box is its orphan directory.
     override void EEDelete(EntityAI parent)
     {
         if (GetGame() && GetGame().IsServer())
+        {
+            string s = "storage: box " + m_OZS_Id + " removed from the world as " + OZS_Const.StateName(m_OZS_State);
+            s = s + " with " + OZS_CountEntities() + " entities, " + m_OZS_StoredCount + " stored; its files are kept";
+            OZ_Log.Warn(s);
             OZS_Controller.Get().Unregister(this);
+        }
         super.EEDelete(parent);
     }
 
@@ -138,14 +150,57 @@ class OZ_StorageBox : DeployableContainer_Base
         return m_OZS_Restoring;
     }
 
-    float OZS_GetOpenedAt()
+    float OZS_GetTouchedAt()
     {
-        return m_OZS_OpenedAt;
+        return m_OZS_TouchedAt;
     }
 
-    void OZS_SetOpenedAt(float t)
+    void OZS_SetTouchedAt(float t)
     {
-        m_OZS_OpenedAt = t;
+        m_OZS_TouchedAt = t;
+    }
+
+    // Any item moving in, out or across the box restarts the idle timer, so
+    // AutoCloseSeconds means "nobody has touched it for that long" and not
+    // "that long since it was opened" (owner 2026-09-17). The paced jobs do
+    // not count: OPENING and CLOSING are not OPEN.
+    void OZS_Touch()
+    {
+        if (!GetGame() || !GetGame().IsServer())
+            return;
+        if (m_OZS_State != OZS_Const.STATE_OPEN || m_OZS_Restoring)
+            return;
+        m_OZS_TouchedAt = GetGame().GetTickTime();
+    }
+
+    override void EECargoIn(EntityAI item)
+    {
+        super.EECargoIn(item);
+        OZS_Touch();
+    }
+
+    override void EECargoOut(EntityAI item)
+    {
+        super.EECargoOut(item);
+        OZS_Touch();
+    }
+
+    override void EECargoMove(EntityAI item)
+    {
+        super.EECargoMove(item);
+        OZS_Touch();
+    }
+
+    override void EEItemAttached(EntityAI item, string slot_name)
+    {
+        super.EEItemAttached(item, slot_name);
+        OZS_Touch();
+    }
+
+    override void EEItemDetached(EntityAI item, string slot_name)
+    {
+        super.EEItemDetached(item, slot_name);
+        OZS_Touch();
     }
 
     float OZS_GetLastSort()
@@ -250,32 +305,51 @@ class OZ_StorageBox : DeployableContainer_Base
         return super.CanReceiveAttachment(attachment, slotId);
     }
 
+    // Taking is strictly for an OPEN box. The restore job only ever puts
+    // things in, so it needs no exception here, and a player must not empty
+    // a box that is still filling up.
     override bool CanReleaseCargo(EntityAI cargo)
     {
-        if (!IsOpen() && !m_OZS_Restoring)
+        if (!IsOpen())
             return false;
         return super.CanReleaseCargo(cargo);
     }
 
     override bool CanReleaseAttachment(EntityAI attachment)
     {
-        if (!IsOpen() && !m_OZS_Restoring)
+        if (!IsOpen())
             return false;
         return super.CanReleaseAttachment(attachment);
     }
 
+    // The UI shows the grid and the weapon slots from the first frame of
+    // OPENING, so the player watches the box fill instead of staring at a
+    // closed panel for six seconds (owner 2026-09-17). Nothing can be taken
+    // out until it is OPEN, and the search bar of the panel says how far the
+    // loading got.
+    override bool CanDisplayCargo()
+    {
+        return OZS_IsUsable();
+    }
+
     override bool CanDisplayAttachmentCategory(string category_name)
     {
-        if (!IsOpen())
+        if (!OZS_IsUsable())
             return false;
         return super.CanDisplayAttachmentCategory(category_name);
     }
 
     override bool CanDisplayAttachmentSlot(int slot_id)
     {
-        if (!IsOpen())
+        if (!OZS_IsUsable())
             return false;
         return super.CanDisplayAttachmentSlot(slot_id);
+    }
+
+    // Open, or opening and therefore worth showing.
+    bool OZS_IsUsable()
+    {
+        return m_OZS_State == OZS_Const.STATE_OPEN || m_OZS_State == OZS_Const.STATE_OPENING;
     }
 
     override bool CanPutInCargo(EntityAI parent)

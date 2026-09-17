@@ -64,6 +64,7 @@ class OZ_StorageBoxKit_Base : ItemBase
         }
         box.SetPosition(position);
         box.SetOrientation(orientation);
+        box.SetLifetime(OZS_Const.BOX_LIFETIME);
         string who = "a player";
         PlayerBase pb = PlayerBase.Cast(player);
         if (pb)

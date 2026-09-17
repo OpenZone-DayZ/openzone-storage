@@ -15,9 +15,11 @@ class OZS_Settings : OZ_ConfigBase
     // written.
     int CloseFrameBudgetMs;
     int CloseDeletesPerFrame;
-    // Auto-close: an open box closes this many seconds after it was opened
-    // (owner 2026-09-16: a plain timer, no distance, no player events); when
-    // someone is still looking at it, the close waits for them to stop.
+    // Auto-close: an open box closes after this many seconds of IDLE time.
+    // The clock restarts on the opening and on every item that goes in, out
+    // or across the box (owner 2026-09-17); distance and player events do not
+    // enter into it. When somebody is still looking at the box, the close
+    // waits for them to stop.
     int AutoCloseSeconds;
     // Viewers: the client heartbeat while its inventory screen shows the box,
     // the silence after which a viewer is dropped, and the distance beyond
@@ -42,7 +44,11 @@ class OZS_Settings : OZ_ConfigBase
         // less per frame anyway (an open at 250/s takes about 2 ms).
         Version = LatestVersion();
         OpenFrameBudgetMs = 5;
-        OpenItemsPerSecond = 250;
+        // 500/s measured 2026-09-17 with a client standing at the box: a
+        // 1443-item box in 2.9 s, longest server step 2 ms, client frames
+        // under 15 ms. 250/s was twice as slow for nothing; 1000/s cut it to
+        // 1.5 s but produced one 54 ms server step.
+        OpenItemsPerSecond = 500;
         CloseFrameBudgetMs = 5;
         CloseDeletesPerFrame = 50;
         AutoCloseSeconds = 120;
@@ -69,8 +75,8 @@ class OZS_Settings : OZ_ConfigBase
         }
         if (OpenItemsPerSecond < 10 || OpenItemsPerSecond > 5000)
         {
-            OZ_Log.Warn("storage settings: OpenItemsPerSecond " + OpenItemsPerSecond + " is outside 10..5000, using 250");
-            OpenItemsPerSecond = 250;
+            OZ_Log.Warn("storage settings: OpenItemsPerSecond " + OpenItemsPerSecond + " is outside 10..5000, using 500");
+            OpenItemsPerSecond = 500;
             warnings++;
         }
         if (CloseFrameBudgetMs < 1 || CloseFrameBudgetMs > 100)

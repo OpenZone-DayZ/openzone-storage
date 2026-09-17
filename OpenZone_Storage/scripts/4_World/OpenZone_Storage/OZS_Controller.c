@@ -204,7 +204,7 @@ class OZS_Controller
         {
             box.OZS_SetState(OZS_Const.STATE_OPEN);
             box.OZS_SetStoredCount(0);
-            box.OZS_SetOpenedAt(GetGame().GetTickTime());
+            box.OZS_SetTouchedAt(GetGame().GetTickTime());
             OZ_Log.Info("storage: box " + box.OZS_GetId() + " opened by " + who + " (no store, empty)");
             return true;
         }
@@ -228,7 +228,7 @@ class OZS_Controller
         string id = box.OZS_GetId();
         if (m_FilesPending.Find(id) < 0)
             m_FilesPending.Insert(id);
-        box.OZS_SetOpenedAt(GetGame().GetTickTime());
+        box.OZS_SetTouchedAt(GetGame().GetTickTime());
     }
 
     protected OZS_OpenJob FindOpenJob(OZ_StorageBox box)
@@ -496,15 +496,15 @@ class OZS_Controller
             OZ_StorageBox b = m_Boxes.Get(i);
             if (b.OZS_GetState() != OZS_Const.STATE_OPEN)
             {
-                b.OZS_SetOpenedAt(0);
+                b.OZS_SetTouchedAt(0);
                 continue;
             }
-            if (b.OZS_GetOpenedAt() <= 0)
+            if (b.OZS_GetTouchedAt() <= 0)
             {
-                b.OZS_SetOpenedAt(now);
+                b.OZS_SetTouchedAt(now);
                 continue;
             }
-            if (now - b.OZS_GetOpenedAt() < st.AutoCloseSeconds)
+            if (now - b.OZS_GetTouchedAt() < st.AutoCloseSeconds)
                 continue;
             if (HasViewers(b))
                 continue;
@@ -637,7 +637,7 @@ class OZS_Controller
         bool files = OZS_Store.HasFiles(id);
         string s = "storage: boot: box " + id + " " + OZS_Const.StateName(state) + " with " + entities + " entities, files=" + files;
         box.OZS_SetRestoring(false);
-        box.OZS_SetOpenedAt(0);
+        box.OZS_SetTouchedAt(0);
 
         if (files)
         {

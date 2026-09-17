@@ -18,6 +18,85 @@
 class OZ_ProbeState
 {
     static const string BLOB = "$profile:OpenZone_StorageProbe/blob.bin";
+    static const string BLOBTIME = "$profile:OpenZone_StorageProbe/blobtime.bin";
+
+    // ------------------------------------------------- OnStoreSave timing
+    //
+    // What does the pair OnStoreSave / OnStoreLoad cost by itself, apart from
+    // the file? ScriptReadWriteContext is a ParamsWriteContext over memory
+    // (gameplay.c:134), and OnStoreSave takes exactly that, so the same calls
+    // can be timed with and without the disk:
+    //   A  save into memory   -- the script work and the native writes, no I/O
+    //   B  load from memory   -- the other half of the pair
+    //   C  save into a file   -- the same work plus FileSerializer
+    // C minus A is what the file costs.
+    static string BlobTime(EntityAI crate)
+    {
+        array<EntityAI> items = new array<EntityAI>();
+        CargoBase cargo = crate.GetInventory().GetCargo();
+        int n = 0;
+        if (cargo)
+            n = cargo.GetItemCount();
+        for (int i = 0; i < n; i++)
+        {
+            EntityAI e = cargo.GetItem(i);
+            if (e)
+                items.Insert(e);
+        }
+        GameInventory inv = crate.GetInventory();
+        for (int a = 0; a < inv.AttachmentCount(); a++)
+        {
+            EntityAI att = inv.GetAttachmentFromIndex(a);
+            if (att)
+                items.Insert(att);
+        }
+        int count = items.Count();
+        if (count == 0)
+            return "the crate is empty, nothing to time";
+
+        ScriptReadWriteContext mem = new ScriptReadWriteContext();
+        ParamsWriteContext w = mem.GetWriteContext();
+        float t0 = GetGame().GetTickTime();
+        for (int s = 0; s < count; s++)
+            items.Get(s).OnStoreSave(w);
+        float t1 = GetGame().GetTickTime();
+
+        ParamsReadContext r = mem.GetReadContext();
+        int ver = GetGame().SaveVersion();
+        int fails = 0;
+        float t2 = GetGame().GetTickTime();
+        for (int l = 0; l < count; l++)
+        {
+            if (!items.Get(l).OnStoreLoad(r, ver))
+                fails++;
+        }
+        float t3 = GetGame().GetTickTime();
+
+        float t4 = 0;
+        float t5 = 0;
+        FileSerializer f = new FileSerializer();
+        if (f.Open(BLOBTIME, FileMode.WRITE))
+        {
+            t4 = GetGame().GetTickTime();
+            for (int c = 0; c < count; c++)
+                items.Get(c).OnStoreSave(f);
+            t5 = GetGame().GetTickTime();
+            f.Close();
+        }
+
+        float saveMs = (t1 - t0) * 1000;
+        float loadMs = (t3 - t2) * 1000;
+        float fileMs = (t5 - t4) * 1000;
+        string d = "n=" + count;
+        d = d + " save_mem=" + R1(saveMs) + "ms";
+        d = d + " (" + R2(saveMs / count) + " per item)";
+        d = d + " load_mem=" + R1(loadMs) + "ms";
+        d = d + " (" + R2(loadMs / count) + " per item)";
+        d = d + " save_file=" + R1(fileMs) + "ms";
+        d = d + " (" + R2(fileMs / count) + " per item)";
+        d = d + " load_refusals=" + fails;
+        return d;
+    }
     static const int BLOB_VERSION = 1;
 
     // ---------------------------------------------------------------- stock

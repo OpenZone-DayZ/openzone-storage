@@ -35,6 +35,12 @@ class OZS_Const
     static const int RPC_SORT_ID = 20260917;
     // Seconds a box refuses a second sort after one.
     static const float SORT_COOLDOWN = 10.0;
+    // The lifetime a box gets on every server start, 45 days. Without it the
+    // central economy removes a placed box: our classes are not in types.xml,
+    // and a box created by a kit had only the config default (a box placed by
+    // the owner vanished overnight, 2026-09-17). An admin can still override
+    // it through types.xml; this is the floor that works without one.
+    static const float BOX_LIFETIME = 3888000.0;
     // Seconds the deploy action of a kit is held (owner 2026-09-16).
     static const float DEPLOY_SECONDS = 10.0;
     // Client: seconds between "still looking" repeats while the inventory

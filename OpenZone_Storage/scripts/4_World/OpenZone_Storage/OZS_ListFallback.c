@@ -198,7 +198,9 @@ class OZS_ListFallback
             e.GetInventory().GetCurrentInventoryLocation(src);
             InventoryLocation dst = new InventoryLocation();
             dst.SetCargo(parent, e, 0, r.row, r.col, r.flip);
-            bool placed = GameInventory.LocationSyncMoveEntity(src, dst);
+            // SERVER mode, so the clients are told about the move (see
+            // OZS_Records.ReadEntity).
+            bool placed = parent.GetInventory().TakeToDst(InventoryMode.SERVER, src, dst);
             if (!placed)
                 placed = parent.GetInventory().TakeEntityToCargoEx(InventoryMode.SERVER, e, 0, r.row, r.col);
             if (!placed)
