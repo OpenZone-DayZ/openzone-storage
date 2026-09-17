@@ -581,3 +581,43 @@ standing added none.
 What the owner has still not decided is what to do with a marked directory afterwards. It is
 kept, which is the safe default; deleting it or moving it to a grave folder is a policy
 choice, and the mark is what makes either possible later.
+
+## 20. Ten boxes at once (2026-09-17, owner)
+
+The load case the pacing was built for, measured: ten boxes opening and closing in the same
+frame while items move between them. Full report and the three profiler windows in
+`docs/measurements/2026-09-17/`.
+
+Two tools were added for it and are worth keeping. `oz_storage open_all` and `close_all`
+put every box's request in one frame, which ten separate bridge commands never do.
+`oz_probe churn` moves items between two open boxes with `TakeToDst` in SERVER mode, the
+same call an inventory action makes, at a set rate, always taking from the fuller side so a
+long run never empties one box and starts failing for the wrong reason.
+
+Ten boxes, 10683 items, one client standing among five of them:
+
+| Window | Longest frame | Stretches >= 150 ms | Mod share of the main thread |
+|---|---|---|---|
+| Ten opening at once, 21.6 s | 44 ms | none | 3.87 % |
+| 4000 moves at 400/s, no jobs | 39 ms | none | 0.90 % |
+| Churn + ten closing + ten opening | 44 ms | one of 168 ms, see below | 6.14 % |
+
+One move costs 0.13 ms of script on the server. No job step exceeded 3 ms against its 5 ms
+budget, because the budgets divide between jobs: ten boxes cost the frame what one does.
+
+**The refusals are the design, not a fault.** While the churn ran through a `close_all`,
+11700 of its moves were refused: a box that is no longer OPEN answers no in
+`CanReleaseCargo`, so an item cannot be moved out from under the capture. A player would
+see the item not move, which is the correct outcome.
+
+**The 168 ms stretch is the sampler merging frames, not a frame.** Its breakdown names
+`Serializer.Write` and `OZS_Records.WriteListEntity`, the close job writing its store. Ten
+close jobs run in consecutive frames with the same function on the stack and the 200 Hz
+sampler cannot see the boundaries between them. The in-engine frame monitor, which times
+every frame, saw 44 ms at worst over 768465 frames and nothing above 100 ms. The same
+artefact was measured on 2026-09-16 (fourteen 20 ms frames reported as one 232 ms freeze),
+and it is the reason the frame budget is 5 ms rather than 20.
+
+**Nothing was lost or duplicated.** The final `close_all`, after ten opens, ten closes, ten
+more opens and 8300 successful moves through all of it, wrote 10683 items: exactly the
+count the test started with.

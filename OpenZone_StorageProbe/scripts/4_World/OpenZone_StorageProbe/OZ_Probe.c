@@ -75,6 +75,7 @@ class OZ_Probe
     protected string   m_Op;
     protected int      m_JobId;
     protected EntityAI m_Crate;        // weak on purpose: a deleted crate reads null
+    protected EntityAI m_Churn;        // the other end of a churn job, weak too
     protected string   m_ItemType;
     protected int      m_ItemW;
     protected int      m_ItemH;
@@ -259,8 +260,10 @@ class OZ_Probe
             return CmdRestore(args, detail);
         if (op == "delete_crate")
             return CmdDeleteCrate(args, detail);
+        if (op == "churn")
+            return CmdChurn(args, detail);
 
-        detail = "unknown op '" + op + "'; known: status, baseline, crate, find, fill, clear, capture, load, restore, delete_crate";
+        detail = "unknown op '" + op + "'; known: status, baseline, crate, find, fill, clear, capture, load, restore, delete_crate, churn";
         return false;
     }
 
@@ -626,6 +629,100 @@ class OZ_Probe
         Print("[OpenZone] storage probe: job " + m_JobId + " " + op + " begins, target " + target + ", batch " + batch);
     }
 
+    // Two open boxes and a stream of items going back and forth between them:
+    // what a room full of players does to a store. Every move is the same
+    // server-side call an inventory action makes (TakeToDst in SERVER mode),
+    // so the cost measured here is the cost of real traffic, minus the client.
+    //   oz_probe churn to="x y z" [class=OZ_StorageBox_Large] n=500 batch=10
+    // The source is whichever side currently holds more, so a long run never
+    // empties one box and starts failing.
+    protected bool CmdChurn(map<string, string> args, out string detail)
+    {
+        if (!RequireCrate(detail))
+            return false;
+        string posText = Arg(args, "to", "");
+        if (posText == "")
+        {
+            detail = "churn needs to=\"x y z\", the other box";
+            return false;
+        }
+        vector pos = posText.ToVector();
+        string kind = Arg(args, "class", "OZ_StorageBox_Large");
+        EntityAI other = NearestCrate(pos, 100, kind);
+        if (!other)
+        {
+            detail = "no " + kind + " within 100 m of " + pos.ToString();
+            return false;
+        }
+        if (other == m_Crate)
+        {
+            detail = "the other box is the one already held; pick a different position";
+            return false;
+        }
+        m_Churn = other;
+        int n = Arg(args, "n", "200").ToInt();
+        int batch = Arg(args, "batch", "0").ToInt();
+        Begin("churn", n, batch);
+        detail = "job " + m_JobId + " churn started: " + n + " moves, batch=" + batch;
+        detail = detail + ", " + m_Crate.GetType() + "(" + CargoCount(m_Crate) + ")";
+        detail = detail + " <-> " + m_Churn.GetType() + "(" + CargoCount(m_Churn) + ")";
+        return true;
+    }
+
+    protected void ChurnOne()
+    {
+        EntityAI src = m_Crate;
+        EntityAI dst = m_Churn;
+        if (!src || !dst)
+        {
+            m_Failed++;
+            return;
+        }
+        CargoBase ca = src.GetInventory().GetCargo();
+        CargoBase cb = dst.GetInventory().GetCargo();
+        if (!ca || !cb)
+        {
+            m_Failed++;
+            return;
+        }
+        // Take from the fuller side.
+        if (cb.GetItemCount() > ca.GetItemCount())
+        {
+            src = m_Churn;
+            dst = m_Crate;
+            ca = cb;
+        }
+        int count = ca.GetItemCount();
+        if (count < 1)
+        {
+            m_Failed++;
+            return;
+        }
+        // The last item: taking the first one makes the engine shuffle the grid.
+        EntityAI item = ca.GetItem(count - 1);
+        if (!item)
+        {
+            m_Failed++;
+            return;
+        }
+        InventoryLocation from = new InventoryLocation();
+        if (!item.GetInventory().GetCurrentInventoryLocation(from))
+        {
+            m_Failed++;
+            return;
+        }
+        InventoryLocation to = new InventoryLocation();
+        if (!dst.GetInventory().FindFreeLocationFor(item, FindInventoryLocationType.CARGO, to))
+        {
+            m_Failed++;
+            return;
+        }
+        if (dst.GetInventory().TakeToDst(InventoryMode.SERVER, from, to))
+            m_Done++;
+        else
+            m_Failed++;
+    }
+
     protected void DoBatch()
     {
         int left = m_Target - m_Done - m_Failed;
@@ -645,6 +742,8 @@ class OZ_Probe
                 CaptureOne();
             else if (m_Op == "restore")
                 RestoreOne();
+            else if (m_Op == "churn")
+                ChurnOne();
             else
                 m_Failed++;
         }

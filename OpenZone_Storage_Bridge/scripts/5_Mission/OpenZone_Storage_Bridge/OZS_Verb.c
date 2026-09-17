@@ -127,6 +127,34 @@ modded class DZMCP_BridgeCore
             return true;
         }
 
+        // Every box at once, in one frame: the load test of ten boxes opening
+        // or closing together needs the requests to land in the same frame,
+        // which ten separate bridge commands never do.
+        if (op == "open_all" || op == "close_all")
+        {
+            array<OZ_StorageBox> all = c.Boxes();
+            int took = 0;
+            int refused = 0;
+            for (int bi = 0; bi < all.Count(); bi++)
+            {
+                OZ_StorageBox b = all.Get(bi);
+                if (!b)
+                    continue;
+                string whyAll;
+                bool ok;
+                if (op == "open_all")
+                    ok = c.RequestOpen(b, null, whyAll);
+                else
+                    ok = c.RequestClose(b, null, whyAll);
+                if (ok)
+                    took++;
+                else
+                    refused++;
+            }
+            detail = op + ": " + took + " accepted, " + refused + " refused, of " + all.Count() + " boxes";
+            return true;
+        }
+
         OZ_StorageBox target = OZS_Pick(args, detail);
         if (!target)
             return false;
@@ -240,7 +268,7 @@ modded class DZMCP_BridgeCore
             return true;
         }
 
-        detail = "unknown op '" + op + "'; known: list, spawn, status, open, close, sort, files, slot, tune, lower";
+        detail = "unknown op '" + op + "'; known: list, spawn, status, open, close, open_all, close_all, sort, files, slot, tune, lower";
         return false;
     }
 
