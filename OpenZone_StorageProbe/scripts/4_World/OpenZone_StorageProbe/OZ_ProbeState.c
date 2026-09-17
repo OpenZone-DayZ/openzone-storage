@@ -8,7 +8,7 @@
 //              tuned to index 3, an OpenZone data carrier with two notes)
 //   inspect    one JSON line per cargo item with everything the probe can read
 //   blob_save  serialise the crate's cargo tree into $profile:.../blob.bin the
-//              another mod way: header, children, weapon chambers, OnStoreSave,
+//              record way: header, children, weapon chambers, OnStoreSave,
 //              magazine cartridges, health per zone, lifetime
 //   blob_load  recreate the tree from that file into the (empty) crate
 //   nest       create bags ON THE GROUND, fill them, then move them into the
@@ -320,7 +320,7 @@ class OZ_ProbeState
 
     // Header, children (attachments then cargo), then the body -- so that on
     // restore the children exist before the parent's OnStoreLoad runs, the order
-    // another mod chose on purpose.
+    // chosen on purpose.
     static int WriteEntity(FileSerializer f, EntityAI e)
     {
         int count = 1;
@@ -578,7 +578,7 @@ class OZ_ProbeState
     }
 
     // The body in the order WriteBody wrote it. Chambers go in before
-    // OnStoreLoad, cartridges and health after it, as another mod does.
+    // OnStoreLoad, cartridges and health after it.
     static bool ReadBody(FileSerializer f, EntityAI e, int saveVer, inout int loadFails)
     {
         int muzzles;

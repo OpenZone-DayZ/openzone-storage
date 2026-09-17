@@ -20,7 +20,8 @@ three box sizes of 500 / 1000 / 1500 cells, weapon slots on the box. Everything 
   so all three fit with room to spare. Bigger boxes are more boxes.
 - All three extend one script class `OZ_StorageBox` (`Container_Base` lineage like SeaChest,
   `DeployableContainer_Base` if placement by kit is wanted later). A box cannot be picked up
-  or put into cargo (`CanPutInCargo`, `CanPutIntoHands` false) -- the another mod/ZMG anti-dupe rule.
+  or put into cargo (`CanPutInCargo`, `CanPutIntoHands` false), which is what stops a box
+  from being duplicated with its contents.
 - **Weapon slots** are attachment slots `OZ_Weapon_1..N` declared in `CfgSlots`
   (`class Slot_OZ_Weapon_1 { name = "OZ_Weapon_1"; displayName = "$STR_OZ_SLOT_WEAPON"; }`, the
   shape OpenZone_PDA already uses) and listed in the box's `attachments[]`; a
@@ -173,8 +174,7 @@ beside it at 900--1700/s without frame drops, but one 5000-item burst stalled a 
 ## 6. Store (item 5 of the brief)
 
 One directory per box under `$profile:OpenZone/Storage/<boxid>/`, box id = the box's
-persistent id (`GetPersistentID(b1,b2,b3,b4)` as hex, stable across restarts, the key another mod
-uses). Two files, written on every Close, read only on Open and at mission start:
+persistent id (`GetPersistentID(b1,b2,b3,b4)` as hex, stable across restarts). Two files, written on every Close, read only on Open and at mission start:
 
 | File | Content | Purpose |
 |---|---|---|
@@ -197,7 +197,7 @@ uses). Two files, written on every Close, read only on Open and at mission start
 - **No import** (*owner*, 2026-09-17). Item 6 of the brief is dropped. Nothing but logs
   will ever leave the live server, and the owner decided the boxes are not replaced in
   place: players carry their things over by hand. So there is no converter, and the
-  the previous mod pbo stays unopened.
+  previous mod's pbo stays unopened.
 
 ## 7. One truth at a time (item 4 of the brief)
 
@@ -207,13 +207,12 @@ uses). Two files, written on every Close, read only on Open and at mission start
 and a flagged item dropped on the ground came back too. The ECE persistency flags govern
 objects the mod puts into the world itself; a child of a persistent container is saved with
 its parent. There is no script API that makes an existing entity non-persistent
-(agent-report-vanilla-facts.md, Q3). So the engine WILL save an open box's cargo, and the
+(measured on the stand, 2026-09-16). So the engine WILL save an open box's cargo, and the
 design has to live with two copies for a while:
 
 - **OPEN**: the engine is the truth. The store files are kept until the box's next
-  `OnStoreSave` after opening (the engine's next save), then deleted -- another mod's
-  another container storage rule, so a crash between opening and the first autosave loses
-  nothing.
+  `OnStoreSave` after opening (the engine's next save), then deleted, so a crash between
+  opening and the first autosave loses nothing.
 - **CLOSING**: the files are written first, then the entities go. The state is persisted with
   the box.
 - **Boot** (`MissionServer.OnMissionStart`, before players): for every box found in the world,
@@ -282,21 +281,8 @@ vests must be empty to enter, as in vanilla. Every child counts for the pacing b
   (`FileSerializer`), `game.c:434` (`SaveVersion`).
 - `Addons/dz.pbo` `config.bin` converted with CfgConvert: `Rifle_Base` 4033, `Pistol_Base` 4285
   (`inventorySlot[]` arrays); `OpenZone_PDA/config.cpp:23-70` for the `CfgSlots` shape.
-- another mod `another storage.c` and `another container storage/.../ItemBase.c` (record
-  order, restore order, the keep-file-until-persisted rule); another mod `another barrel.c`
-  (persistent id as the box key, autoclose timer); another mod `another world class.c`
-  (mark / commit protocol, session journal).
 - Stand runs of 2026-09-16, `docs/measurements/2026-09-16/`: results-run1..5, client-run3/4,
   the profiler reports; the survey `2026-09-16-virtual-storage-survey.md`.
-- `docs/measurements/2026-09-16/agent-report-vanilla-facts.md`: the source report behind
-  sections 2, 3, 4, 6 and 7 (eight questions, every fact with file and line).
-
-## 13. As built (2026-09-16, evening)
-
-Code: `OpenZone_Storage` (3_Game / 4_World / 5_Mission) plus the stand-only
-`OpenZone_Storage_Bridge` (verb `oz_storage`: list, spawn, status, open, close, files, slot,
-tune). The deltas between sections 2--9 and the code that was measured:
-
 - Names: `OZ_StorageBox` with `OZ_StorageBox_Small / _Medium / _Large`, `OZS_ActionOpenBox` /
   `OZS_ActionCloseBox`, `OZS_Controller`, `OZS_CloseJob` / `OZS_OpenJob`, `OZS_Store` /
   `OZS_StoreWriter`, `OZS_Records`, `OZS_ListFallback`, `OZS_ClientViewer`, `OZS_Player`,
@@ -368,7 +354,7 @@ tune). The deltas between sections 2--9 and the code that was measured:
 3. How players get boxes: today a box is spawned by an admin (the stand verb or a spawner);
    there is no recipe, no `types.xml` entry, and the box is never takeable. Craftable or
    placeable boxes and the economy entry are a separate task.
-4. Import of the live server's the previous mod stores (item 6 of the brief): waits for sample files.
+4. Import of the live server's existing stores (item 6 of the brief): waits for sample files.
    **Closed 2026-09-17**: no files will be given and no boxes are replaced in place (section 17).
 5. A box that the "no files" rule closes at boot is closed synchronously (1468 entities =
    about 0.4 s, once) -- fine for a few boxes; a server with hundreds of open boxes at a crash

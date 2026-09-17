@@ -8,7 +8,7 @@
 //   then the body: weapon chambers and internal magazines, the OnStoreSave
 //   blob, magazine cartridges, health (global and per zone), lifetime.
 // Children go before the parent's body so that on restore they exist before
-// the parent's OnStoreLoad runs -- the order another mod chose on purpose, and
+// the parent's OnStoreLoad runs -- the order chosen on purpose, and
 // the one measured to round-trip a loaded rifle, a radio's frequency and a
 // CF_ModStorage carrier exactly (docs/measurements/2026-09-16, run 4).
 //
@@ -307,7 +307,7 @@ class OZS_Records
     }
 
     // The body in the order WriteBody wrote it. Chambers go in before
-    // OnStoreLoad, cartridges and health after it, as another mod does.
+    // OnStoreLoad, cartridges and health after it.
     static bool ReadBody(FileSerializer f, EntityAI e, int saveVer)
     {
         int muzzles;
