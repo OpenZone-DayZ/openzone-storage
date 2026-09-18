@@ -343,7 +343,14 @@ class OZ_Probe
             string chainMode = Arg(args, "mode", "sync");
             string chainFlags = Arg(args, "flags", "surface");
             int chainDelay = Arg(args, "delay", "1").ToInt();
+            // n= repeats the build in the same frame: a box full of nested
+            // trees for the restore to chew on.
+            int chainCount = Arg(args, "n", "1").ToInt();
             detail = OZ_ProbeState.Chain(m_Crate, chainTypes, leafType, leafCount, onGround, chainMode, chainFlags, chainDelay);
+            for (int ci = 1; ci < chainCount; ci++)
+                OZ_ProbeState.Chain(m_Crate, chainTypes, leafType, leafCount, onGround, chainMode, chainFlags, chainDelay);
+            if (chainCount > 1)
+                detail = chainCount.ToString() + " chains built; the last one: " + detail;
         }
         else if (op == "deltree")
         {

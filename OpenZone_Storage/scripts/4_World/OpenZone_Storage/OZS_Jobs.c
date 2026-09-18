@@ -432,6 +432,7 @@ class OZS_OpenJob
         }
         EntityAI made;
         int missedBefore = OZS_Records.s_Missed;
+        int queued = m_Moves.Count();
         if (OZS_Records.ReadEntity(m_Bin, m_Box, m_SaveVer, made, m_Moves))
         {
             m_Next++;
@@ -439,11 +440,13 @@ class OZS_OpenJob
         }
         // The stream broke inside root m_Next: drop the half-built tree
         // (the list restores this root, so it is not a miss), keep the blob
-        // for a look, continue from the list.
+        // for a look, continue from the list. Its ground containers are the
+        // moves queued from `queued` on; the roots read before it this frame
+        // keep theirs. What ReadEntity deleted itself is no longer `made`.
         OZS_Records.s_Missed = missedBefore;
-        if (made)
+        OZS_Records.DropMovesFrom(m_Moves, queued);
+        if (made && !made.IsSetForDeletion())
             GetGame().ObjectDelete(made);
-        OZS_Records.DropMoves(m_Moves);
         CloseBin();
         string keep = OZS_Store.BinPath(m_Id) + ".failed-" + OZS_Store.FileStamp();
         CopyFile(OZS_Store.BinPath(m_Id), keep);

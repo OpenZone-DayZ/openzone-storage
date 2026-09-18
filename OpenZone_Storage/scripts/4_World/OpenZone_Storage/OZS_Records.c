@@ -318,8 +318,7 @@ class OZS_Records
         {
             if (!ReadEntity(f, e, saveVer, child, moves, childrenLocal))
             {
-                if (standIn)
-                    GetGame().ObjectDelete(e);
+                Discard(e, standIn || viaGround, made);
                 return false;
             }
         }
@@ -327,8 +326,7 @@ class OZS_Records
         {
             if (!ReadEntity(f, e, saveVer, child, moves, childrenLocal))
             {
-                if (standIn)
-                    GetGame().ObjectDelete(e);
+                Discard(e, standIn || viaGround, made);
                 return false;
             }
         }
@@ -340,7 +338,10 @@ class OZS_Records
             return bodyOk;
         }
         if (!bodyOk)
+        {
+            Discard(e, viaGround, made);
             return false;
+        }
 
         if (viaGround)
             moves.Insert(new OZS_Move(e, parent, row, col, flip, cc, !parentLocal));
@@ -348,38 +349,57 @@ class OZS_Records
         return true;
     }
 
+    // A container that cannot be finished: a stand-in or a ground-built
+    // (local, unqueued) one is deleted here, because nobody else holds it;
+    // `made` is cleared so the caller does not delete it a second time.
+    protected static void Discard(EntityAI e, bool ours, out EntityAI made)
+    {
+        if (!ours)
+            return;
+        GetGame().ObjectDelete(e);
+        made = null;
+    }
+
     // Runs the queued moves, innermost first (the order they were queued in),
-    // and empties the queue. Returns how many could not be placed; those stay
-    // on the ground beside the box and are counted as misses.
+    // and empties the queue. Returns how many could not be placed; those are
+    // published where they lie, beside the box, and counted as misses.
     static int ApplyMoves(array<ref OZS_Move> moves)
     {
         int failed = 0;
         for (int i = 0; i < moves.Count(); i++)
         {
             OZS_Move m = moves.Get(i);
-            if (!m.item || !m.parent)
+            if (!m.item)
             {
                 failed++;
                 continue;
             }
-            InventoryLocation src = new InventoryLocation();
-            m.item.GetInventory().GetCurrentInventoryLocation(src);
-            InventoryLocation dst = new InventoryLocation();
-            dst.SetCargo(m.parent, m.item, 0, m.row, m.col, m.flip);
-            // LOCAL: the tree is not on the network yet, so there is nobody
-            // to send a SYNC_MOVE to; the clients get the finished tree below.
-            bool placed = m.parent.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
-            if (!placed)
-                placed = m.parent.GetInventory().TakeEntityToCargoEx(InventoryMode.LOCAL, m.item, 0, m.row, m.col);
+            bool placed = false;
+            string into = "a container that is gone";
+            if (m.parent)
+            {
+                into = m.parent.GetType();
+                InventoryLocation src = new InventoryLocation();
+                m.item.GetInventory().GetCurrentInventoryLocation(src);
+                InventoryLocation dst = new InventoryLocation();
+                dst.SetCargo(m.parent, m.item, 0, m.row, m.col, m.flip);
+                // LOCAL: the tree is not on the network yet, so there is
+                // nobody to send a SYNC_MOVE to; the clients get the finished
+                // tree below.
+                placed = m.parent.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
+                if (!placed)
+                    placed = m.parent.GetInventory().TakeEntityToCargoEx(InventoryMode.LOCAL, m.item, 0, m.row, m.col);
+            }
             if (!placed)
             {
                 failed++;
                 s_Missed++;
-                OZ_Log.Warn("storage: " + m.item.GetType() + " with " + m.children + " items could not be moved into " + m.parent.GetType() + " at " + m.row + "," + m.col + "; it stays on the ground");
+                OZ_Log.Warn("storage: " + m.item.GetType() + " with " + m.children + " items could not be moved into " + into + " at " + m.row + "," + m.col + "; it stays on the ground");
             }
-            // Placed or not, the clients must learn of it now: in the box, or
-            // lying beside it.
-            if (m.publish)
+            // The clients learn of it now: the root of a finished tree once
+            // it is in the box, and anything that could not be placed where
+            // it lies -- a local entity nobody publishes is a lost one.
+            if (m.publish || !placed)
                 GetGame().RemoteObjectTreeCreate(m.item);
         }
         moves.Clear();
@@ -390,8 +410,16 @@ class OZS_Records
     // has not been moved yet is a root of its own out there.
     static int DropMoves(array<ref OZS_Move> moves)
     {
+        return DropMovesFrom(moves, 0);
+    }
+
+    // The same for the moves queued from index `from` on -- the ones a root
+    // that could not be read left behind, while the roots read before it in
+    // the same frame keep theirs.
+    static int DropMovesFrom(array<ref OZS_Move> moves, int from)
+    {
         int removed = 0;
-        for (int i = 0; i < moves.Count(); i++)
+        for (int i = from; i < moves.Count(); i++)
         {
             OZS_Move m = moves.Get(i);
             if (m.item && !m.item.GetHierarchyParent())
@@ -400,7 +428,8 @@ class OZS_Records
                 removed++;
             }
         }
-        moves.Clear();
+        while (moves.Count() > from)
+            moves.Remove(moves.Count() - 1);
         return removed;
     }
 
