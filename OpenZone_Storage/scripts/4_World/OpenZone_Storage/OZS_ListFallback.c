@@ -152,7 +152,7 @@ class OZS_ListFallback
 
     // Creates record i and its subtree under `parent`; returns the entity or
     // null. Counts into OZS_Records.s_Created / s_Missed like the blob path.
-    static EntityAI Make(array<ref OZS_ListRec> recs, int i, EntityAI parent)
+    static EntityAI Make(array<ref OZS_ListRec> recs, int i, EntityAI parent, array<ref OZS_Move> moves, bool parentLocal = false)
     {
         OZS_ListRec r = recs.Get(i);
         int end = SubtreeEnd(recs, i);
@@ -160,15 +160,31 @@ class OZS_ListFallback
         bool viaGround = r.hasCargoChild;
         if (viaGround)
         {
+            // Local until the tree is published, as in OZS_Records.ReadEntity.
             vector pos = parent.GetPosition();
             pos[0] = pos[0] + 2;
-            e = EntityAI.Cast(GetGame().CreateObjectEx(r.type, pos, ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME));
+            e = EntityAI.Cast(GetGame().CreateObjectEx(r.type, pos, ECE_LOCAL | ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME));
         }
         else if (r.lt == InventoryLocationType.ATTACHMENT)
         {
             InventoryLocation il = new InventoryLocation();
             il.SetAttachment(parent, null, r.slot);
-            e = GameInventory.LocationCreateEntity(il, r.type, ECE_IN_INVENTORY, RF_DEFAULT);
+            if (parentLocal)
+                e = GameInventory.LocationCreateLocalEntity(il, r.type, ECE_IN_INVENTORY, RF_DEFAULT);
+            else
+                e = GameInventory.LocationCreateEntity(il, r.type, ECE_IN_INVENTORY, RF_DEFAULT);
+        }
+        else if (parentLocal)
+        {
+            InventoryLocation cell = new InventoryLocation();
+            cell.SetCargo(parent, null, 0, r.row, r.col, r.flip);
+            e = GameInventory.LocationCreateLocalEntity(cell, r.type, ECE_IN_INVENTORY, RF_DEFAULT);
+            if (!e)
+            {
+                InventoryLocation any = new InventoryLocation();
+                if (parent.GetInventory().FindFirstFreeLocationForNewEntity(r.type, FindInventoryLocationType.CARGO, any))
+                    e = GameInventory.LocationCreateLocalEntity(any, r.type, ECE_IN_INVENTORY, RF_DEFAULT);
+            }
         }
         else
         {
@@ -186,29 +202,15 @@ class OZS_ListFallback
         int k = i + 1;
         while (k < end)
         {
-            Make(recs, k, e);
+            Make(recs, k, e, moves, viaGround || parentLocal);
             k = SubtreeEnd(recs, k);
         }
 
         Apply(e, r);
 
+        // The move into `parent` waits for a later frame (OZS_Move).
         if (viaGround)
-        {
-            InventoryLocation src = new InventoryLocation();
-            e.GetInventory().GetCurrentInventoryLocation(src);
-            InventoryLocation dst = new InventoryLocation();
-            dst.SetCargo(parent, e, 0, r.row, r.col, r.flip);
-            // SERVER mode, so the clients are told about the move (see
-            // OZS_Records.ReadEntity).
-            bool placed = parent.GetInventory().TakeToDst(InventoryMode.SERVER, src, dst);
-            if (!placed)
-                placed = parent.GetInventory().TakeEntityToCargoEx(InventoryMode.SERVER, e, 0, r.row, r.col);
-            if (!placed)
-            {
-                OZS_Records.s_Missed++;
-                OZ_Log.Warn("storage: list fallback: " + r.type + " could not be moved into " + parent.GetType() + " at " + r.row + "," + r.col + "; it stays on the ground");
-            }
-        }
+            moves.Insert(new OZS_Move(e, parent, r.row, r.col, r.flip, end - i - 1, !parentLocal));
         OZS_Records.s_Created++;
         return e;
     }

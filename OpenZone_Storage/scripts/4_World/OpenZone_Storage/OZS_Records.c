@@ -14,6 +14,45 @@
 //
 // items.list line of one entity: fields separated by '|':
 //   depth|type|loctype|slot|row|col|flip|health|quantity|liquid|ammo|chambers|zone=hp;zone=hp
+// A container with cargo, created LOCAL (unknown to the clients) on the
+// ground, waiting to be moved into its parent's cargo in a LATER frame.
+//
+// Two engine faults shaped this, both measured 2026-09-18 with the storage
+// probe. On the server, an entity that a script moved into a container
+// created in the SAME frame can never be deleted again: the deletion stops
+// halfway, the entity keeps its place in the world with network id 0,
+// players see it lying where it last was and cannot pick it up, and a
+// restart turns it into a real item -- a dupe. One frame between the
+// creation of the target and the move is enough. On the client the same
+// stuck deletion follows a SYNC_MOVE of a container with children into a
+// cargo, whatever the delay, so the clients never see the moves at all: the
+// tree is built out of local entities and published once, in its final
+// place, with RemoteObjectTreeCreate -- the way the game's own
+// ReplaceItemWithNewLambdaBase hands a rebuilt item to the clients.
+class OZS_Move
+{
+    EntityAI item;
+    EntityAI parent;
+    int row;
+    int col;
+    bool flip;
+    int children;
+    // True for the move into a networked parent (the box): the tree is
+    // published right after it. Moves between local containers are silent.
+    bool publish;
+
+    void OZS_Move(EntityAI i, EntityAI p, int r, int c, bool f, int n, bool pub)
+    {
+        item = i;
+        parent = p;
+        row = r;
+        col = c;
+        flip = f;
+        children = n;
+        publish = pub;
+    }
+}
+
 class OZS_Records
 {
     // Statistics of one read pass (the open job reports them).
@@ -181,11 +220,12 @@ class OZS_Records
 
     // Reads the next record and creates the entity under `parent`; `made` is
     // that entity (null for a stand-in), so the caller can remove a half-built
-    // tree. False when the stream can no longer be followed: a class that does
+    // tree. A container with cargo is created on the ground and its move into
+    // `parent` is queued on `moves` for a LATER frame (see OZS_Move). False when the stream can no longer be followed: a class that does
     // not exist and could not even be stood in for, or an OnStoreLoad that
     // refused (the blob's length is unknown, so nothing behind it can be read
     // either).
-    static bool ReadEntity(FileSerializer f, EntityAI parent, int saveVer, out EntityAI made)
+    static bool ReadEntity(FileSerializer f, EntityAI parent, int saveVer, out EntityAI made, array<ref OZS_Move> moves, bool parentLocal = false)
     {
         made = null;
         string type;
@@ -213,17 +253,35 @@ class OZS_Records
         {
             // A container with cargo children: the engine refuses children
             // while it sits in cargo, so build it on the ground and move it
-            // afterwards (measured 2026-09-16, run 4).
+            // afterwards (measured 2026-09-16, run 4). LOCAL, so the clients
+            // learn of it only when the finished tree is published (OZS_Move).
             vector pos = parent.GetPosition();
             pos[0] = pos[0] + 2;
-            e = EntityAI.Cast(GetGame().CreateObjectEx(type, pos, ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME));
+            e = EntityAI.Cast(GetGame().CreateObjectEx(type, pos, ECE_LOCAL | ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME));
             viaGround = true;
         }
         else if (lt == InventoryLocationType.ATTACHMENT)
         {
             InventoryLocation il = new InventoryLocation();
             il.SetAttachment(parent, null, slot);
-            e = GameInventory.LocationCreateEntity(il, type, ECE_IN_INVENTORY, RF_DEFAULT);
+            if (parentLocal)
+                e = GameInventory.LocationCreateLocalEntity(il, type, ECE_IN_INVENTORY, RF_DEFAULT);
+            else
+                e = GameInventory.LocationCreateEntity(il, type, ECE_IN_INVENTORY, RF_DEFAULT);
+        }
+        else if (parentLocal)
+        {
+            // Inside a local container: a local child, in the recorded cell
+            // or, failing that, in any free one.
+            InventoryLocation cell = new InventoryLocation();
+            cell.SetCargo(parent, null, 0, row, col, flip);
+            e = GameInventory.LocationCreateLocalEntity(cell, type, ECE_IN_INVENTORY, RF_DEFAULT);
+            if (!e)
+            {
+                InventoryLocation any = new InventoryLocation();
+                if (parent.GetInventory().FindFirstFreeLocationForNewEntity(type, FindInventoryLocationType.CARGO, any))
+                    e = GameInventory.LocationCreateLocalEntity(any, type, ECE_IN_INVENTORY, RF_DEFAULT);
+            }
         }
         else
         {
@@ -251,11 +309,14 @@ class OZS_Records
         if (!standIn)
             made = e;
 
-        // Children first: attachments, then cargo, each a full record.
+        // Children first: attachments, then cargo, each a full record. Under
+        // a ground-built container (local) or a stand-in (local too) the
+        // children are local as well.
+        bool childrenLocal = viaGround || standIn || parentLocal;
         EntityAI child;
         for (int a = 0; a < ac; a++)
         {
-            if (!ReadEntity(f, e, saveVer, child))
+            if (!ReadEntity(f, e, saveVer, child, moves, childrenLocal))
             {
                 if (standIn)
                     GetGame().ObjectDelete(e);
@@ -264,7 +325,7 @@ class OZS_Records
         }
         for (int c = 0; c < cc; c++)
         {
-            if (!ReadEntity(f, e, saveVer, child))
+            if (!ReadEntity(f, e, saveVer, child, moves, childrenLocal))
             {
                 if (standIn)
                     GetGame().ObjectDelete(e);
@@ -282,28 +343,65 @@ class OZS_Records
             return false;
 
         if (viaGround)
-        {
-            InventoryLocation src = new InventoryLocation();
-            e.GetInventory().GetCurrentInventoryLocation(src);
-            InventoryLocation dst = new InventoryLocation();
-            dst.SetCargo(parent, e, 0, row, col, flip);
-            // TakeToDst in SERVER mode, never the bare LocationSyncMoveEntity:
-            // both move the item on the server, but only the SERVER mode sends
-            // the SYNC_MOVE command to the clients (inventory.c:1056-1073).
-            // Without it the item sits in the box for the server and stays
-            // drawn on the ground for every client -- a ghost that vanishes
-            // when the box closes (seen by the owner 2026-09-17).
-            bool placed = parent.GetInventory().TakeToDst(InventoryMode.SERVER, src, dst);
-            if (!placed)
-                placed = parent.GetInventory().TakeEntityToCargoEx(InventoryMode.SERVER, e, 0, row, col);
-            if (!placed)
-            {
-                s_Missed++;
-                OZ_Log.Warn("storage: " + type + " with " + cc + " items could not be moved into " + parent.GetType() + " at " + row + "," + col + "; it stays on the ground");
-            }
-        }
+            moves.Insert(new OZS_Move(e, parent, row, col, flip, cc, !parentLocal));
         s_Created++;
         return true;
+    }
+
+    // Runs the queued moves, innermost first (the order they were queued in),
+    // and empties the queue. Returns how many could not be placed; those stay
+    // on the ground beside the box and are counted as misses.
+    static int ApplyMoves(array<ref OZS_Move> moves)
+    {
+        int failed = 0;
+        for (int i = 0; i < moves.Count(); i++)
+        {
+            OZS_Move m = moves.Get(i);
+            if (!m.item || !m.parent)
+            {
+                failed++;
+                continue;
+            }
+            InventoryLocation src = new InventoryLocation();
+            m.item.GetInventory().GetCurrentInventoryLocation(src);
+            InventoryLocation dst = new InventoryLocation();
+            dst.SetCargo(m.parent, m.item, 0, m.row, m.col, m.flip);
+            // LOCAL: the tree is not on the network yet, so there is nobody
+            // to send a SYNC_MOVE to; the clients get the finished tree below.
+            bool placed = m.parent.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
+            if (!placed)
+                placed = m.parent.GetInventory().TakeEntityToCargoEx(InventoryMode.LOCAL, m.item, 0, m.row, m.col);
+            if (!placed)
+            {
+                failed++;
+                s_Missed++;
+                OZ_Log.Warn("storage: " + m.item.GetType() + " with " + m.children + " items could not be moved into " + m.parent.GetType() + " at " + m.row + "," + m.col + "; it stays on the ground");
+            }
+            // Placed or not, the clients must learn of it now: in the box, or
+            // lying beside it.
+            if (m.publish)
+                GetGame().RemoteObjectTreeCreate(m.item);
+        }
+        moves.Clear();
+        return failed;
+    }
+
+    // Removes what a cancelled job left on the ground: every queued item that
+    // has not been moved yet is a root of its own out there.
+    static int DropMoves(array<ref OZS_Move> moves)
+    {
+        int removed = 0;
+        for (int i = 0; i < moves.Count(); i++)
+        {
+            OZS_Move m = moves.Get(i);
+            if (m.item && !m.item.GetHierarchyParent())
+            {
+                GetGame().ObjectDelete(m.item);
+                removed++;
+            }
+        }
+        moves.Clear();
+        return removed;
     }
 
     // The body in the order WriteBody wrote it. Chambers go in before

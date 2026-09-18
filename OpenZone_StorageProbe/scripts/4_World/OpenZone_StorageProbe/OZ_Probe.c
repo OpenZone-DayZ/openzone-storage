@@ -25,6 +25,20 @@
 //   status   progress of the running job or the last result.
 //   baseline reset and read the idle frame statistics.
 //
+// Immediate ops (answered in the frame of the verb; all but `find` need a
+// crate selected with `crate` or `find class= pos=`):
+//   find     select the nearest `class` (default OZ_ProbeCrate) as the crate.
+//   chain    build types=A,B,C nested (C innermost, `leaves` x `leaf` in it)
+//            on the ground and move the root into the crate; ground=1 leaves
+//            it lying. mode=sync|local|tree|move|incargo|inbox|deferred and
+//            flags=surface|inventory|none vary how the containers are created
+//            and moved (the zombie hunt of 2026-09-18, see OZ_ProbeState).
+//   put      the nearest loose `class` within 3 m of pos into the crate.
+//   out      the crate's first cargo root onto the ground, by the server.
+//   hands    the nearest loose `class` at pos into the first player's hands.
+//   tree     every item within `radius` of pos as a tree, into tree.txt.
+//   deltree  ObjectDelete of the nearest loose `class` at pos, deepest first.
+//
 // Results: one JSON line per finished job appended to
 // $profile:OpenZone_StorageProbe/results.log, plus the script log.
 
@@ -155,6 +169,12 @@ class OZ_Probe
     // a frame with 724 ms of script work arrived as timeslice = 300 ms).
     void OnFrame(float timeslice)
     {
+        string deferred = OZ_ProbeState.DeferredTick();
+        if (deferred != "")
+        {
+            AppendLine(RESULTS, "{\"op\":\"chain-deferred\",\"detail\":\"" + Escape(deferred) + "\"}");
+            Print("[OpenZone] storage probe " + deferred);
+        }
         float now = GetGame().GetTickTime();
         if (m_LastFrameAt == 0)
         {
@@ -216,7 +236,7 @@ class OZ_Probe
             return CmdFind(args, detail);
 
         // Immediate research ops (items 2-4 of the brief); all need a crate.
-        if (op == "stock" || op == "inspect" || op == "blob_save" || op == "blob_load" || op == "blobtime" || op == "nest" || op == "give")
+        if (op == "stock" || op == "inspect" || op == "blob_save" || op == "blob_load" || op == "blobtime" || op == "nest" || op == "give" || op == "chain" || op == "put" || op == "hands" || op == "tree" || op == "out" || op == "deltree")
         {
             if (!RequireCrate(detail))
                 return false;
@@ -313,6 +333,46 @@ class OZ_Probe
             int children = Arg(args, "children", "10").ToInt();
             int bags = Arg(args, "n", "5").ToInt();
             detail = OZ_ProbeState.Nest(m_Crate, bagType, childType, children, bags);
+        }
+        else if (op == "chain")
+        {
+            string chainTypes = Arg(args, "types", "PlateCarrierPouches,SmallProtectorCase,AmmoBox");
+            string leafType = Arg(args, "leaf", "Paper");
+            int leafCount = Arg(args, "leaves", "3").ToInt();
+            bool onGround = Arg(args, "ground", "0") == "1";
+            string chainMode = Arg(args, "mode", "sync");
+            string chainFlags = Arg(args, "flags", "surface");
+            int chainDelay = Arg(args, "delay", "1").ToInt();
+            detail = OZ_ProbeState.Chain(m_Crate, chainTypes, leafType, leafCount, onGround, chainMode, chainFlags, chainDelay);
+        }
+        else if (op == "deltree")
+        {
+            vector delAt = Arg(args, "pos", "0 0 0").ToVector();
+            string delKind = Arg(args, "class", "PlateCarrierPouches");
+            string delOrder = Arg(args, "order", "all");
+            detail = OZ_ProbeState.DelTree(delAt, delKind, delOrder);
+        }
+        else if (op == "out")
+        {
+            detail = OZ_ProbeState.Out(m_Crate);
+        }
+        else if (op == "tree")
+        {
+            vector treeAt = Arg(args, "pos", "0 0 0").ToVector();
+            float treeR = Arg(args, "radius", "8").ToFloat();
+            detail = OZ_ProbeState.Tree(treeAt, treeR, "$profile:OpenZone_StorageProbe/tree.txt");
+        }
+        else if (op == "hands")
+        {
+            vector handsAt = Arg(args, "pos", "0 0 0").ToVector();
+            string handsKind = Arg(args, "class", "PlateCarrierPouches");
+            detail = OZ_ProbeState.Hands(handsAt, handsKind);
+        }
+        else if (op == "put")
+        {
+            vector putAt = Arg(args, "pos", "0 0 0").ToVector();
+            string putKind = Arg(args, "class", "PlateCarrierPouches");
+            detail = OZ_ProbeState.Put(m_Crate, putAt, putKind);
         }
         else if (op == "give")
         {

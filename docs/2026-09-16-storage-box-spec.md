@@ -607,3 +607,100 @@ and it is the reason the frame budget is 5 ms rather than 20.
 **Nothing was lost or duplicated.** The final `close_all`, after ten opens, ten closes, ten
 more opens and 8300 successful moves through all of it, wrote 10683 items: exactly the
 count the test started with.
+
+## 21. Ghost items: the stuck deletion of nested containers (2026-09-18, owner's video)
+
+The owner filmed the live server's phantom items and then reproduced them on the stand
+(https://www.youtube.com/watch?v=CWDBvLZji04): a pouch holding a protective case holding a
+first aid kit, restored by a box, taken out and dropped, and later drawn on the ground on the
+client where nobody could pick it up; a restart turned it into a real item again, with the
+case inside and the kit gone. The hunt below took one evening with the stand's own client
+and a new verb; every line is a measurement, not a reading of the engine's source.
+
+### What a ghost is
+
+On the server it is an entity whose deletion stopped halfway: `ToDelete()` and
+`IsPendingDeletion()` answer yes, the network id is 0, the inventory location is UNKNOWN,
+and the entity is still in the spatial index (`GetObjectsAtPosition` returns it). A second
+`ObjectDelete`, `EntityAI.Delete()` or `RemoteObjectTreeDelete` plus `ObjectDelete` change
+nothing; a player joining the server frees every pending one (measured to the second); a
+restart writes them into the persistence as real items -- the top two levels of the tree,
+which is the dupe the players saw. On the client the copy stays behind with location 0 at
+the spot where the item last lay -- that is the picture on the ground nobody can pick up --
+and a relog clears it.
+
+### The recipe (every step needed)
+
+1. A script moves an entity into a container **created in the same frame**
+   (`TakeToDst(InventoryMode.SERVER)`, i.e. `LocationSyncMoveEntity`). The restore did
+   exactly that for every container with cargo: create it, fill it, move it into its parent,
+   all in one frame. An entity *created* into such a container with `CreateEntityInCargo`
+   is fine; a player's juncture move is fine; the same move into a container created 20 s
+   earlier is fine; one frame between the creation and the move is enough on the server.
+2. The entity, or the tree holding it, leaves that cargo for the ground -- a player's
+   take-out and drop, or a script move (`TakeToDst` to a ground location).
+3. Any `ObjectDelete` afterwards: an admin tool on the ground, or our own close after the
+   player put the item back into the box.
+
+Variants measured on the way, all with a two- or three-level chain unless noted:
+
+| what | result |
+|---|---|
+| chain built by the probe in one frame, moved into the box, closed untouched | clean |
+| the same, client takes it out and stashes it back, closed | clean |
+| the same, client takes it out and drops it, deleted | **zombie** |
+| the same, client drops it, the server puts it back, closed | **zombie** (the owner's case) |
+| the same without any client: server moves it out, deleted | **zombie** |
+| an empty pouch through the box and out | clean |
+| an empty case moved by script into a pouch created in the same frame, taken out, deleted | **zombie** |
+| the same with the pouch created 20 s earlier | clean |
+| a chain the client built with its own moves, through the box and out | clean |
+| a probe chain built on the ground, never in a box, taken and dropped | clean |
+| a bandage created by `CreateEntityInCargo` in a same-frame kit, taken out, deleted | clean |
+| probe `chain mode=deferred delay=1` (moves in the next frame), out, deleted | clean |
+| creation flags `ECE_IN_INVENTORY` instead of `ECE_PLACE_ON_SURFACE` | zombie |
+| `RemoteObjectTreeDelete`, local move, `RemoteObjectTreeCreate` around the root's move | zombie |
+| every level created inside its parent, no move at all | impossible: the engine refuses a cargo-resident parent (`CreateEntityInCargo` null, `FindFirstFreeLocationForNewEntity` no cell) |
+| deleting a tainted tree deepest first | the children go, the root still sticks |
+
+### The client has its own trigger
+
+With the server-side delay in place (even ten frames), a client that watched the restore
+still kept a ghost after taking the tree out, dropping it and having it deleted. On the
+client the trigger is the SYNC_MOVE itself: a container with children moved into a cargo by
+a command from the server, whatever the timing. A client that joins after the tree is in
+place gets it as one creation and never has the problem.
+
+### The fix
+
+The restore builds each root's tree out of **local** entities the clients never see:
+`CreateObjectEx(..., ECE_LOCAL | ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME)` for a container
+with cargo, `LocationCreateLocalEntity` for everything under it, the recorded cell first and
+any free cell second. The moves are not run where the records are read: each is queued as an
+`OZS_Move` (innermost first, the order of reading) and the open job runs the queue at the
+start of its **next** frame's Tick in `InventoryMode.LOCAL`, which keeps the server one
+frame away from the taint. The move into the box is followed by `RemoteObjectTreeCreate`
+of the root, placed or not, so every client receives the finished tree once, in its final
+place -- the pattern of the game's own `ReplaceItemWithNewLambdaBase`. The job lasts one
+frame more than the reading; `Cancel` and the abandon path delete the containers still
+waiting on the ground; `OZS_ListFallback.Make` does the same. Nothing is drawn on the
+ground during the restore any more, because local entities are invisible until published.
+
+Verified on the stand: restore, server moves the tree out, delete -- 0 zombies (2 before);
+restore, client takes it out and drops it, delete -- server clean, client clean (a client
+ghost before); the owner's own sequence, hands, box, hands, ground, hands, box, close --
+clean on both sides, five entities deleted.
+
+### What stays
+
+- Nested containers that **other** mods build the old way (a storage mod's own restore, an
+  admin tool spawning a filled bag) carry the same taint, and our close cannot delete them
+  cleanly once a player has moved them; deleting deepest first removes their children but
+  not the root. Nothing to do on our side but know it when a report comes in.
+- Attachments created under a local container go through `LocationCreateLocalEntity`; the
+  taint was never measured for a creation, only for moves, and the box's own weapon slots
+  keep the networked path.
+- The stand's tools stay in the probe: the `oz_ghost` verb (`watch`, `scan`, `redelete`),
+  the probe ops `chain mode=sync|local|tree|move|incargo|inbox|deferred flags=...
+  delay=...`, `put`, `out`, `deltree`, `tree`, and the client control commands `grab`,
+  `drop`, `take`, `into`, `onto`, `stash`, `tree`.

@@ -11,19 +11,19 @@ modded class DZMCP_BridgeCore
 {
     override protected string KnownVerbs()
     {
-        return super.KnownVerbs() + ", oz_probe";
+        return super.KnownVerbs() + ", oz_probe, oz_ghost";
     }
 
     override protected bool IsKnownVerb(string verb)
     {
-        if (verb == "oz_probe")
+        if (verb == "oz_probe" || verb == "oz_ghost")
             return true;
         return super.IsKnownVerb(verb);
     }
 
     override protected void Dispatch(string verb, string raw)
     {
-        if (verb != "oz_probe")
+        if (verb != "oz_probe" && verb != "oz_ghost")
         {
             super.Dispatch(verb, raw);
             return;
@@ -47,10 +47,55 @@ modded class DZMCP_BridgeCore
         }
 
         string detail;
-        bool ok = OZ_Probe.Get().Command(op, args, detail);
+        bool ok;
+        if (verb == "oz_ghost")
+            ok = GhostCommand(op, args, detail);
+        else
+            ok = OZ_Probe.Get().Command(op, args, detail);
         if (ok)
             FinishCommand(DZMCP_STATUS_DONE, detail);
         else
             FinishCommand(DZMCP_STATUS_FAILED, detail);
+    }
+
+    // oz_ghost: the zombie watcher (OZ_GhostWatch.c).
+    protected bool GhostCommand(string op, map<string, string> args, out string detail)
+    {
+        vector pos = GhostArg(args, "pos", "0 0 0").ToVector();
+        float radius = GhostArg(args, "radius", "6").ToFloat();
+        string types = GhostArg(args, "types", "");
+        OZ_GhostWatch w = OZ_GhostWatch.Get();
+        if (op == "watch")
+        {
+            detail = w.Start(pos, radius, types, GhostArg(args, "seconds", "0").ToFloat());
+            return true;
+        }
+        if (op == "stop")
+        {
+            detail = w.Stop();
+            return true;
+        }
+        if (op == "scan")
+        {
+            detail = w.Scan(pos, radius, types);
+            return true;
+        }
+        if (op == "redelete")
+        {
+            detail = w.Redelete(pos, radius, GhostArg(args, "mode", "bottomup"));
+            return true;
+        }
+        detail = "unknown op '" + op + "'; known: watch, stop, scan, redelete";
+        return false;
+    }
+
+    protected string GhostArg(map<string, string> args, string key, string fallback)
+    {
+        if (!args)
+            return fallback;
+        string v;
+        if (args.Find(key, v))
+            return v;
+        return fallback;
     }
 }

@@ -675,6 +675,551 @@ class OZ_ProbeState
 
     // ------------------------------------------------------------- nest
 
+    // A chain of containers, outermost first ("PlateCarrierPouches,SmallProtectorCase,AmmoBox"),
+    // with `leaves` items of `leaf` in the innermost one. Built the way the store
+    // restores a chain and the way a player ends up with one: innermost first on
+    // the ground, each moved into the next with TakeToDst in SERVER mode, so every
+    // client is told, and the outermost moved into the crate last.
+    // `mode` is how the outermost container reaches the crate, the step the
+    // zombie recipe needs (measured 2026-09-18: a nested container the server
+    // moved into the box, taken out and dropped by a client, cannot be deleted):
+    //   sync     TakeToDst SERVER, the way the restore does it
+    //   local    TakeToDst LOCAL, no SYNC_MOVE to the clients
+    //   tree     RemoteObjectTreeDelete, local move, RemoteObjectTreeCreate --
+    //            the pattern of vanilla's ReplaceItemWithNewLambdaBase
+    //   incargo  no move at all: every level is created inside its parent
+    // `flagsName` is the creation of the ground entities: surface (current),
+    // inventory (ECE_IN_INVENTORY) or none (ECE_NOLIFETIME alone).
+    static string Chain(EntityAI crate, string typesCsv, string leaf, int leaves, bool ground = false, string mode = "sync", string flagsName = "surface", int delay = 1)
+    {
+        array<string> types = new array<string>();
+        typesCsv.Split(",", types);
+        if (types.Count() == 0)
+            return "no container types";
+        if (mode == "incargo")
+            return ChainInCargo(crate, types, leaf, leaves);
+        if (mode == "inbox")
+            return ChainInBox(crate, types, leaf, leaves);
+        if (mode == "deferred")
+            return ChainDeferred(crate, types, leaf, leaves, delay);
+        int flags = ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME;
+        if (flagsName == "inventory")
+            flags = ECE_IN_INVENTORY | ECE_NOLIFETIME;
+        else if (flagsName == "none")
+            flags = ECE_NOLIFETIME;
+        vector pos = crate.GetPosition();
+        pos[0] = pos[0] + 2;
+        EntityAI inner = null;
+        string desc = "";
+        array<EntityAI> built = new array<EntityAI>();
+        string trace = "";
+        for (int i = types.Count() - 1; i >= 0; i--)
+        {
+            EntityAI c = EntityAI.Cast(GetGame().CreateObjectEx(types.Get(i), pos, flags));
+            if (!c)
+                return "cannot create " + types.Get(i);
+            built.Insert(c);
+            if (!inner)
+            {
+                int made = 0;
+                for (int k = 0; k < leaves; k++)
+                {
+                    if (c.GetInventory().CreateEntityInCargo(leaf))
+                        made++;
+                }
+                desc = types.Get(i) + "(" + made + " " + leaf + ")";
+            }
+            else
+            {
+                if (!MoveInto(inner, c))
+                    return "cannot move " + inner.GetType() + " into " + c.GetType() + "; built so far: " + desc;
+                desc = types.Get(i) + "[" + desc + "]";
+                trace = trace + " | after " + inner.GetType() + "->" + c.GetType() + ":" + Where(built);
+            }
+            inner = c;
+        }
+        // ground=1 stops here: the outermost stays on the ground, where every
+        // client in range sees it lie, the way a player's dropped bag does.
+        if (ground)
+            return "chain on the ground at " + inner.GetPosition().ToString(false) + ": " + desc + trace;
+        bool rootIn;
+        if (mode == "tree")
+        {
+            GetGame().RemoteObjectTreeDelete(inner);
+            rootIn = MoveIntoMode(inner, crate, InventoryMode.LOCAL);
+            GetGame().RemoteObjectTreeCreate(inner);
+        }
+        else if (mode == "local")
+        {
+            rootIn = MoveIntoMode(inner, crate, InventoryMode.LOCAL);
+        }
+        else if (mode == "move")
+        {
+            rootIn = MoveIntoPlain(inner, crate);
+        }
+        else
+        {
+            rootIn = MoveInto(inner, crate);
+        }
+        if (!rootIn)
+            return "cannot move " + inner.GetType() + " into " + crate.GetType() + " (mode " + mode + "); chain " + desc;
+        trace = trace + " | after " + inner.GetType() + "->" + crate.GetType() + ":" + Where(built);
+        return "chain in " + crate.GetType() + " (mode " + mode + ", flags " + flagsName + "): " + desc + trace;
+    }
+
+    // Every level created inside its parent, outermost first, nothing ever
+    // moved. CreateEntityInCargo first; when the engine refuses it for a
+    // container that sits in cargo, LocationCreateEntity into a free cell.
+    static string ChainInCargo(EntityAI crate, array<string> types, string leaf, int leaves)
+    {
+        EntityAI parent = crate;
+        string desc = "";
+        for (int i = 0; i < types.Count(); i++)
+        {
+            string type = types.Get(i);
+            string how = "CreateEntityInCargo";
+            EntityAI c = parent.GetInventory().CreateEntityInCargo(type);
+            if (!c)
+            {
+                InventoryLocation il = new InventoryLocation();
+                if (parent.GetInventory().FindFirstFreeLocationForNewEntity(type, FindInventoryLocationType.CARGO, il))
+                {
+                    c = GameInventory.LocationCreateEntity(il, type, ECE_IN_INVENTORY, RF_DEFAULT);
+                    how = "LocationCreateEntity";
+                }
+                else
+                {
+                    how = "no free cell";
+                }
+            }
+            if (!c)
+                return "cannot create " + type + " inside " + parent.GetType() + " at level " + i + " (" + how + "); built:" + desc;
+            desc = desc + " " + type + "@" + parent.GetType() + "/" + how;
+            parent = c;
+        }
+        int made = 0;
+        for (int k = 0; k < leaves; k++)
+        {
+            if (parent.GetInventory().CreateEntityInCargo(leaf))
+                made++;
+        }
+        return "chain created in cargo (mode incargo):" + desc + "; " + made + " " + leaf + " in " + parent.GetType();
+    }
+
+    // LocationMoveEntity (not the Sync one) plus the SYNC_MOVE command
+    // TakeToDst SERVER would have sent.
+    static bool MoveIntoPlain(EntityAI item, EntityAI into)
+    {
+        InventoryLocation dst = new InventoryLocation();
+        if (!into.GetInventory().FindFreeLocationFor(item, FindInventoryLocationType.CARGO, dst))
+            return false;
+        InventoryLocation src = new InventoryLocation();
+        item.GetInventory().GetCurrentInventoryLocation(src);
+        bool ok = GameInventory.LocationMoveEntity(src, dst);
+        if (ok && dst.IsValid())
+            InventoryInputUserData.SendServerMove(null, InventoryCommandType.SYNC_MOVE, src, dst);
+        return ok;
+    }
+
+    // The crate's first cargo root onto the ground beside the crate, by the
+    // server (TakeToDst SERVER to a ground location): the take-out step of
+    // the zombie recipe without a client's hands in it.
+    static string Out(EntityAI crate)
+    {
+        CargoBase cargo = crate.GetInventory().GetCargo();
+        if (!cargo || cargo.GetItemCount() == 0)
+            return "the crate is empty";
+        EntityAI item = cargo.GetItem(0);
+        vector pos = crate.GetPosition();
+        pos[0] = pos[0] + 1.5;
+        pos[2] = pos[2] + 1.5;
+        pos[1] = GetGame().SurfaceY(pos[0], pos[2]) + 0.05;
+        InventoryLocation src = new InventoryLocation();
+        item.GetInventory().GetCurrentInventoryLocation(src);
+        InventoryLocation dst = new InventoryLocation();
+        vector mat[4];
+        Math3D.MatrixIdentity4(mat);
+        mat[3] = pos;
+        dst.SetGround(item, mat);
+        bool ok = crate.GetInventory().TakeToDst(InventoryMode.SERVER, src, dst);
+        return "out: " + item.GetType() + " -> ground at " + pos.ToString(false) + " by the server: " + ok;
+    }
+
+    // Deletes the nearest loose `kind` within 3 m of `pos` the way a tainted
+    // tree might survive: every descendant on its own ObjectDelete, deepest
+    // first, the root last -- instead of one ObjectDelete of the root that
+    // leaves the top two levels as zombies (measured 2026-09-18). `order`
+    // "children" deletes the children and leaves the root alone, to see
+    // whether a root emptied this way deletes cleanly later.
+    static string DelTree(vector pos, string kind, string order)
+    {
+        array<Object> objs = new array<Object>();
+        GetGame().GetObjectsAtPosition(pos, 3, objs, null);
+        EntityAI best = null;
+        float bestDist = 1000;
+        for (int i = 0; i < objs.Count(); i++)
+        {
+            EntityAI e = EntityAI.Cast(objs.Get(i));
+            if (!e || e.GetHierarchyParent() || !e.IsKindOf(kind))
+                continue;
+            if (e.GetNetworkIDString() == "00")
+                continue;
+            float d = vector.Distance(e.GetPosition(), pos);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = e;
+            }
+        }
+        if (!best)
+            return "no loose " + kind + " within 3 m of " + pos.ToString(false);
+        array<EntityAI> post = new array<EntityAI>();
+        PostOrderOf(best, post);
+        int calls = 0;
+        string names = "";
+        for (int k = 0; k < post.Count(); k++)
+        {
+            EntityAI it = post.Get(k);
+            if (it == best && order == "children")
+                continue;
+            names = names + " " + it.GetType();
+            GetGame().ObjectDelete(it);
+            calls++;
+        }
+        return "deltree " + order + ": " + calls + " ObjectDelete call(s), deepest first:" + names;
+    }
+
+    static void PostOrderOf(EntityAI e, array<EntityAI> order)
+    {
+        GameInventory inv = e.GetInventory();
+        if (inv)
+        {
+            for (int a = 0; a < inv.AttachmentCount(); a++)
+            {
+                EntityAI att = inv.GetAttachmentFromIndex(a);
+                if (att)
+                    PostOrderOf(att, order);
+            }
+            CargoBase cargo = inv.GetCargo();
+            if (cargo)
+            {
+                for (int c = 0; c < cargo.GetItemCount(); c++)
+                {
+                    EntityAI item = cargo.GetItem(c);
+                    if (item)
+                        PostOrderOf(item, order);
+                }
+            }
+        }
+        order.Insert(e);
+    }
+
+    // The root is created inside the crate and never moves; each deeper level
+    // is created on the ground and moved into its (cargo-resident) parent by
+    // an explicit cargo cell, skipping FindFreeLocationFor, which refuses
+    // cargo-resident parents. Tells whether the native move itself refuses,
+    // and if it does not, whether a root that never moved with children
+    // stays deletable after a take-out.
+    static string ChainInBox(EntityAI crate, array<string> types, string leaf, int leaves)
+    {
+        EntityAI parent = crate.GetInventory().CreateEntityInCargo(types.Get(0));
+        if (!parent)
+            return "cannot create " + types.Get(0) + " in " + crate.GetType();
+        string desc = types.Get(0) + "@" + crate.GetType();
+        vector pos = crate.GetPosition();
+        pos[0] = pos[0] + 2;
+        for (int i = 1; i < types.Count(); i++)
+        {
+            EntityAI c = EntityAI.Cast(GetGame().CreateObjectEx(types.Get(i), pos, ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME));
+            if (!c)
+                return "cannot create " + types.Get(i) + "; built: " + desc;
+            InventoryLocation src = new InventoryLocation();
+            c.GetInventory().GetCurrentInventoryLocation(src);
+            InventoryLocation dst = new InventoryLocation();
+            dst.SetCargo(parent, c, 0, 0, 0, false);
+            bool moved = parent.GetInventory().TakeToDst(InventoryMode.SERVER, src, dst);
+            if (!moved)
+            {
+                GetGame().ObjectDelete(c);
+                return "the native refuses " + types.Get(i) + " into cargo-resident " + parent.GetType() + " at cell 0,0; built: " + desc;
+            }
+            desc = desc + " " + types.Get(i) + "@" + parent.GetType() + "/explicit-cell";
+            parent = c;
+        }
+        int made = 0;
+        for (int k = 0; k < leaves; k++)
+        {
+            if (parent.GetInventory().CreateEntityInCargo(leaf))
+                made++;
+        }
+        return "chain (mode inbox): " + desc + "; " + made + " " + leaf + " in " + parent.GetType();
+    }
+
+    // ---- deferred chain ----------------------------------------------------
+    // The containers of the chain, outermost first, created in the frame of
+    // the command; the moves run `s_DeferredFrames` frames later.
+    static ref array<EntityAI> s_Deferred;
+    static EntityAI s_DeferredCrate;
+    static int s_DeferredFrames;
+    static string s_DeferredResult;
+
+    static string ChainDeferred(EntityAI crate, array<string> types, string leaf, int leaves, int delay)
+    {
+        if (s_Deferred)
+            return "a deferred chain is still pending (" + s_DeferredFrames + " frame(s) left)";
+        s_Deferred = new array<EntityAI>();
+        s_DeferredCrate = crate;
+        s_DeferredFrames = delay;
+        s_DeferredResult = "";
+        vector pos = crate.GetPosition();
+        pos[0] = pos[0] + 2;
+        for (int i = 0; i < types.Count(); i++)
+        {
+            pos[2] = pos[2] + 0.6;
+            EntityAI c = EntityAI.Cast(GetGame().CreateObjectEx(types.Get(i), pos, ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME));
+            if (!c)
+            {
+                s_Deferred = null;
+                return "cannot create " + types.Get(i);
+            }
+            s_Deferred.Insert(c);
+        }
+        EntityAI innermost = s_Deferred.Get(s_Deferred.Count() - 1);
+        int made = 0;
+        for (int k = 0; k < leaves; k++)
+        {
+            if (innermost.GetInventory().CreateEntityInCargo(leaf))
+                made++;
+        }
+        return "deferred chain: " + types.Count() + " container(s) created, " + made + " " + leaf + " in " + innermost.GetType() + "; moves in " + delay + " frame(s)";
+    }
+
+    // Called every frame by OZ_Probe.OnFrame. Returns a non-empty text once,
+    // in the frame the moves ran.
+    static string DeferredTick()
+    {
+        if (!s_Deferred)
+            return "";
+        if (s_DeferredFrames > 0)
+        {
+            s_DeferredFrames--;
+            return "";
+        }
+        string r = "deferred moves:";
+        for (int i = s_Deferred.Count() - 1; i > 0; i--)
+        {
+            EntityAI item = s_Deferred.Get(i);
+            EntityAI into = s_Deferred.Get(i - 1);
+            bool ok = false;
+            if (item && into)
+                ok = MoveInto(item, into);
+            r = r + " " + item.GetType() + "->" + into.GetType() + "=" + ok;
+        }
+        EntityAI root = s_Deferred.Get(0);
+        bool rootOk = false;
+        if (root && s_DeferredCrate)
+            rootOk = MoveInto(root, s_DeferredCrate);
+        r = r + " " + root.GetType() + "->crate=" + rootOk;
+        s_DeferredResult = r;
+        s_Deferred = null;
+        s_DeferredCrate = null;
+        return r;
+    }
+
+    // MoveInto with the mode chosen by the caller.
+    static bool MoveIntoMode(EntityAI item, EntityAI into, InventoryMode mode)
+    {
+        InventoryLocation dst = new InventoryLocation();
+        if (!into.GetInventory().FindFreeLocationFor(item, FindInventoryLocationType.CARGO, dst))
+            return false;
+        InventoryLocation src = new InventoryLocation();
+        item.GetInventory().GetCurrentInventoryLocation(src);
+        return into.GetInventory().TakeToDst(mode, src, dst);
+    }
+
+    // Where each built container sits right now: parent type and location
+    // kind (1 GROUND, 2 ATTACHMENT, 3 CARGO), as the server sees it.
+    static string Where(array<EntityAI> built)
+    {
+        string w = "";
+        for (int i = 0; i < built.Count(); i++)
+        {
+            EntityAI e = built.Get(i);
+            if (!e)
+            {
+                w = w + " [gone]";
+                continue;
+            }
+            InventoryLocation il = new InventoryLocation();
+            e.GetInventory().GetCurrentInventoryLocation(il);
+            string parentType = "-";
+            if (e.GetHierarchyParent())
+                parentType = e.GetHierarchyParent().GetType();
+            w = w + " " + e.GetType() + "@" + parentType + "/" + il.GetType();
+        }
+        return w;
+    }
+
+    // The nearest LOOSE item of `kind` within 3 m of `pos`, into the crate --
+    // a ground-to-box move of something every client has already seen lying.
+    static string Put(EntityAI crate, vector pos, string kind)
+    {
+        array<Object> objs = new array<Object>();
+        GetGame().GetObjectsAtPosition(pos, 3, objs, null);
+        EntityAI best = null;
+        float bestDist = 1000;
+        for (int i = 0; i < objs.Count(); i++)
+        {
+            EntityAI e = EntityAI.Cast(objs.Get(i));
+            if (!e || !e.IsKindOf(kind) || e.GetHierarchyParent())
+                continue;
+            float d = vector.Distance(e.GetPosition(), pos);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = e;
+            }
+        }
+        if (!best)
+            return "no loose " + kind + " within 3 m of " + pos.ToString(false);
+        if (!MoveInto(best, crate))
+            return "cannot move the loose " + best.GetType() + " into " + crate.GetType();
+        return "moved the loose " + best.GetType() + " from " + pos.ToString(false) + " into " + crate.GetType();
+    }
+
+    // The nearest LOOSE item of `kind` within 3 m of `pos`, into the hands of
+    // the first connected player, server side -- so the next step can be the
+    // player's OWN client moving it on, the way a player does with the mouse.
+    static string Hands(vector pos, string kind)
+    {
+        array<Man> players = new array<Man>();
+        GetGame().GetPlayers(players);
+        if (players.Count() == 0)
+            return "nobody is connected";
+        Man who = players.Get(0);
+        array<Object> objs = new array<Object>();
+        GetGame().GetObjectsAtPosition(pos, 3, objs, null);
+        EntityAI best = null;
+        float bestDist = 1000;
+        for (int i = 0; i < objs.Count(); i++)
+        {
+            EntityAI e = EntityAI.Cast(objs.Get(i));
+            if (!e || !e.IsKindOf(kind) || e.GetHierarchyParent())
+                continue;
+            float d = vector.Distance(e.GetPosition(), pos);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = e;
+            }
+        }
+        if (!best)
+            return "no loose " + kind + " within 3 m of " + pos.ToString(false);
+        who.ServerTakeEntityToHands(best);
+        return "asked the server to put the loose " + best.GetType() + " into " + who.GetIdentity().GetName() + "'s hands";
+    }
+
+    // Every item near `pos` as a tree, one line per entity: depth, type,
+    // network id, parent type, location kind (1 ground, 2 attachment, 3
+    // cargo, 4 hands), and W when the entity is ALSO found by
+    // GetObjectsAtPosition, i.e. registered in the world's spatial index.
+    // A child (depth > 0) marked W is the split state: in a container's
+    // cargo by hierarchy and a loose world object by index at the same time.
+    static string Tree(vector pos, float radius, string fileName)
+    {
+        array<Object> objs = new array<Object>();
+        GetGame().GetObjectsAtPosition(pos, radius, objs, null);
+        FileHandle tf = OpenFile(fileName, FileMode.APPEND);
+        if (tf != 0)
+            FPrintln(tf, "=== tree at " + pos.ToString(false) + " r=" + radius + " t=" + GetGame().GetTickTime());
+        int roots = 0;
+        int lines = 0;
+        int split = 0;
+        for (int i = 0; i < objs.Count(); i++)
+        {
+            EntityAI e = EntityAI.Cast(objs.Get(i));
+            if (!e)
+                continue;
+            if (!ItemBase.Cast(e) && !OZ_StorageBox.Cast(e))
+                continue;
+            if (e.GetHierarchyParent())
+            {
+                // An indexed entity with a parent: report it as its own line
+                // so it cannot hide behind its root.
+                split++;
+                if (tf != 0)
+                    FPrintln(tf, "INDEXED-WITH-PARENT " + TreeLine(e, 0));
+                continue;
+            }
+            roots++;
+            lines = lines + TreeWalk(e, 0, tf);
+        }
+        if (tf != 0)
+        {
+            FPrintln(tf, "total roots " + roots + ", lines " + lines + ", indexed-with-parent " + split);
+            CloseFile(tf);
+        }
+        return "tree: " + roots + " root(s), " + lines + " line(s), " + split + " indexed entity(ies) with a parent -> " + fileName;
+    }
+
+    static int TreeWalk(EntityAI e, int depth, FileHandle tf)
+    {
+        if (tf != 0)
+            FPrintln(tf, TreeLine(e, depth));
+        int n = 1;
+        GameInventory inv = e.GetInventory();
+        if (!inv)
+            return n;
+        int ac = inv.AttachmentCount();
+        for (int a = 0; a < ac; a++)
+        {
+            EntityAI att = inv.GetAttachmentFromIndex(a);
+            if (att)
+                n = n + TreeWalk(att, depth + 1, tf);
+        }
+        CargoBase cargo = inv.GetCargo();
+        if (cargo)
+        {
+            int cc = cargo.GetItemCount();
+            for (int c = 0; c < cc; c++)
+            {
+                EntityAI item = cargo.GetItem(c);
+                if (item)
+                    n = n + TreeWalk(item, depth + 1, tf);
+            }
+        }
+        return n;
+    }
+
+    static string TreeLine(EntityAI e, int depth)
+    {
+        string pad = "";
+        for (int d = 0; d < depth; d++)
+            pad = pad + "  ";
+        InventoryLocation il = new InventoryLocation();
+        e.GetInventory().GetCurrentInventoryLocation(il);
+        string parentType = "-";
+        if (e.GetHierarchyParent())
+            parentType = e.GetHierarchyParent().GetType();
+        string indexed = "";
+        array<Object> near = new array<Object>();
+        GetGame().GetObjectsAtPosition(e.GetPosition(), 0.3, near, null);
+        if (near.Find(e) >= 0)
+            indexed = " W";
+        return pad + e.GetType() + " #" + e.GetNetworkIDString() + " parent=" + parentType + " loc=" + il.GetType() + indexed + " at " + e.GetPosition().ToString(false);
+    }
+
+    // Into the first free cargo cell of `into`, the client-synced way.
+    static bool MoveInto(EntityAI item, EntityAI into)
+    {
+        InventoryLocation dst = new InventoryLocation();
+        if (!into.GetInventory().FindFreeLocationFor(item, FindInventoryLocationType.CARGO, dst))
+            return false;
+        InventoryLocation src = new InventoryLocation();
+        item.GetInventory().GetCurrentInventoryLocation(src);
+        return into.GetInventory().TakeToDst(InventoryMode.SERVER, src, dst);
+    }
+
     static string Nest(EntityAI crate, string bagType, string childType, int childCount, int bags)
     {
         int moved = 0;

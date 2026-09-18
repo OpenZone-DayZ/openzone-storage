@@ -227,9 +227,12 @@ class OZS_OpenJob
     protected int m_Created;
     protected int m_Missed;
     protected int m_Fails;
+    // Containers created this frame, moved into their parents next frame.
+    protected ref array<ref OZS_Move> m_Moves;
 
     void OZS_OpenJob(OZ_StorageBox box, string who)
     {
+        m_Moves = new array<ref OZS_Move>();
         m_Box = box;
         m_Who = who;
         m_Mode = MODE_NONE;
@@ -365,7 +368,8 @@ class OZS_OpenJob
         if (!m_Box)
         {
             Abort();
-            OZ_Log.Warn("storage: open job abandoned: the box is gone");
+            int dropped = OZS_Records.DropMoves(m_Moves);
+            OZ_Log.Warn("storage: open job abandoned: the box is gone; " + dropped + " container(s) waiting on the ground removed");
             return true;
         }
         m_Tokens = m_Tokens + rate * timeslice;
@@ -373,6 +377,14 @@ class OZS_OpenJob
             m_Tokens = rate;
         float frameStart = GetGame().GetTickTime();
         float now = frameStart;
+        // The moves queued by the previous frame's records go first: every
+        // container they target is at least one frame old by now.
+        if (m_Moves.Count() > 0)
+        {
+            int missedByMoves = OZS_Records.s_Missed;
+            OZS_Records.ApplyMoves(m_Moves);
+            m_Missed = m_Missed + OZS_Records.s_Missed - missedByMoves;
+        }
         while (m_Mode != MODE_NONE && m_Tokens >= 1)
         {
             // The record counters are static and shared by every job in
@@ -400,7 +412,8 @@ class OZS_OpenJob
         m_WorkMs = m_WorkMs + ms;
         if (ms > m_MaxStepMs)
             m_MaxStepMs = ms;
-        if (m_Mode != MODE_NONE)
+        // Moves queued this frame run next frame, so the job lasts one more.
+        if (m_Mode != MODE_NONE || m_Moves.Count() > 0)
             return false;
         Finish();
         return true;
@@ -419,7 +432,7 @@ class OZS_OpenJob
         }
         EntityAI made;
         int missedBefore = OZS_Records.s_Missed;
-        if (OZS_Records.ReadEntity(m_Bin, m_Box, m_SaveVer, made))
+        if (OZS_Records.ReadEntity(m_Bin, m_Box, m_SaveVer, made, m_Moves))
         {
             m_Next++;
             return;
@@ -430,6 +443,7 @@ class OZS_OpenJob
         OZS_Records.s_Missed = missedBefore;
         if (made)
             GetGame().ObjectDelete(made);
+        OZS_Records.DropMoves(m_Moves);
         CloseBin();
         string keep = OZS_Store.BinPath(m_Id) + ".failed-" + OZS_Store.FileStamp();
         CopyFile(OZS_Store.BinPath(m_Id), keep);
@@ -445,7 +459,7 @@ class OZS_OpenJob
             m_Mode = MODE_NONE;
             return;
         }
-        OZS_ListFallback.Make(m_List, m_ListAt, m_Box);
+        OZS_ListFallback.Make(m_List, m_ListAt, m_Box, m_Moves);
         m_ListAt = OZS_ListFallback.SubtreeEnd(m_List, m_ListAt);
         m_Next++;
     }
@@ -471,6 +485,7 @@ class OZS_OpenJob
     void Cancel(string why)
     {
         Abort();
+        int waiting = OZS_Records.DropMoves(m_Moves);
         if (!m_Box)
             return;
         array<EntityAI> roots = new array<EntityAI>();
@@ -482,7 +497,7 @@ class OZS_OpenJob
         }
         m_Box.OZS_SetRestoring(false);
         m_Box.OZS_SetState(OZS_Const.STATE_CLOSED);
-        OZ_Log.Warn("storage: box " + m_Id + " opening cancelled (" + why + "): " + roots.Count() + " half-restored items removed, the files stay");
+        OZ_Log.Warn("storage: box " + m_Id + " opening cancelled (" + why + "): " + roots.Count() + " half-restored items and " + waiting + " container(s) waiting on the ground removed, the files stay");
     }
 
     protected void Finish()
