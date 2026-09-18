@@ -704,3 +704,35 @@ clean on both sides, five entities deleted.
   the probe ops `chain mode=sync|local|tree|move|incargo|inbox|deferred flags=...
   delay=...`, `put`, `out`, `deltree`, `tree`, and the client control commands `grab`,
   `drop`, `take`, `into`, `onto`, `stash`, `tree`.
+
+### Load (2026-09-19, owner asked)
+
+The same 100 nested roots (500 entities) restored by both versions of the code: old
+138 ms of script work with a longest step of 4 ms, new 105 ms and 3 ms; with a client
+at the box 119 ms and 2 ms, server frames at most 22 ms, and the client's own walk of
+the box shows all 500 entities in place. The fix costs nothing; the LOCAL moves skip the
+SYNC_MOVE serialisation. Table in `docs/measurements/2026-09-19/`.
+
+## 22. An item whose mod left the server (2026-09-19, owner asked)
+
+Measured by renaming the case's class in a stored box to one that does not exist
+(`SmallProtectorCase` -> `SmallProtectorCasX` in both files, the stamps untouched). The
+open warns `cannot create SmallProtectorCasX in PlateCarrierPouches`, gives up on the
+blob (`items.bin cannot be followed at root 0`, the blob kept as `items.bin.failed-<stamp>`)
+and restores the box from `items.list`: the pouch comes back **empty**, the case and
+everything inside it -- the kit, the bandages -- are gone, `missed 1`. So today an item of a
+vanished mod takes its contents with it, and every root behind it in the same box comes
+back through the list, i.e. with health, quantity and ammunition but without the script
+state of its class (a radio's frequency, a battery's charge through the energy manager
+excepted). The files are never destroyed: the mod back on the server and the `.failed`
+blob renamed into place restore everything.
+
+Two things the owner may want, neither done:
+
+- **The contents of a vanished container fall into the container above it.** The list
+  fallback knows the subtree; on a failed creation it could go on with the children under
+  the parent, any free cell, instead of skipping the subtree. Small change, list-level
+  state only.
+- **A length-prefixed record in `items.bin`**, so the reader skips one unreadable record
+  and keeps the full state of every other root. A format change (`BIN_VERSION` 2, the old
+  blob still readable).
