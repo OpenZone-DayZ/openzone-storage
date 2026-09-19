@@ -334,6 +334,15 @@ class OZS_Records
                 Cleanup(nodes);
                 return false;
             }
+            // The root itself found no place (a full box, a returned root
+            // whose cell is taken and no cell free): the root is parked
+            // again rather than consumed by a stand-in and lost.
+            if (c == 0 && node.standIn)
+            {
+                why = "no room in the box for " + node.cls;
+                Cleanup(nodes);
+                return false;
+            }
         }
 
         for (int b = 0; b < count; b++)

@@ -572,6 +572,8 @@ class OZS_OpenJob
         string reason = "refused";
         if (why.Contains("marker"))
             reason = "desync";
+        else if (why.Contains("no room"))
+            reason = "no_room";
         OZS_ParkLetter letter = new OZS_ParkLetter();
         letter.id = m_Id;
         letter.stamp = m_Stamp;
