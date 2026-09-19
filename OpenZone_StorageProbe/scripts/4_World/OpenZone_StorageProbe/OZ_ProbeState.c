@@ -1119,6 +1119,47 @@ class OZ_ProbeState
         return "asked the server to put the loose " + best.GetType() + " into " + who.GetIdentity().GetName() + "'s hands";
     }
 
+    // The engine's persistent id of an entity, read right after creation
+    // (mode=spawn) or off the nearest loose entity of `kind` (mode=find), so
+    // that a stop-and-boot shows whether the id exists before the first save
+    // and survives it. GetID is the session's network id, for comparison.
+    static string Pid(vector pos, string kind, string mode)
+    {
+        EntityAI e = null;
+        if (mode == "spawn")
+        {
+            e = EntityAI.Cast(GetGame().CreateObjectEx(kind, pos, ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME));
+            if (!e)
+                return "cannot create " + kind;
+        }
+        else
+        {
+            array<Object> objs = new array<Object>();
+            GetGame().GetObjectsAtPosition(pos, 5, objs, null);
+            float bestDist = 1000;
+            for (int i = 0; i < objs.Count(); i++)
+            {
+                EntityAI c = EntityAI.Cast(objs.Get(i));
+                if (!c || !c.IsKindOf(kind) || c.GetHierarchyParent())
+                    continue;
+                float d = vector.Distance(c.GetPosition(), pos);
+                if (d < bestDist)
+                {
+                    bestDist = d;
+                    e = c;
+                }
+            }
+            if (!e)
+                return "no loose " + kind + " within 5 m of " + pos.ToString(false);
+        }
+        int b1;
+        int b2;
+        int b3;
+        int b4;
+        e.GetPersistentID(b1, b2, b3, b4);
+        return mode + " " + e.GetType() + " at " + e.GetPosition().ToString(false) + ": persistent id " + b1.ToString() + "-" + b2.ToString() + "-" + b3.ToString() + "-" + b4.ToString() + ", GetID " + e.GetID().ToString();
+    }
+
     // Every item near `pos` as a tree, one line per entity: depth, type,
     // network id, parent type, location kind (1 ground, 2 attachment, 3
     // cargo, 4 hands), and W when the entity is ALSO found by

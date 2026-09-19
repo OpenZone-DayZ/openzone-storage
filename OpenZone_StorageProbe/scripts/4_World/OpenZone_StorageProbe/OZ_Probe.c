@@ -234,6 +234,11 @@ class OZ_Probe
             return CmdCrate(args, detail);
         if (op == "find")
             return CmdFind(args, detail);
+        if (op == "pid")
+        {
+            detail = OZ_ProbeState.Pid(Arg(args, "pos", "0 0 0").ToVector(), Arg(args, "class", "Paper"), Arg(args, "mode", "spawn"));
+            return true;
+        }
 
         // Immediate research ops (items 2-4 of the brief); all need a crate.
         if (op == "stock" || op == "inspect" || op == "blob_save" || op == "blob_load" || op == "blobtime" || op == "nest" || op == "give" || op == "chain" || op == "put" || op == "hands" || op == "tree" || op == "out" || op == "deltree")
