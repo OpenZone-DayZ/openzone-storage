@@ -953,6 +953,10 @@ class OZS_Controller
             m_BootSqlWon++;
             box.OZS_SetState(OZS_Const.STATE_CLOSED);
             box.OZS_SetStoredCount(ab.roots);
+            // SQL still believes the box open: the open the crash cut short
+            // never posted its `closed`, and until the next real close every
+            // admin change would be refused with "the box is open".
+            PostClosedAtBoot(id, ab.version);
             OZ_Log.Info(s + " -> the engine's save predates the open; SQL wins, " + ab.roots.ToString() + " stored");
             return;
         }
@@ -960,6 +964,20 @@ class OZS_Controller
         box.OZS_SetState(OZS_Const.STATE_CLOSED);
         box.OZS_SetStoredCount(0);
         OZ_Log.Info(s + " -> new to the bridge, empty");
+    }
+
+    // The `closed` of a close the engine never made (measured 2026-09-19: a
+    // kill right after an open left SQL saying open through the next boot).
+    protected void PostClosedAtBoot(string id, int version)
+    {
+        OZS_IdLetter ack = new OZS_IdLetter();
+        ack.id = id;
+        ack.by = "boot";
+        ack.version = version;
+        string json;
+        string err;
+        if (JsonFileLoader<OZS_IdLetter>.MakeData(ack, json, err, false))
+            OZS_Bridge.Post(OZS_Const.ROUTE_CLOSED, json, new OZS_AckReply("closed at boot"));
     }
 
     // Which of the classes SQL holds exist on this server: the bridge parks
