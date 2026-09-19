@@ -41,13 +41,9 @@ class OZS_Search
         return s_Text != "";
     }
 
-    static bool Matches(EntityAI e)
+    // The query against one name, in the four spellings (see Set).
+    protected static bool NameMatches(string n)
     {
-        if (s_Text == "")
-            return true;
-        if (!e)
-            return true;
-        string n = e.GetDisplayName();
         if (n.IndexOf(s_Q0) >= 0)
             return true;
         if (n.IndexOf(s_Q1) >= 0)
@@ -55,6 +51,32 @@ class OZS_Search
         if (n.IndexOf(s_Q2) >= 0)
             return true;
         return n.IndexOf(s_Q3) >= 0;
+    }
+
+    // An entity matches by its own name, or by the name of anything it
+    // holds, however deep: the pouch stays lit for the rag inside it, and
+    // the player opens the pouch instead of the wrong one. PREORDER lists
+    // the entity itself first; it is skipped, its name was asked already.
+    static bool Matches(EntityAI e)
+    {
+        if (s_Text == "")
+            return true;
+        if (!e)
+            return true;
+        if (NameMatches(e.GetDisplayName()))
+            return true;
+        GameInventory inv = e.GetInventory();
+        if (!inv)
+            return false;
+        ref array<EntityAI> inside = new array<EntityAI>();
+        inv.EnumerateInventory(InventoryTraversalType.PREORDER, inside);
+        for (int i = 0; i < inside.Count(); i++)
+        {
+            EntityAI k = inside.Get(i);
+            if (k && k != e && NameMatches(k.GetDisplayName()))
+                return true;
+        }
+        return false;
     }
 
     static Widget MakeShade(Widget parent)
