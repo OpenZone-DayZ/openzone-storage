@@ -1382,3 +1382,10 @@ class OZ_ProbeState
         return "false";
     }
 }
+
+// A field named `type` compiles; a field named `local` does not (the word is
+// reserved). Kept as the living proof for the dayz-modding skill.
+class OZ_ProbeFieldTest
+{
+    string type;
+}

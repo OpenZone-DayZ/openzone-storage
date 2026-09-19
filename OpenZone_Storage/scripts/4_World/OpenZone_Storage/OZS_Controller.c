@@ -44,6 +44,11 @@ class OZS_Controller
     protected int m_BootSqlWon;
     protected int m_BootClosed;
     protected int m_BootNew;
+    // The classes check waits for the boot closes: the bridge returns a
+    // parked root only into a closed box, and a box the engine closes at
+    // boot is closed in SQL only once its close job has finished.
+    protected int m_BootClosesPending;
+    protected ref array<string> m_PendingClasses;
 
     static OZS_Controller Get()
     {
@@ -80,6 +85,7 @@ class OZS_Controller
         m_BootInFlight = false;
         m_BootRetryAt = -1;
         m_BootWaitSaid = false;
+        m_BootClosesPending = 0;
     }
 
     // Mission start: the boot exchange goes out once the world has loaded.
@@ -348,6 +354,8 @@ class OZS_Controller
 
     void OnClosed(OZ_StorageBox box, bool reopen, string who, string uid)
     {
+        if (who == "boot")
+            BootCloseDone();
         if (!reopen || !box)
             return;
         string why;
@@ -355,8 +363,10 @@ class OZS_Controller
             OZ_Log.Warn("storage: box " + box.OZS_GetId() + " could not reopen after the sort: " + why);
     }
 
-    void OnCloseFailed(OZ_StorageBox box, string uid, string why)
+    void OnCloseFailed(OZ_StorageBox box, string who, string uid, string why)
     {
+        if (who == "boot")
+            BootCloseDone();
         NotifyUid(uid, "#STR_OZS_STORE_FAILED");
     }
 
@@ -751,8 +761,32 @@ class OZS_Controller
         int classes = 0;
         if (a.classes)
             classes = a.classes.Count();
-        ClassesCheck(a.classes);
-        OZ_Log.Info("storage: world loaded: boxes=" + BoxCount() + " open=" + OpenCount() + " classes checked=" + classes.ToString());
+        if (m_BootClosesPending > 0)
+        {
+            m_PendingClasses = new array<string>();
+            for (int c = 0; c < classes; c++)
+                m_PendingClasses.Insert(a.classes.Get(c));
+            OZ_Log.Info("storage: boot: the classes check waits for " + m_BootClosesPending.ToString() + " boot close(s)");
+        }
+        else
+        {
+            ClassesCheck(a.classes);
+        }
+        OZ_Log.Info("storage: world loaded: boxes=" + BoxCount() + " open=" + OpenCount() + " classes to check=" + classes.ToString());
+    }
+
+    // A boot close finished (or failed): once the last one has, the classes
+    // check goes out and the bridge can return parked roots into the boxes
+    // that are closed now.
+    protected void BootCloseDone()
+    {
+        if (m_BootClosesPending > 0)
+            m_BootClosesPending--;
+        if (m_BootClosesPending > 0 || !m_PendingClasses)
+            return;
+        array<string> classes = m_PendingClasses;
+        m_PendingClasses = null;
+        ClassesCheck(classes);
     }
 
     // One box, one rule (design section 3.3): SQL wins over a half-done
@@ -777,6 +811,7 @@ class OZS_Controller
             if (RequestCloseAs(box, "boot", "", "boot", "", why))
             {
                 m_BootClosed++;
+                m_BootClosesPending++;
                 OZ_Log.Info(s + " -> the engine's cargo is the truth, closing it into a new version");
             }
             else
@@ -812,7 +847,10 @@ class OZS_Controller
             box.OZS_SetState(OZS_Const.STATE_OPEN);
             string emptyWhy;
             if (RequestCloseAs(box, "boot", "", "boot", "", emptyWhy))
+            {
+                m_BootClosesPending++;
                 OZ_Log.Info(s + " -> nothing inside; a version with no roots closes it");
+            }
             else
                 OZ_Log.Warn(s + " -> nothing inside and the empty close was refused (" + emptyWhy + ")");
             return;
@@ -837,7 +875,14 @@ class OZS_Controller
             string t = classes.Get(i);
             if (t == "")
                 continue;
-            if (GetGame().ConfigIsExisting("CfgVehicles " + t))
+            // Items live in CfgVehicles, weapons in CfgWeapons, magazines and
+            // ammunition piles in CfgMagazines.
+            bool exists = GetGame().ConfigIsExisting("CfgVehicles " + t);
+            if (!exists)
+                exists = GetGame().ConfigIsExisting("CfgWeapons " + t);
+            if (!exists)
+                exists = GetGame().ConfigIsExisting("CfgMagazines " + t);
+            if (exists)
                 letter.present.Insert(t);
             else
                 letter.missing.Insert(t);

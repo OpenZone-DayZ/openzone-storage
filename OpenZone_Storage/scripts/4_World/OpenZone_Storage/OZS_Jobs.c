@@ -265,7 +265,7 @@ class OZS_CloseJob
             m_Box.OZS_SetTouchedAt(GetGame().GetTickTime());
         }
         OZ_Log.Error("storage: box " + id + " could not be closed by " + m_Who + ": " + why + "; nothing was removed");
-        OZS_Controller.Get().OnCloseFailed(m_Box, m_Uid, why);
+        OZS_Controller.Get().OnCloseFailed(m_Box, m_Who, m_Uid, why);
     }
 
     protected void Abandon(string why)
