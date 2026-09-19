@@ -843,8 +843,8 @@ query, however deep (`OZS_Search.Matches` walks the entity's inventory with
 `EnumerateInventory`); the player opens the right pouch instead of guessing.
 
 A "Count" button beside "Sort" opens a list under the bar: items in total,
-then one line per class, most numerous first -- `12 × Paper`, and for
-stackables the pieces they add up to, `3 × Rag (15 pcs)`. Everything is
+then one line per class, most numerous first -- `12 x Paper`, and for
+stackables the pieces they add up to, `3 x Rag (15 pcs)`. Everything is
 counted on the client from the entities the viewer already holds, so the
 list is live: it is rebuilt whenever the box's `CountInventory()` changes
 -- one native walk of the box per frame, cheap, while the panel is open;
