@@ -792,3 +792,46 @@ Stand notes of the night: the stand's own client stopped connecting after 02:30
 (`0x00010001`, the server unavailable to it while it answered the query port and the
 bridge); Steam was up, the BattlEye client service was not. The owner tests the client
 side himself.
+
+## 24. SQL as the truth, a file as the wire (2026-09-19, owner)
+
+The owner rejected version 2 of the store (section 23.8) for its file cost and
+redirected the whole persistence: the truth of a CLOSED box is the bridge's
+SQLite, the truth of an OPEN box is the engine's cargo, and a file is only the
+wire between them, because an `OnStoreSave` body leaves the script VM through
+`FileSerializer` and no other way. The design lives in the series hub,
+`docs/specs/2026-09-19-storage-sql-truth-design.md`; sections 6, 7, 19, 22 and
+23.6-23.8 of this document no longer describe the code. What replaced them:
+
+- one file per close in `$profile:OpenZone/Storage/xchg/`, version 3 of the
+  wire (header with a random marker, per root the descriptor of the subtree and
+  then the bodies, the marker after every root, `BIN_END`); the bridge keeps
+  every root byte for byte, deduplicated by hash, and answers an open with a
+  cache file it validates or rebuilds from SQL; the engine never writes at an
+  open and never deletes the cache;
+- the boot exchange instead of the file rules: SQL wins over a half-done
+  transition, an open box with cargo is the engine's truth and closes into a
+  new version, the classes SQL holds are checked in `CfgVehicles`, `CfgWeapons`
+  and `CfgMagazines` and the missing ones parked by the bridge, byte for byte,
+  to come back unplaced once the class exists again; the check waits for the
+  boot closes, because the bridge returns a root only into a closed box;
+- a root the engine cannot read (a refused `OnStoreLoad`, a marker out of
+  step, no room for a returned root) is deleted with everything the open
+  created, parked, and the open asked again -- a degraded state is never
+  written back;
+- the bridge is mandatory: Open, Close and Sort are refused with the core's
+  `#STR_OZ_ERR_NO_BRIDGE` while it is down or the boot exchange is unanswered,
+  the idle close waits, mission finish never closes a box (a close needs the
+  bridge's answer and there is no frame loop to wait in);
+- events (placed, removed, open, close, put, take, sort, park reasons,
+  unavailable) go by HTTP in batches of up to 200 once a second;
+- the box id is the engine's persistent id, `b1-b2-b3-b4`, valid the frame the
+  box is created and the same after every boot (measured).
+
+Measured on the stand 2026-09-19 (`docs/measurements/2026-09-19/results-sql-truth.md`):
+1272 roots close in 305 ms of paced writing and open with 48 ms of work;
+100 nested chains (600 entities) close in 115 ms and open with 115 ms; the
+bridge answers a close in 40-130 ms; the AKM with its magazine and chambered
+round, ten nested chains and an item of a stand-only class survived the vanish
+and return of their pbo. Not pushed; commits ff790c9..HEAD of this repository
+and 39d17cf..57bff93 of `openzone-bridge`.
