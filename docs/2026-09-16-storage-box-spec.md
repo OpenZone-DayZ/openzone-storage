@@ -736,3 +736,59 @@ Two things the owner may want, neither done:
 - **A length-prefixed record in `items.bin`**, so the reader skips one unreadable record
   and keeps the full state of every other root. A format change (`BIN_VERSION` 2, the old
   blob still readable).
+
+## 23. The owner's decisions of 2026-09-19, and what became of them
+
+1. **A placed box is never dismantled** (*owner*: no). Closed, nothing to build.
+2. **The Sort button looks like the PDA's** (*owner*). The button in `ozs_search.layout`
+   draws itself through children the way `oz_pda_menu.layout` does: an edge panel
+   (0.22 0.3 0.38), a face (0.135 0.18 0.225) that lights up to the edge colour under the
+   mouse (`OnMouseEnter`/`OnMouseLeave` in `OZS_BoxBar`), and the text in the PDA's blue
+   (0.31 0.71 0.91), 13 px, centred. `SetText` goes to the `SortText` child.
+3. **The Cyrillic search** the owner checks himself on his own client.
+4. **The search field opens by a click only** (*owner*: fine as it is).
+5. **Kits are handed out by admins** (*owner*); no recipe, no spawn, `types-example.xml`
+   stays at nominal 0.
+6. **A removed box's store goes to an archive** (*owner*). `OZS_Store.Archive` moves every
+   file of `<id>/` and `<id>/roots/` into `Storage/removed/<id>/`, writes `removed.txt`
+   there and deletes the emptied directories (`DeleteFile` removes an empty directory --
+   measured). `EEDelete` calls it in place of the old mark; the `files` verb reports
+   `archived=`. Verified on the stand with a version 2 store: index, list, the `.failed`
+   copy and `roots/0000.bin` all moved, the live directory gone.
+7. **Vanilla's uppercase in container headers** (*owner*: look at how the PDA does it). The
+   PDA never uppercases; the inventory screen does, in four places before the name reaches
+   a header (`CargoContainer.UpdateHeaderText`, `Attachments.InitAttachmentGrid`,
+   `HandsPreview.CreateNewIcon`, `ContainerWithCargoAndAttachments.SetEntity`) and in the
+   headers themselves (`Header.SetName`, `ClosableHeader.SetName`) -- which is why the fix
+   of 2026-09-17 in the header alone found only spaces to fix. `OZS_Headers.c` reopens all
+   of them to fold case through `OZS_Case`; the closable header of a box without a cargo
+   grid is named again after `super.SetEntity`. Compiles on the client; not yet seen on a
+   Ukrainian client (the stand's own client could not connect this night, see below).
+8. **The record with a length in `items.bin`** (*owner*, section 22's second option) turned
+   out impossible as written: `FileSerializer` is `Open`, `Close`, `Read`, `Write` -- no
+   position, no seek, no raw bytes -- so a typed stream cannot step over a body it cannot
+   parse. The equivalent that the engine allows is **one file per root**: `items.bin` is
+   now the header alone (version 2, the same fields), every root's record sits in
+   `roots/NNNN.bin` with the store's stamp and its own index inside, and the open reads
+   root by root: a file that is missing, of another commit, or broken inside costs that
+   root and no other -- it comes from `items.list`, the file is kept as `.failed-<stamp>`,
+   and the next root is read from its own file. The writer deletes the old files at Open as
+   before, writes the index whole, the root files straight into place and the list line by
+   line, and commits index and list at the end; a crash before the commit leaves no index,
+   and the engine's cargo is the truth as it always was. A version 1 store (the boxes
+   closed before this) opens through `items.list` and is rewritten as version 2 at its next
+   close. Measured on the stand: root 7 of 100 with its class renamed to one that does not
+   exist -- `root 7 of 100 cannot be read (the record cannot be followed); kept as
+   roots\0007.bin.failed-...; it comes from items.list`, the other 99 from their files,
+   500 entities in the box, no zombie. The price is the file count: 100 nested roots
+   closed in 205 ms (78-83 ms as one file) and opened with 142 ms of script work
+   (105-119 ms); a flat box of 1400 items closed in 1108 ms of paced writing (283 ms for
+   1443 as one file) and opened with 196 ms of work (20 ms), longest step 8-10 ms, wall
+   2.8 s at the 500-per-second rate either way. Table in
+   `docs/measurements/2026-09-19/results-store-v2.md`. If the file count ever matters,
+   roots can be grouped into files of N without touching the reader's logic.
+
+Stand notes of the night: the stand's own client stopped connecting after 02:30
+(`0x00010001`, the server unavailable to it while it answered the query port and the
+bridge); Steam was up, the BattlEye client service was not. The owner tests the client
+side himself.

@@ -203,6 +203,9 @@ class OZS_OpenJob
     static const int MODE_BIN  = 0;
     static const int MODE_LIST = 1;
     static const int MODE_NONE = 2;
+    static const int LIST_UNREAD  = 0;
+    static const int LIST_USABLE  = 1;
+    static const int LIST_REFUSED = 2;
 
     protected OZ_StorageBox m_Box;
     protected string m_Id;
@@ -217,8 +220,12 @@ class OZS_OpenJob
     protected int m_Entities;
     protected int m_Next;
     protected ref array<ref OZS_ListRec> m_List;
+    protected int m_ListState;
     protected int m_ListAt;
     protected int m_FallbackFrom;
+    // Roots that came from items.list because their own file could not be
+    // read (the index itself fine).
+    protected int m_FromList;
     protected float m_Tokens;
     protected float m_Started;
     protected int m_Frames;
@@ -237,6 +244,8 @@ class OZS_OpenJob
         m_Who = who;
         m_Mode = MODE_NONE;
         m_FallbackFrom = -1;
+        m_ListState = LIST_UNREAD;
+        m_FromList = 0;
         m_BinStamp = "";
         m_Created = 0;
         m_Missed = 0;
@@ -281,28 +290,28 @@ class OZS_OpenJob
             why = "no items.bin";
             return false;
         }
-        m_Bin = new FileSerializer();
-        if (!m_Bin.Open(path, FileMode.READ))
+        FileSerializer index = new FileSerializer();
+        if (!index.Open(path, FileMode.READ))
         {
-            m_Bin = null;
             why = "items.bin cannot be opened";
             return false;
         }
         int ver;
-        if (!m_Bin.Read(ver) || ver != OZS_Const.BIN_VERSION)
+        if (!index.Read(ver) || ver != OZS_Const.BIN_VERSION)
         {
-            CloseBin();
+            index.Close();
             why = "items.bin format version " + ver + " is not " + OZS_Const.BIN_VERSION;
             return false;
         }
         string type;
         string id;
-        m_Bin.Read(m_SaveVer);
-        m_Bin.Read(m_BinStamp);
-        m_Bin.Read(type);
-        m_Bin.Read(id);
-        m_Bin.Read(m_Roots);
-        m_Bin.Read(m_Entities);
+        index.Read(m_SaveVer);
+        index.Read(m_BinStamp);
+        index.Read(type);
+        index.Read(id);
+        index.Read(m_Roots);
+        index.Read(m_Entities);
+        index.Close();
         if (id != m_Id)
             OZ_Log.Warn("storage: box " + m_Id + " items.bin was written for box " + id);
         if (m_SaveVer != GetGame().SaveVersion())
@@ -311,40 +320,52 @@ class OZS_OpenJob
         return true;
     }
 
-    // items.list from root `fromRoot` on.
-    protected bool OpenList(int fromRoot)
+    // Reads items.list once and checks that it belongs to the index's
+    // commit. The two are written in one pass with one stamp, so a list
+    // stamped otherwise is a survivor of an older commit whose delete
+    // failed, and splicing it onto this store would restore the wrong items:
+    // refused, kept aside, both stamps said. True when the list can be used.
+    protected bool LoadList()
     {
+        if (m_ListState != LIST_UNREAD)
+            return m_ListState == LIST_USABLE;
+        m_ListState = LIST_REFUSED;
         m_List = new array<ref OZS_ListRec>();
-        int n = OZS_ListFallback.Read(m_Id, m_List);
-        if (n < 0)
+        if (OZS_ListFallback.Read(m_Id, m_List) < 0)
         {
-            m_Mode = MODE_NONE;
+            m_List = null;
+            OZ_Log.Error("storage: box " + m_Id + " has no readable items.list");
             return false;
         }
-        // The two files of a store are written in one pass with one stamp, so
-        // a list whose stamp differs from the blob's belongs to an older
-        // commit: the delete of the old live file must have failed and the new
-        // blob landed beside a survivor. Splicing it on from root `fromRoot`
-        // would restore the wrong items, and where the roots overlap it would
-        // duplicate them. Refuse, keep both files, and say both stamps.
         if (m_BinStamp != "")
         {
             string listStamp = OZS_Store.ListStamp(m_Id);
             if (listStamp != m_BinStamp)
             {
-                // The blob is already copied aside as .failed-<stamp>; the
-                // list must be too, or the box's next close overwrites the
-                // only copy of the state this list describes and the refusal
-                // will have saved nothing.
+                // Copied aside, or the box's next close overwrites the only
+                // copy of the state this list describes.
                 string keep = OZS_Store.ListPath(m_Id) + ".failed-" + OZS_Store.FileStamp();
                 CopyFile(OZS_Store.ListPath(m_Id), keep);
                 string e = "storage: box " + m_Id + " items.list is stamped " + listStamp;
                 e = e + " but items.bin is stamped " + m_BinStamp;
                 e = e + "; the pair does not match, the fallback is refused and the list is kept as " + keep;
                 OZ_Log.Error(e);
-                m_Mode = MODE_NONE;
+                m_List = null;
                 return false;
             }
+        }
+        m_ListState = LIST_USABLE;
+        return true;
+    }
+
+    // Every root from `fromRoot` on comes from items.list: the index cannot
+    // be used at all (absent, unreadable, or of an older format).
+    protected bool OpenList(int fromRoot)
+    {
+        if (!LoadList())
+        {
+            m_Mode = MODE_NONE;
+            return false;
         }
         int listRoots = OZS_ListFallback.RootCount(m_List);
         if (m_Roots == 0)
@@ -419,40 +440,109 @@ class OZS_OpenJob
         return true;
     }
 
+    // One root from its own file. A file that is missing, of another
+    // commit or broken inside costs that root alone: it comes from
+    // items.list instead, and the next root is read from its own file.
     protected void StepBin()
     {
         if (m_Next >= m_Roots)
         {
-            int end;
-            if (!m_Bin.Read(end) || end != OZS_Const.BIN_END)
-                OZ_Log.Warn("storage: box " + m_Id + " items.bin has no trailer after " + m_Roots + " roots; it may be truncated");
-            CloseBin();
             m_Mode = MODE_NONE;
             return;
         }
+        int n = m_Next;
+        m_Next++;
+        string path = OZS_Store.RootPath(m_Id, n);
         EntityAI made;
+        string why;
         int missedBefore = OZS_Records.s_Missed;
         int queued = m_Moves.Count();
-        if (OZS_Records.ReadEntity(m_Bin, m_Box, m_SaveVer, made, m_Moves))
-        {
-            m_Next++;
+        if (ReadRootFile(path, n, made, why))
             return;
-        }
-        // The stream broke inside root m_Next: drop the half-built tree
-        // (the list restores this root, so it is not a miss), keep the blob
-        // for a look, continue from the list. Its ground containers are the
-        // moves queued from `queued` on; the roots read before it this frame
-        // keep theirs. What ReadEntity deleted itself is no longer `made`.
+        // Drop what the broken file left: its ground containers are the
+        // moves queued from `queued` on, the rest sits in the box under
+        // `made`, and what ReadEntity deleted itself is no longer `made`.
         OZS_Records.s_Missed = missedBefore;
         OZS_Records.DropMovesFrom(m_Moves, queued);
         if (made && !made.IsSetForDeletion())
             GetGame().ObjectDelete(made);
+        string kept = "";
+        if (FileExist(path))
+        {
+            kept = path + ".failed-" + OZS_Store.FileStamp();
+            CopyFile(path, kept);
+            kept = "; kept as " + kept;
+        }
+        OZ_Log.Error("storage: box " + m_Id + " root " + n + " of " + m_Roots + " cannot be read (" + why + ")" + kept + "; it comes from items.list");
+        RootFromList(n);
+    }
+
+    // False with `why` when the file is absent, of another commit, or
+    // breaks inside its record.
+    protected bool ReadRootFile(string path, int n, out EntityAI made, out string why)
+    {
+        made = null;
+        why = "";
+        if (!FileExist(path))
+        {
+            why = "no file " + path;
+            return false;
+        }
+        m_Bin = new FileSerializer();
+        if (!m_Bin.Open(path, FileMode.READ))
+        {
+            m_Bin = null;
+            why = path + " cannot be opened";
+            return false;
+        }
+        int ver;
+        string stamp;
+        int index;
+        if (!m_Bin.Read(ver) || ver != OZS_Const.BIN_VERSION)
+        {
+            CloseBin();
+            why = "format version " + ver;
+            return false;
+        }
+        m_Bin.Read(stamp);
+        m_Bin.Read(index);
+        if (stamp != m_BinStamp || index != n)
+        {
+            CloseBin();
+            why = "stamped " + stamp + " as root " + index + " where the index says " + m_BinStamp + " root " + n;
+            return false;
+        }
+        if (!OZS_Records.ReadEntity(m_Bin, m_Box, m_SaveVer, made, m_Moves))
+        {
+            CloseBin();
+            why = "the record cannot be followed";
+            return false;
+        }
+        int end;
+        if (!m_Bin.Read(end) || end != OZS_Const.BIN_END)
+            OZ_Log.Warn("storage: box " + m_Id + " root " + n + " has no trailer; its file may be truncated");
         CloseBin();
-        string keep = OZS_Store.BinPath(m_Id) + ".failed-" + OZS_Store.FileStamp();
-        CopyFile(OZS_Store.BinPath(m_Id), keep);
-        OZ_Log.Error("storage: box " + m_Id + " items.bin cannot be followed at root " + m_Next + " of " + m_Roots + "; kept as " + keep);
-        if (!OpenList(m_Next))
-            m_Mode = MODE_NONE;
+        return true;
+    }
+
+    // Root n from items.list, when the list can be trusted.
+    protected void RootFromList(int n)
+    {
+        if (!LoadList())
+        {
+            OZS_Records.s_Missed++;
+            OZ_Log.Error("storage: box " + m_Id + " root " + n + " is lost: neither its file nor items.list can be used");
+            return;
+        }
+        int at = OZS_ListFallback.RootIndex(m_List, n);
+        if (at < 0)
+        {
+            OZS_Records.s_Missed++;
+            OZ_Log.Error("storage: box " + m_Id + " root " + n + " is lost: items.list holds " + OZS_ListFallback.RootCount(m_List) + " roots");
+            return;
+        }
+        OZS_ListFallback.Make(m_List, at, m_Box, m_Moves);
+        m_FromList++;
     }
 
     protected void StepList()
@@ -514,6 +604,8 @@ class OZS_OpenJob
         s = s + ", missed " + m_Missed + ", refusals " + m_Fails;
         if (m_FallbackFrom >= 0)
             s = s + ", items.list from root " + m_FallbackFrom;
+        if (m_FromList > 0)
+            s = s + ", " + m_FromList + " root(s) from items.list";
         OZ_Log.Info(s);
     }
 }

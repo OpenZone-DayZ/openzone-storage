@@ -4,6 +4,8 @@ class OZS_Const
 {
     // Where a box keeps its files: <DIR>/<box id>/items.bin and items.list.
     static const string DIR          = "$profile:OpenZone\\Storage";
+    // Where the store of a box that left the world goes, under its id.
+    static const string DIR_REMOVED  = "$profile:OpenZone\\Storage\\removed";
     static const string SETTINGS     = "$profile:OpenZone\\OZ_Storage.json";
     static const string SETTINGS_TAG = "Storage";
 
@@ -15,10 +17,16 @@ class OZS_Const
 
     // Version of the box's own OnStoreSave block (written first, read first).
     static const int SAVE_VERSION = 1;
-    // Version of the items.bin record format, and the trailer that proves
-    // the file was written to the end.
-    static const int BIN_VERSION = 1;
+    // Version of the store's binary format, and the trailer that proves a
+    // file was written to the end. Version 2 (owner, 2026-09-19): items.bin
+    // holds the header alone and every root's record sits in a file of its
+    // own under roots/, so a record that cannot be read -- a class whose mod
+    // left the server -- costs that root and no other. One file could not
+    // do it: the serializer is a typed stream with no way to skip a body it
+    // cannot parse. A version 1 store is read through items.list.
+    static const int BIN_VERSION = 2;
     static const int BIN_END     = 20260916;
+    static const string DIR_ROOTS = "roots";
     // The files of one box under DIR/<box id>/; written as .new first and
     // copied over the live names, so a crash never leaves a half file live.
     static const string FILE_BIN  = "items.bin";

@@ -60,7 +60,6 @@ FrameWidgetClass ozs_search_root {
    font "gui/fonts/sdf_MetronLight24"
   }
   ButtonWidgetClass Sort {
-   color 0.2196 0.2196 0.2196 0.9
    position 344 3
    size 136 28
    hexactpos 1
@@ -69,9 +68,50 @@ FrameWidgetClass ozs_search_root {
    vexactsize 1
    style Empty
    "no focus" 0
-   text "Sort"
-   text_proportion 0.6
-   font "gui/fonts/sdf_MetronBook24"
+   text ""
+   {
+    PanelWidgetClass SortEdge {
+     ignorepointer 1
+     position 0 0
+     size 136 28
+     hexactpos 1
+     vexactpos 1
+     hexactsize 1
+     vexactsize 1
+     color 0.22 0.3 0.38 1
+     priority 0
+     style rover_sim_colorable
+    }
+    PanelWidgetClass SortBg {
+     ignorepointer 1
+     position 1 1
+     size 134 26
+     hexactpos 1
+     vexactpos 1
+     hexactsize 1
+     vexactsize 1
+     color 0.135 0.18 0.225 1
+     priority 1
+     style rover_sim_colorable
+    }
+    TextWidgetClass SortText {
+     ignorepointer 1
+     position 0 0
+     size 136 28
+     hexactpos 1
+     vexactpos 1
+     hexactsize 1
+     vexactsize 1
+     color 0.31 0.71 0.91 1
+     priority 2
+     text "Sort"
+     font "gui/fonts/sdf_MetronBook24"
+     "exact text" 1
+     "exact text size" 13
+     "text halign" center
+     "text valign" center
+    }
+   }
   }
  }
 }

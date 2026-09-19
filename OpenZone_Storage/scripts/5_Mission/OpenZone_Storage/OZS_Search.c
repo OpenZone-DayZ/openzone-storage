@@ -75,6 +75,10 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
     protected Widget        m_Root;
     protected EditBoxWidget m_Edit;
     protected ButtonWidget  m_Sort;
+    // The button is drawn by its children, the way the PDA's buttons are:
+    // an edge, a face that lights up under the mouse, and the text.
+    protected Widget        m_SortBg;
+    protected TextWidget    m_SortText;
     protected TextWidget    m_Label;
     protected TextWidget    m_Loading;
     protected bool          m_WasLoading;
@@ -93,12 +97,14 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
         m_Root.SetSort(0);
         m_Edit = EditBoxWidget.Cast(m_Root.FindAnyWidget("Search"));
         m_Sort = ButtonWidget.Cast(m_Root.FindAnyWidget("Sort"));
+        m_SortBg = m_Root.FindAnyWidget("SortBg");
+        m_SortText = TextWidget.Cast(m_Root.FindAnyWidget("SortText"));
         m_Label = TextWidget.Cast(m_Root.FindAnyWidget("Label"));
         m_Loading = TextWidget.Cast(m_Root.FindAnyWidget("Loading"));
         if (m_Label)
             m_Label.SetText(Widget.TranslateString("#STR_OZS_SEARCH"));
-        if (m_Sort)
-            m_Sort.SetText(Widget.TranslateString("#STR_OZS_SORT"));
+        if (m_SortText)
+            m_SortText.SetText(Widget.TranslateString("#STR_OZS_SORT"));
         if (m_Edit)
             m_Edit.SetText(OZS_Search.s_Text);
         m_Root.SetHandler(this);
@@ -171,6 +177,20 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
         }
         return false;
     }
+
+    override bool OnMouseEnter(Widget w, int x, int y)
+    {
+        if (w == m_Sort && m_SortBg)
+            m_SortBg.SetColor(ARGBF(1, 0.22, 0.3, 0.38));
+        return false;
+    }
+
+    override bool OnMouseLeave(Widget w, Widget enterW, int x, int y)
+    {
+        if (w == m_Sort && m_SortBg)
+            m_SortBg.SetColor(ARGBF(1, 0.135, 0.18, 0.225));
+        return false;
+    }
 }
 
 // The two containers the vicinity builds for a ground container: with cargo
@@ -205,6 +225,10 @@ modded class ContainerWithCargoAndAttachments
     override void SetEntity(EntityAI entity, bool immedUpdate = true)
     {
         super.SetEntity(entity, immedUpdate);
+        // An entity without a cargo grid names the closable header from
+        // vanilla's spoiled uppercase (see OZS_Headers.c); name it again.
+        if (m_Entity && m_ClosableHeader && !(m_Entity.CanDisplayCargo() && m_Entity.GetInventory().GetCargo()))
+            m_ClosableHeader.SetName(m_Entity.GetDisplayName());
         if (m_OZS_Bar)
             return;
         OZ_StorageBox box = OZ_StorageBox.Cast(entity);

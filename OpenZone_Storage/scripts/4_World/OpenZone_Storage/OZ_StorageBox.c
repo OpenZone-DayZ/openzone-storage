@@ -66,8 +66,8 @@ class OZ_StorageBox : DeployableContainer_Base
             {
                 string what = "removed from the world as " + OZS_Const.StateName(m_OZS_State);
                 what = what + " with " + OZS_CountEntities() + " entities, " + m_OZS_StoredCount + " stored";
-                OZ_Log.Warn("storage: box " + m_OZS_Id + " " + what + "; its files are kept");
-                OZS_Store.MarkRemoved(m_OZS_Id, GetType() + " " + what + " at " + GetPosition().ToString(false));
+                OZ_Log.Warn("storage: box " + m_OZS_Id + " " + what + "; its files go to the archive");
+                OZS_Store.Archive(m_OZS_Id, GetType() + " " + what + " at " + GetPosition().ToString(false));
             }
             OZS_Controller.Get().Unregister(this);
         }

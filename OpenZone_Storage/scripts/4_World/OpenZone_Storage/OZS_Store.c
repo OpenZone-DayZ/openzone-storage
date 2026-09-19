@@ -26,18 +26,52 @@ class OZS_Store
         return BoxDir(id) + "\\" + OZS_Const.FILE_LIST;
     }
 
+    static string RootsDir(string id)
+    {
+        return BoxDir(id) + "\\" + OZS_Const.DIR_ROOTS;
+    }
+
+    // roots/0000.bin, roots/0001.bin ... one per root, in the order of the
+    // list.
+    static string RootPath(string id, int n)
+    {
+        return RootsDir(id) + "\\" + n.ToStringLen(4) + ".bin";
+    }
+
+    // Root files present, counted from 0 up to the first gap.
+    static int RootCount(string id)
+    {
+        int n = 0;
+        while (FileExist(RootPath(id, n)))
+            n++;
+        return n;
+    }
+
     static bool HasFiles(string id)
     {
         return FileExist(BinPath(id)) || FileExist(ListPath(id));
     }
 
-    // Removes both files (the engine holds the truth again).
+    // Removes the index, the list and every root file (the engine holds the
+    // truth again).
     static void Delete(string id)
     {
         if (FileExist(BinPath(id)))
             DeleteFile(BinPath(id));
         if (FileExist(ListPath(id)))
             DeleteFile(ListPath(id));
+        DeleteRoots(id);
+    }
+
+    static int DeleteRoots(string id)
+    {
+        int n = 0;
+        while (FileExist(RootPath(id, n)))
+        {
+            DeleteFile(RootPath(id, n));
+            n++;
+        }
+        return n;
     }
 
     // "2026-09-16 17:31:18" in UTC.
@@ -144,19 +178,69 @@ class OZS_Store
     // A box that left the world leaves its files behind; this marks the
     // directory so an admin can tell an orphan store from a live one without
     // reading the log. Appends, so a directory reused later keeps its history.
-    static void MarkRemoved(string id, string text)
+    // Moves the store of a box that left the world into DIR_REMOVED/<id>/
+    // and writes removed.txt on top of it there (owner 2026-09-19): the
+    // files stay readable for an admin, and the live tree holds live boxes
+    // only. Returns how many files went; 0 for a box that never had a store.
+    static int Archive(string id, string text)
     {
         if (id == "")
-            return;
-        // No MakeDirectory and no existence test: FileExist is documented for
-        // files only, and OpenFile simply returns 0 when the directory is not
-        // there -- a box that never had a store leaves nothing to mark.
-        string dir = BoxDir(id);
-        FileHandle fh = OpenFile(dir + "\\" + OZS_Const.FILE_REMOVED, FileMode.APPEND);
-        if (fh == 0)
-            return;
-        FPrintln(fh, Stamp() + " " + text);
-        CloseFile(fh);
+            return 0;
+        string from = BoxDir(id);
+        string to = OZS_Const.DIR_REMOVED + "\\" + id;
+        MakeDirectory(OZS_Const.DIR_REMOVED);
+        int moved = MoveFiles(from, to, id);
+        moved = moved + MoveFiles(RootsDir(id), to + "\\" + OZS_Const.DIR_ROOTS, id);
+        if (moved == 0)
+            return 0;
+        FileHandle mark = OpenFile(to + "\\" + OZS_Const.FILE_REMOVED, FileMode.APPEND);
+        if (mark != 0)
+        {
+            FPrintln(mark, Stamp() + " " + text);
+            CloseFile(mark);
+        }
+        // DeleteFile removes an emptied directory too (measured 2026-09-19).
+        DeleteFile(RootsDir(id));
+        bool dirGone = DeleteFile(from);
+        OZ_Log.Info("storage: box " + id + " store archived: " + moved + " file(s) in " + to + ", the emptied directory removed=" + dirGone);
+        return moved;
+    }
+
+    // Every file of `from` copied into `to` (made on demand) and deleted
+    // where it was; how many went. Subdirectories are left alone.
+    protected static int MoveFiles(string from, string to, string id)
+    {
+        array<string> names = new array<string>();
+        string name;
+        FileAttr attr;
+        FindFileHandle fh = FindFile(from + "\\*", name, attr, FindFileFlags.DIRECTORIES);
+        if (name != "" && name != "." && name != ".." && name != OZS_Const.DIR_ROOTS)
+            names.Insert(name);
+        while (FindNextFile(fh, name, attr))
+        {
+            if (name != "." && name != ".." && name != OZS_Const.DIR_ROOTS)
+                names.Insert(name);
+        }
+        CloseFindFile(fh);
+        if (names.Count() == 0)
+            return 0;
+        MakeDirectory(to);
+        int moved = 0;
+        for (int i = 0; i < names.Count(); i++)
+        {
+            string src = from + "\\" + names.Get(i);
+            string dst = to + "\\" + names.Get(i);
+            if (CopyFile(src, dst))
+            {
+                DeleteFile(src);
+                moved++;
+            }
+            else
+            {
+                OZ_Log.Warn("storage: box " + id + ": " + names.Get(i) + " could not be copied into the archive; it stays in " + from);
+            }
+        }
+        return moved;
     }
 
     // Lines in items.list beyond the header, or -1.
@@ -174,7 +258,10 @@ class OZS_Store
     }
 }
 
-// One store being written, a root at a time, across frames.
+// One store being written, a root at a time, across frames: the index and
+// the list as .new files committed at the end, every root straight into its
+// own file under roots/ -- the old files went at Open, so until Commit the
+// engine's cargo is the truth and a crash leaves nothing half-live.
 class OZS_StoreWriter
 {
     protected string m_Id;
@@ -182,14 +269,15 @@ class OZS_StoreWriter
     protected string m_ListLive;
     protected string m_BinNew;
     protected string m_ListNew;
-    protected ref FileSerializer m_Bin;
+    protected string m_Stamp;
     protected FileHandle m_List;
     protected int m_Expected;
     protected int m_Written;
+    protected int m_RootsWritten;
     protected bool m_Open;
 
-    // Deletes the old live files, opens the .new pair and writes the
-    // headers. False leaves nothing behind and says why.
+    // Deletes the old files, writes the .new index whole and opens the .new
+    // list with its header. False leaves nothing behind and says why.
     bool Open(OZ_StorageBox box, int roots, int entities, out string why)
     {
         m_Id = box.OZS_GetId();
@@ -200,18 +288,20 @@ class OZS_StoreWriter
         }
         MakeDirectory(OZS_Const.DIR);
         MakeDirectory(OZS_Store.BoxDir(m_Id));
+        MakeDirectory(OZS_Store.RootsDir(m_Id));
         m_BinLive = OZS_Store.BinPath(m_Id);
         m_ListLive = OZS_Store.ListPath(m_Id);
         m_BinNew = m_BinLive + OZS_Const.FILE_NEW;
         m_ListNew = m_ListLive + OZS_Const.FILE_NEW;
         m_Expected = entities;
         m_Written = 0;
+        m_RootsWritten = 0;
 
         int saveVer = GetGame().SaveVersion();
-        string stamp = OZS_Store.Stamp();
+        m_Stamp = OZS_Store.Stamp();
 
-        m_Bin = new FileSerializer();
-        if (!m_Bin.Open(m_BinNew, FileMode.WRITE))
+        FileSerializer index = new FileSerializer();
+        if (!index.Open(m_BinNew, FileMode.WRITE))
         {
             why = "cannot write " + m_BinNew;
             return false;
@@ -219,7 +309,7 @@ class OZS_StoreWriter
         m_List = OpenFile(m_ListNew, FileMode.WRITE);
         if (m_List == 0)
         {
-            m_Bin.Close();
+            index.Close();
             DeleteFile(m_BinNew);
             why = "cannot write " + m_ListNew;
             return false;
@@ -230,27 +320,46 @@ class OZS_StoreWriter
         // until Commit.
         OZS_Store.Delete(m_Id);
 
-        m_Bin.Write(OZS_Const.BIN_VERSION);
-        m_Bin.Write(saveVer);
-        m_Bin.Write(stamp);
-        m_Bin.Write(box.GetType());
-        m_Bin.Write(m_Id);
-        m_Bin.Write(roots);
-        m_Bin.Write(entities);
+        index.Write(OZS_Const.BIN_VERSION);
+        index.Write(saveVer);
+        index.Write(m_Stamp);
+        index.Write(box.GetType());
+        index.Write(m_Id);
+        index.Write(roots);
+        index.Write(entities);
+        index.Write(OZS_Const.BIN_END);
+        index.Close();
 
-        string head = OZS_Const.LIST_HEAD + "|1|" + saveVer + "|" + stamp + "|" + box.GetType();
+        string head = OZS_Const.LIST_HEAD + "|1|" + saveVer + "|" + m_Stamp + "|" + box.GetType();
         head = head + "|" + m_Id + "|" + roots + "|" + entities;
         FPrintln(m_List, head);
         return true;
     }
 
-    // One root entity with everything under it, into both files; a cell
-    // override (>= 0) puts a cargo root elsewhere in the grid (the sort).
+    // One root entity with everything under it: its own file, and its lines
+    // in the list. A cell override (>= 0) puts a cargo root elsewhere in the
+    // grid (the sort).
     void WriteRoot(EntityAI e, int newRow = -1, int newCol = -1)
     {
         if (!m_Open || !e)
             return;
-        m_Written = m_Written + OZS_Records.WriteEntity(m_Bin, e, newRow, newCol);
+        int n = m_RootsWritten;
+        m_RootsWritten++;
+        string path = OZS_Store.RootPath(m_Id, n);
+        FileSerializer f = new FileSerializer();
+        if (!f.Open(path, FileMode.WRITE))
+        {
+            // The list still carries this root; the open reads it from there.
+            OZ_Log.Error("storage: box " + m_Id + " cannot write " + path + "; root " + n + " will come from items.list");
+            OZS_Records.WriteListEntity(m_List, e, 0, newRow, newCol);
+            return;
+        }
+        f.Write(OZS_Const.BIN_VERSION);
+        f.Write(m_Stamp);
+        f.Write(n);
+        m_Written = m_Written + OZS_Records.WriteEntity(f, e, newRow, newCol);
+        f.Write(OZS_Const.BIN_END);
+        f.Close();
         OZS_Records.WriteListEntity(m_List, e, 0, newRow, newCol);
     }
 
@@ -259,7 +368,8 @@ class OZS_StoreWriter
         return m_Written;
     }
 
-    // Trailer, close, and the .new pair over the live names.
+    // Close the list and put the .new pair over the live names; the root
+    // files are already where they belong.
     bool Commit(out string why)
     {
         if (!m_Open)
@@ -269,8 +379,6 @@ class OZS_StoreWriter
         }
         if (m_Written != m_Expected)
             OZ_Log.Warn("storage: box " + m_Id + " counted " + m_Expected + " entities but wrote " + m_Written);
-        m_Bin.Write(OZS_Const.BIN_END);
-        m_Bin.Close();
         CloseFile(m_List);
         m_Open = false;
         if (!OZS_Store.Commit(m_BinNew, m_BinLive, why))
@@ -280,17 +388,18 @@ class OZS_StoreWriter
         return true;
     }
 
-    // Closes and removes the .new pair; the live names stay absent.
+    // Closes and removes the .new pair and the root files written so far;
+    // the live names stay absent.
     void Abort()
     {
         if (!m_Open)
             return;
-        m_Bin.Close();
         CloseFile(m_List);
         m_Open = false;
         if (FileExist(m_BinNew))
             DeleteFile(m_BinNew);
         if (FileExist(m_ListNew))
             DeleteFile(m_ListNew);
+        OZS_Store.DeleteRoots(m_Id);
     }
 }
