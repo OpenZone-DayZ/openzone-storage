@@ -176,11 +176,28 @@ class OZS_BridgeSink : OZ_BridgeSink
         routes.Insert(OZS_Const.ROUTE_EVENTS);
     }
 
-    // Live commands of the admin web arrive here (a later sub-project).
+    // A live command of the admin side (design section 3.5): close, remove,
+    // report. The controller answers with an admin_result event.
     override void Deliver(string json)
     {
-        OZ_Log.Dbg("storage: the bridge delivered a storage item, which nothing handles yet");
+        OZS_CommandLetter c = new OZS_CommandLetter();
+        string err;
+        if (!JsonFileLoader<OZS_CommandLetter>.LoadData(json, c, err) || !c || c.cmd == "")
+        {
+            OZ_Log.Warn("storage: the bridge delivered a storage item that is not a command: " + err);
+            return;
+        }
+        OZS_Controller.Get().AdminCommand(c);
     }
+}
+
+// What the bridge pushes into the poll for this mod.
+class OZS_CommandLetter
+{
+    string cmd;
+    string id;
+    string by;
+    string token;
 }
 
 class OZS_Bridge

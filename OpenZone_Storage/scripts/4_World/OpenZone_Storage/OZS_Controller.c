@@ -514,6 +514,70 @@ class OZS_Controller
         }
     }
 
+    // An admin closing a box now: whoever looks at it stops counting.
+    protected void DropViewersOfBox(OZ_StorageBox box)
+    {
+        for (int i = m_Viewers.Count() - 1; i >= 0; i--)
+        {
+            if (m_Viewers.Get(i).m_Box == box)
+                m_Viewers.RemoveOrdered(i);
+        }
+    }
+
+    // ---- live commands of the admin side (design section 3.5) ----
+
+    // report: where and how the box is. close: now, viewers or not. remove:
+    // a closed box leaves the world (its versions stay in SQL). Every
+    // command answers with an admin_result event carrying its ref.
+    void AdminCommand(OZS_CommandLetter c)
+    {
+        OZ_StorageBox box = FindById(c.id);
+        bool ok = false;
+        string note = "";
+        if (!box)
+        {
+            note = "no such box";
+        }
+        else if (c.cmd == "report")
+        {
+            ok = true;
+            note = OZS_Const.StateName(box.OZS_GetState()) + " entities=" + box.OZS_CountEntities() + " stored=" + box.OZS_GetStoredCount();
+            note = note + " viewers=" + ViewerCount(box) + " at " + box.GetPosition().ToString(false);
+        }
+        else if (c.cmd == "close")
+        {
+            DropViewersOfBox(box);
+            string why;
+            ok = RequestCloseAs(box, "admin " + c.by, "", "admin", "", why);
+            if (ok)
+                note = "closing";
+            else
+                note = why;
+        }
+        else if (c.cmd == "remove")
+        {
+            if (box.OZS_GetState() != OZS_Const.STATE_CLOSED)
+            {
+                note = "the box is " + OZS_Const.StateName(box.OZS_GetState()) + "; close it first";
+            }
+            else
+            {
+                ok = true;
+                note = "removed from the world at " + box.GetPosition().ToString(false);
+                GetGame().ObjectDelete(box);
+            }
+        }
+        else
+        {
+            note = "unknown command " + c.cmd;
+        }
+        string verdict = "refused";
+        if (ok)
+            verdict = "ok";
+        OZ_Log.Info("storage: admin " + c.by + " asked " + c.cmd + " of box " + c.id + ": " + verdict + " " + note);
+        OZS_Audit.Log("admin_result", c.id, "", c.by, "", 0, -1, -1, "", c.token + ": " + verdict + " " + note);
+    }
+
     protected void DropViewersOf(string pid)
     {
         for (int i = m_Viewers.Count() - 1; i >= 0; i--)
