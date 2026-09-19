@@ -692,6 +692,15 @@ class OZS_OpenJob
         m_Box.OZS_SetRestoring(false);
         m_Box.OZS_SetState(OZS_Const.STATE_CLOSED);
         OZ_Log.Error("storage: box " + m_Id + " could not be opened by " + m_Who + ": " + why);
+        // The bridge marked the box open when it handed out the contents;
+        // it is closed again, and SQL must know at once.
+        OZS_IdLetter back = new OZS_IdLetter();
+        back.id = m_Id;
+        back.version = 0;
+        string json;
+        string err;
+        if (JsonFileLoader<OZS_IdLetter>.MakeData(back, json, err, false))
+            OZS_Bridge.Post(OZS_Const.ROUTE_CLOSED, json, new OZS_AckReply("closed after a failed open"));
         OZS_Controller.Get().OnOpenFailed(m_Box, m_Uid, why);
     }
 

@@ -482,9 +482,9 @@ class OZS_Records
     {
         if (!n.made || n.standIn)
             return;
-        // Health 0 in a bodiless node means "the class default" (a gift from
-        // the admin side); anything above is the health to set.
-        if (n.health > 0)
+        // Health below zero in a bodiless node means "the class default" (a
+        // gift from the admin side); zero and above is the health to set.
+        if (n.health >= 0)
             n.made.SetHealth("", "Health", n.health);
         ItemBase item = ItemBase.Cast(n.made);
         if (item && item.HasQuantity() && n.quantity > 0)

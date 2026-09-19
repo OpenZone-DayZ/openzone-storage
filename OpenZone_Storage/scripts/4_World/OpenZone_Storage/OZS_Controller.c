@@ -514,6 +514,23 @@ class OZS_Controller
         }
     }
 
+    // A refusal the player sees as a localised string, in words for the
+    // admin's console.
+    protected static string Words(string why)
+    {
+        if (why == "#STR_OZS_OPENING")
+            return "the box is in a transition";
+        if (why == "#STR_OZS_BUSY")
+            return "someone is looking at the box";
+        if (why == "#STR_OZ_ERR_NO_BRIDGE")
+            return "the bridge is down";
+        if (why == "#STR_OZS_STORE_FAILED")
+            return "the close could not start";
+        if (why == "#STR_OZS_OPEN_FAILED")
+            return "the open could not start";
+        return why;
+    }
+
     // An admin closing a box now: whoever looks at it stops counting.
     protected void DropViewersOfBox(OZ_StorageBox box)
     {
@@ -546,13 +563,22 @@ class OZS_Controller
         }
         else if (c.cmd == "close")
         {
-            DropViewersOfBox(box);
-            string why;
-            ok = RequestCloseAs(box, "admin " + c.by, "", "admin", "", why);
-            if (ok)
-                note = "closing";
+            if (box.OZS_GetState() != OZS_Const.STATE_OPEN)
+            {
+                note = "the box is " + OZS_Const.StateName(box.OZS_GetState()) + ", not open";
+            }
             else
-                note = why;
+            {
+                // Whoever looks at it stops counting: the admin's close goes
+                // through even with a screen open on the box.
+                DropViewersOfBox(box);
+                string why;
+                ok = RequestCloseAs(box, "admin " + c.by, "", "admin", "", why);
+                if (ok)
+                    note = "closing";
+                else
+                    note = Words(why);
+            }
         }
         else if (c.cmd == "remove")
         {
@@ -906,17 +932,28 @@ class OZS_Controller
         }
         if (ab.status == "open")
         {
-            // The engine has nothing and SQL believes the box open: it is
-            // empty, and a close with no roots tells the bridge so.
-            box.OZS_SetState(OZS_Const.STATE_OPEN);
-            string emptyWhy;
-            if (RequestCloseAs(box, "boot", "", "boot", "", emptyWhy))
+            // The engine has nothing and SQL believes the box open. Two
+            // different pasts look like this: the engine SAVED the box open
+            // and empty (the players emptied it: a version with no roots
+            // tells the bridge so), or the engine's save is older than the
+            // open (a crash before an autosave: the engine never really had
+            // the items, SQL's version is still the truth and wins).
+            if (state == OZS_Const.STATE_OPEN)
             {
-                m_BootClosesPending++;
-                OZ_Log.Info(s + " -> nothing inside; a version with no roots closes it");
+                string emptyWhy;
+                if (RequestCloseAs(box, "boot", "", "boot", "", emptyWhy))
+                {
+                    m_BootClosesPending++;
+                    OZ_Log.Info(s + " -> saved open and empty; a version with no roots closes it");
+                }
+                else
+                    OZ_Log.Warn(s + " -> saved open and empty, and the empty close was refused (" + emptyWhy + ")");
+                return;
             }
-            else
-                OZ_Log.Warn(s + " -> nothing inside and the empty close was refused (" + emptyWhy + ")");
+            m_BootSqlWon++;
+            box.OZS_SetState(OZS_Const.STATE_CLOSED);
+            box.OZS_SetStoredCount(ab.roots);
+            OZ_Log.Info(s + " -> the engine's save predates the open; SQL wins, " + ab.roots.ToString() + " stored");
             return;
         }
         m_BootNew++;
