@@ -383,7 +383,7 @@ button** and a **live search**. Built and measured:
   5 / 7 / 9 kg. *Measured*: the hologram counts as "floating" (deploy refused) when its
   contact point is closer than 1 m or farther than 2 m from the player -- the camera must
   aim at the ground about a metre and a half ahead; bushes and walls refuse it too, like any
-  vanilla kit. No recipe and no economy entry yet (`types-example.xml` in the repo root).
+  vanilla kit. No recipe and no economy entry yet (`types-example.xml`, shipped in the mod folder from `packaging/`).
 - **Sort** (`OZS_Sorter.c`): a close whose records carry a new layout -- cargo roots ordered
   by display name, class and quantity (fullest first), packed row by row with the items'
   own sizes -- followed by a reopen; the requester keeps their screen open and watches the
