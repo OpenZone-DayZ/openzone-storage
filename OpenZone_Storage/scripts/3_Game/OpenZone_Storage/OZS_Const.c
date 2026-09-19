@@ -69,6 +69,10 @@ class OZS_Const
 
     static const int SLOT_COUNT = 6;
 
+    // The search bar's height and one line of the count list, in layout pixels.
+    static const int UI_BAR_PX = 34;
+    static const int UI_LINE_PX = 17;
+
     static string StateName(int state)
     {
         if (state == STATE_OPENING)

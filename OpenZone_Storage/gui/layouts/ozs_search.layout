@@ -61,7 +61,7 @@ FrameWidgetClass ozs_search_root {
   }
   ButtonWidgetClass Sort {
    position 344 3
-   size 136 28
+   size 120 28
    hexactpos 1
    vexactpos 1
    hexactsize 1
@@ -73,7 +73,7 @@ FrameWidgetClass ozs_search_root {
     PanelWidgetClass SortEdge {
      ignorepointer 1
      position 0 0
-     size 136 28
+     size 120 28
      hexactpos 1
      vexactpos 1
      hexactsize 1
@@ -85,7 +85,7 @@ FrameWidgetClass ozs_search_root {
     PanelWidgetClass SortBg {
      ignorepointer 1
      position 1 1
-     size 134 26
+     size 118 26
      hexactpos 1
      vexactpos 1
      hexactsize 1
@@ -97,7 +97,7 @@ FrameWidgetClass ozs_search_root {
     TextWidgetClass SortText {
      ignorepointer 1
      position 0 0
-     size 136 28
+     size 120 28
      hexactpos 1
      vexactpos 1
      hexactsize 1
@@ -110,6 +110,89 @@ FrameWidgetClass ozs_search_root {
      "exact text size" 13
      "text halign" center
      "text valign" center
+    }
+   }
+  }
+  ButtonWidgetClass Count {
+   position 472 3
+   size 120 28
+   hexactpos 1
+   vexactpos 1
+   hexactsize 1
+   vexactsize 1
+   style Empty
+   "no focus" 0
+   text ""
+   {
+    PanelWidgetClass CountEdge {
+     ignorepointer 1
+     position 0 0
+     size 120 28
+     hexactpos 1
+     vexactpos 1
+     hexactsize 1
+     vexactsize 1
+     color 0.22 0.3 0.38 1
+     priority 0
+     style rover_sim_colorable
+    }
+    PanelWidgetClass CountBg {
+     ignorepointer 1
+     position 1 1
+     size 118 26
+     hexactpos 1
+     vexactpos 1
+     hexactsize 1
+     vexactsize 1
+     color 0.135 0.18 0.225 1
+     priority 1
+     style rover_sim_colorable
+    }
+    TextWidgetClass CountText {
+     ignorepointer 1
+     position 0 0
+     size 120 28
+     hexactpos 1
+     vexactpos 1
+     hexactsize 1
+     vexactsize 1
+     color 0.31 0.71 0.91 1
+     priority 2
+     text "Count"
+     font "gui/fonts/sdf_MetronBook24"
+     "exact text" 1
+     "exact text size" 13
+     "text halign" center
+     "text valign" center
+    }
+   }
+  }
+  PanelWidgetClass CountPanel {
+   visible 0
+   ignorepointer 1
+   position 0 34
+   size 1 60
+   hexactpos 1
+   vexactpos 1
+   hexactsize 0
+   vexactsize 1
+   color 0 0 0 0.6
+   style rover_sim_colorable
+   {
+    MultilineTextWidgetClass CountList {
+     ignorepointer 1
+     position 12 4
+     size 560 52
+     hexactpos 1
+     vexactpos 1
+     hexactsize 1
+     vexactsize 1
+     color 0.85 0.85 0.85 1
+     text ""
+     font "gui/fonts/sdf_MetronBook24"
+     "exact text" 1
+     "exact text size" 13
+     "text valign" top
     }
    }
   }

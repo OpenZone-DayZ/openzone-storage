@@ -835,3 +835,18 @@ bridge answers a close in 40-130 ms; the AKM with its magazine and chambered
 round, ten nested chains and an item of a stand-only class survived the vanish
 and return of their pbo. Not pushed; commits ff790c9..HEAD of this repository
 and 39d17cf..57bff93 of `openzone-bridge`.
+
+## 25. Count and search through containers (2026-09-19, owner's request)
+
+The search bar keeps a container lit when anything inside it matches the
+query, however deep (`OZS_Search.Matches` walks the entity's inventory with
+`EnumerateInventory`); the player opens the right pouch instead of guessing.
+
+A "Count" button beside "Sort" opens a list under the bar: items in total,
+then one line per class, most numerous first -- `12 × Paper`, and for
+stackables the pieces they add up to, `3 × Rag (15 pcs)`. Everything is
+counted on the client from the entities the viewer already holds, so the
+list is live: it is rebuilt whenever the box's `CountInventory()` changes
+and costs nothing on a frame it did not. The panel closes while the box is
+loading and on the button. Nothing of this reaches the server or the bridge;
+a closed box has no panel to count in.

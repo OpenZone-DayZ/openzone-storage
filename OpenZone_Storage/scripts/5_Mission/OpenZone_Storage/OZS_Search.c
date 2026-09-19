@@ -90,6 +90,16 @@ class OZS_Search
     }
 }
 
+// One line of the count list: a class, how many entities of it, and for
+// stackables (canBeSplit) the pieces they add up to.
+class OZS_CountRow
+{
+    string name;
+    int    n;
+    bool   stack;
+    float  qty;
+}
+
 // One bar, belonging to one box's container.
 class OZS_BoxBar : ScriptedWidgetEventHandler
 {
@@ -105,6 +115,14 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
     protected TextWidget    m_Loading;
     protected bool          m_WasLoading;
     protected int           m_WasCount = -1;
+    protected ButtonWidget         m_Count;
+    protected Widget               m_CountBg;
+    protected TextWidget           m_CountText;
+    protected Widget               m_CountPanel;
+    protected MultilineTextWidget  m_CountList;
+    protected bool                 m_CountOpen;
+    // CountInventory() the list was built from; -1 = build on the next frame.
+    protected int                  m_CountSeen = -1;
 
     void OZS_BoxBar(OZ_StorageBox box, Widget parent)
     {
@@ -123,6 +141,13 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
         m_SortText = TextWidget.Cast(m_Root.FindAnyWidget("SortText"));
         m_Label = TextWidget.Cast(m_Root.FindAnyWidget("Label"));
         m_Loading = TextWidget.Cast(m_Root.FindAnyWidget("Loading"));
+        m_Count = ButtonWidget.Cast(m_Root.FindAnyWidget("Count"));
+        m_CountBg = m_Root.FindAnyWidget("CountBg");
+        m_CountText = TextWidget.Cast(m_Root.FindAnyWidget("CountText"));
+        m_CountPanel = m_Root.FindAnyWidget("CountPanel");
+        m_CountList = MultilineTextWidget.Cast(m_Root.FindAnyWidget("CountList"));
+        if (m_CountText)
+            m_CountText.SetText(Widget.TranslateString("#STR_OZS_COUNT"));
         if (m_Label)
             m_Label.SetText(Widget.TranslateString("#STR_OZS_SEARCH"));
         if (m_SortText)
@@ -142,13 +167,19 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
         }
     }
 
-    // Called every frame by the container. While the box is OPENING the bar
-    // turns into a progress line and the controls go away, so nobody types
-    // into a box that is still half there.
+    // Called every frame by the container.
     void Refresh()
     {
         if (!m_Root || !m_Box)
             return;
+        RefreshLoading();
+        RefreshCount();
+    }
+
+    // While the box is OPENING the bar turns into a progress line and the
+    // controls go away, so nobody types into a box that is still half there.
+    protected void RefreshLoading()
+    {
         bool loading = m_Box.OZS_GetState() == OZS_Const.STATE_OPENING;
         int have = 0;
         if (loading)
@@ -162,10 +193,14 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
         m_WasLoading = loading;
         m_WasCount = have;
 
+        if (loading && m_CountOpen)
+            ShowCount(false);
         if (m_Edit)
             m_Edit.Show(!loading);
         if (m_Sort)
             m_Sort.Show(!loading);
+        if (m_Count)
+            m_Count.Show(!loading);
         if (m_Label)
             m_Label.Show(!loading);
         if (m_Loading)
@@ -178,6 +213,132 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
                 m_Loading.SetText(s);
             }
         }
+    }
+
+    // The panel opens and closes on the button; open, it is rebuilt only
+    // when the box's inventory changed size (CountInventory is one native
+    // call), never on a frame it did not.
+    protected void ShowCount(bool open)
+    {
+        m_CountOpen = open;
+        m_CountSeen = -1;
+        if (!m_CountPanel)
+            return;
+        if (!open)
+        {
+            m_CountPanel.Show(false);
+            m_Root.SetSize(1, OZS_Const.UI_BAR_PX);
+        }
+    }
+
+    protected void RefreshCount()
+    {
+        if (!m_CountOpen || !m_CountPanel || !m_CountList)
+            return;
+        int now = m_Box.GetInventory().CountInventory();
+        if (now == m_CountSeen)
+            return;
+        m_CountSeen = now;
+        BuildCount();
+    }
+
+    // Most numerous first, then by name.
+    protected bool Before(OZS_CountRow a, OZS_CountRow b)
+    {
+        if (a.n != b.n)
+            return a.n > b.n;
+        return NameLess(a.name, b.name);
+    }
+
+    // string has no Compare() and the engine has no comparator sort (see
+    // OZS_Sorter), so the order is read out character by character through
+    // ToAscii(), which the engine documents on the string's first character.
+    protected bool NameLess(string a, string b)
+    {
+        int len = a.Length();
+        if (b.Length() < len)
+            len = b.Length();
+        for (int i = 0; i < len; i++)
+        {
+            int ca = a.Substring(i, 1).ToAscii();
+            int cb = b.Substring(i, 1).ToAscii();
+            if (ca != cb)
+                return ca < cb;
+        }
+        return a.Length() < b.Length();
+    }
+
+    protected void BuildCount()
+    {
+        ref array<EntityAI> all = new array<EntityAI>();
+        m_Box.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, all);
+        ref map<string, ref OZS_CountRow> byType = new map<string, ref OZS_CountRow>();
+        ref array<ref OZS_CountRow> rows = new array<ref OZS_CountRow>();
+        int total = 0;
+        for (int i = 0; i < all.Count(); i++)
+        {
+            EntityAI e = all.Get(i);
+            if (!e || e == m_Box)
+                continue;
+            string t = e.GetType();
+            OZS_CountRow row = byType.Get(t);
+            if (!row)
+            {
+                row = new OZS_CountRow();
+                row.name = e.GetDisplayName();
+                byType.Insert(t, row);
+                rows.Insert(row);
+            }
+            row.n = row.n + 1;
+            total = total + 1;
+            ItemBase item = ItemBase.Cast(e);
+            if (item && item.CanBeSplit())
+            {
+                row.stack = true;
+                row.qty = row.qty + item.GetQuantity();
+            }
+        }
+        // Insertion sort: the list is a few dozen lines at most.
+        for (int a = 1; a < rows.Count(); a++)
+        {
+            OZS_CountRow moving = rows.Get(a);
+            int b = a - 1;
+            while (b >= 0 && Before(moving, rows.Get(b)))
+            {
+                rows.Set(b + 1, rows.Get(b));
+                b = b - 1;
+            }
+            rows.Set(b + 1, moving);
+        }
+
+        string text;
+        int lines;
+        if (rows.Count() == 0)
+        {
+            text = Widget.TranslateString("#STR_OZS_COUNT_EMPTY");
+            lines = 1;
+        }
+        else
+        {
+            text = Widget.TranslateString("#STR_OZS_COUNT_TOTAL") + ": " + total.ToString();
+            lines = 1;
+            string pieces = Widget.TranslateString("#STR_OZS_COUNT_PIECES");
+            for (int r = 0; r < rows.Count(); r++)
+            {
+                OZS_CountRow x = rows.Get(r);
+                string line = x.n.ToString() + " × " + x.name;
+                if (x.stack)
+                    line = line + " (" + Math.Round(x.qty).ToString() + " " + pieces + ")";
+                text = text + "\n" + line;
+                lines = lines + 1;
+            }
+        }
+        m_CountList.SetText(text);
+        int height = 8 + lines * OZS_Const.UI_LINE_PX;
+        m_CountList.SetSize(560, height - 8);
+        m_CountPanel.SetSize(1, height);
+        m_CountPanel.Show(true);
+        m_Root.SetSize(1, OZS_Const.UI_BAR_PX + height);
     }
 
     override bool OnChange(Widget w, int x, int y, bool finished)
@@ -197,6 +358,11 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
             m_Box.RPCSingleParam(OZS_Const.RPC_SORT_ID, new Param1<bool>(true), true);
             return true;
         }
+        if (w == m_Count)
+        {
+            ShowCount(!m_CountOpen);
+            return true;
+        }
         return false;
     }
 
@@ -204,6 +370,8 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
     {
         if (w == m_Sort && m_SortBg)
             m_SortBg.SetColor(ARGBF(1, 0.22, 0.3, 0.38));
+        if (w == m_Count && m_CountBg)
+            m_CountBg.SetColor(ARGBF(1, 0.22, 0.3, 0.38));
         return false;
     }
 
@@ -211,6 +379,8 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
     {
         if (w == m_Sort && m_SortBg)
             m_SortBg.SetColor(ARGBF(1, 0.135, 0.18, 0.225));
+        if (w == m_Count && m_CountBg)
+            m_CountBg.SetColor(ARGBF(1, 0.135, 0.18, 0.225));
         return false;
     }
 }
