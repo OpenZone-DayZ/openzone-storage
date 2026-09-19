@@ -847,6 +847,9 @@ then one line per class, most numerous first -- `12 × Paper`, and for
 stackables the pieces they add up to, `3 × Rag (15 pcs)`. Everything is
 counted on the client from the entities the viewer already holds, so the
 list is live: it is rebuilt whenever the box's `CountInventory()` changes
-and costs nothing on a frame it did not. The panel closes while the box is
-loading and on the button. Nothing of this reaches the server or the bridge;
-a closed box has no panel to count in.
+-- one native walk of the box per frame, cheap, while the panel is open;
+the same signal re-applies a live search, so a container follows its
+contents. The list shows at most 24 classes and says how many more there
+are; the pieces of a magazine or an ammo pile are its rounds. The panel
+closes while the box is loading and on the button. Nothing of this reaches
+the server or the bridge; a closed box has no panel to count in.

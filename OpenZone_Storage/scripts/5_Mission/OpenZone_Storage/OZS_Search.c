@@ -41,6 +41,13 @@ class OZS_Search
         return s_Text != "";
     }
 
+    // Re-shades every icon on the next frame without changing the query;
+    // used when a container's contents changed instead of its text.
+    static void Bump()
+    {
+        s_Version++;
+    }
+
     // The query against one name, in the four spellings (see Set).
     protected static bool NameMatches(string n)
     {
@@ -65,6 +72,9 @@ class OZS_Search
             return true;
         if (NameMatches(e.GetDisplayName()))
             return true;
+        // A leaf holds nothing: no walk, no allocation.
+        if (e.IsEmpty())
+            return false;
         GameInventory inv = e.GetInventory();
         if (!inv)
             return false;
@@ -123,6 +133,8 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
     protected bool                 m_CountOpen;
     // CountInventory() the list was built from; -1 = build on the next frame.
     protected int                  m_CountSeen = -1;
+    // CountInventory() as of the last frame, open or not; -1 = not seen yet.
+    protected int                  m_LastCount = -1;
 
     void OZS_BoxBar(OZ_StorageBox box, Widget parent)
     {
@@ -228,14 +240,28 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
         {
             m_CountPanel.Show(false);
             m_Root.SetSize(1, OZS_Const.UI_BAR_PX);
+            m_Root.Update();
+            Widget above = m_Root.GetParent();
+            if (above)
+                above.Update();
         }
     }
 
+    // Every frame: one native walk of the box (CountInventory) tells
+    // whether anything moved. A live query is then re-applied, so a
+    // pouch that lost its rag goes dark and one that gained it lights
+    // up; the open panel is rebuilt on the same signal.
     protected void RefreshCount()
     {
+        int now = m_Box.GetInventory().CountInventory();
+        if (now != m_LastCount)
+        {
+            m_LastCount = now;
+            if (OZS_Search.Active())
+                OZS_Search.Bump();
+        }
         if (!m_CountOpen || !m_CountPanel || !m_CountList)
             return;
-        int now = m_Box.GetInventory().CountInventory();
         if (now == m_CountSeen)
             return;
         m_CountSeen = now;
@@ -278,10 +304,11 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
         for (int i = 0; i < all.Count(); i++)
         {
             EntityAI e = all.Get(i);
+            // The weapons in the box's slots count too: they are in the box.
             if (!e || e == m_Box)
                 continue;
             string t = e.GetType();
-            OZS_CountRow row = byType.Get(t);
+            ref OZS_CountRow row = byType.Get(t);
             if (!row)
             {
                 row = new OZS_CountRow();
@@ -291,11 +318,18 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
             }
             row.n = row.n + 1;
             total = total + 1;
+            // Stackables by config (canBeSplit), never by the momentary state
+            // of the stack; a magazine or an ammo pile keeps its pieces in the
+            // ammo count, everything else in the quantity.
             ItemBase item = ItemBase.Cast(e);
-            if (item && item.CanBeSplit())
+            if (item && item.IsSplitable())
             {
                 row.stack = true;
-                row.qty = row.qty + item.GetQuantity();
+                Magazine mag = Magazine.Cast(e);
+                if (mag)
+                    row.qty = row.qty + mag.GetAmmoCount();
+                else
+                    row.qty = row.qty + item.GetQuantity();
             }
         }
         // Insertion sort: the list is a few dozen lines at most.
@@ -325,8 +359,15 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
             string pieces = Widget.TranslateString("#STR_OZS_COUNT_PIECES");
             for (int r = 0; r < rows.Count(); r++)
             {
+                if (r == OZS_Const.UI_COUNT_LINES)
+                {
+                    int rest = rows.Count() - r;
+                    text = text + "\n" + Widget.TranslateString("#STR_OZS_COUNT_MORE") + " " + rest.ToString();
+                    lines = lines + 1;
+                    break;
+                }
                 OZS_CountRow x = rows.Get(r);
-                string line = x.n.ToString() + " × " + x.name;
+                string line = x.n.ToString() + " x " + x.name;
                 if (x.stack)
                     line = line + " (" + Math.Round(x.qty).ToString() + " " + pieces + ")";
                 text = text + "\n" + line;
@@ -334,11 +375,20 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
             }
         }
         m_CountList.SetText(text);
-        int height = 8 + lines * OZS_Const.UI_LINE_PX;
-        m_CountList.SetSize(560, height - 8);
+        int tw = 0;
+        int th = 0;
+        m_CountList.GetTextSize(tw, th);
+        int height = 8 + Math.Max(th, lines * OZS_Const.UI_LINE_PX);
+        m_CountList.SetSize(440, height - 8);
         m_CountPanel.SetSize(1, height);
         m_CountPanel.Show(true);
         m_Root.SetSize(1, OZS_Const.UI_BAR_PX + height);
+        m_CountList.Update();
+        m_CountPanel.Update();
+        m_Root.Update();
+        Widget above = m_Root.GetParent();
+        if (above)
+            above.Update();
     }
 
     override bool OnChange(Widget w, int x, int y, bool finished)

@@ -72,6 +72,9 @@ class OZS_Const
     // The search bar's height and one line of the count list, in layout pixels.
     static const int UI_BAR_PX = 34;
     static const int UI_LINE_PX = 17;
+    // How many class lines the count list prints before it switches to
+    // "N more classes" instead of growing without limit.
+    static const int UI_COUNT_LINES = 24;
 
     static string StateName(int state)
     {

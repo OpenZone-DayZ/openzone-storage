@@ -51,7 +51,7 @@ FrameWidgetClass ozs_search_root {
   }
   EditBoxWidgetClass Search {
    position 90 4
-   size 244 26
+   size 150 26
    hexactpos 1
    vexactpos 1
    hexactsize 1
@@ -60,8 +60,8 @@ FrameWidgetClass ozs_search_root {
    font "gui/fonts/sdf_MetronLight24"
   }
   ButtonWidgetClass Sort {
-   position 344 3
-   size 120 28
+   position 248 3
+   size 104 28
    hexactpos 1
    vexactpos 1
    hexactsize 1
@@ -73,7 +73,7 @@ FrameWidgetClass ozs_search_root {
     PanelWidgetClass SortEdge {
      ignorepointer 1
      position 0 0
-     size 120 28
+     size 104 28
      hexactpos 1
      vexactpos 1
      hexactsize 1
@@ -85,7 +85,7 @@ FrameWidgetClass ozs_search_root {
     PanelWidgetClass SortBg {
      ignorepointer 1
      position 1 1
-     size 118 26
+     size 102 26
      hexactpos 1
      vexactpos 1
      hexactsize 1
@@ -97,7 +97,7 @@ FrameWidgetClass ozs_search_root {
     TextWidgetClass SortText {
      ignorepointer 1
      position 0 0
-     size 120 28
+     size 104 28
      hexactpos 1
      vexactpos 1
      hexactsize 1
@@ -114,8 +114,8 @@ FrameWidgetClass ozs_search_root {
    }
   }
   ButtonWidgetClass Count {
-   position 472 3
-   size 120 28
+   position 360 3
+   size 104 28
    hexactpos 1
    vexactpos 1
    hexactsize 1
@@ -127,7 +127,7 @@ FrameWidgetClass ozs_search_root {
     PanelWidgetClass CountEdge {
      ignorepointer 1
      position 0 0
-     size 120 28
+     size 104 28
      hexactpos 1
      vexactpos 1
      hexactsize 1
@@ -139,7 +139,7 @@ FrameWidgetClass ozs_search_root {
     PanelWidgetClass CountBg {
      ignorepointer 1
      position 1 1
-     size 118 26
+     size 102 26
      hexactpos 1
      vexactpos 1
      hexactsize 1
@@ -151,7 +151,7 @@ FrameWidgetClass ozs_search_root {
     TextWidgetClass CountText {
      ignorepointer 1
      position 0 0
-     size 120 28
+     size 104 28
      hexactpos 1
      vexactpos 1
      hexactsize 1
@@ -176,13 +176,13 @@ FrameWidgetClass ozs_search_root {
    vexactpos 1
    hexactsize 0
    vexactsize 1
-   color 0 0 0 0.6
+   color 0 0 0 0
    style rover_sim_colorable
    {
     MultilineTextWidgetClass CountList {
      ignorepointer 1
      position 12 4
-     size 560 52
+     size 440 52
      hexactpos 1
      vexactpos 1
      hexactsize 1
