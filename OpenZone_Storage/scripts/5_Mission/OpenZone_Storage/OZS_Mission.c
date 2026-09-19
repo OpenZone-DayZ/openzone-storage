@@ -7,6 +7,9 @@ modded class MissionServer
         if (!GetGame() || !GetGame().IsDedicatedServer())
             return;
         OZS_Settings.Load();
+        // Before the bridge client starts: the sink names the storage routes
+        // neutral, so they never clear the PDA's read cache.
+        OZS_Bridge.Subscribe();
     }
 
     override void OnMissionStart()

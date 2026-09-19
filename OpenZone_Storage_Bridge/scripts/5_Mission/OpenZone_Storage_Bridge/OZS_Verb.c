@@ -192,7 +192,7 @@ modded class DZMCP_BridgeCore
         if (op == "sort")
         {
             string whySort;
-            if (!c.RequestSortAs(target, "server", "", whySort))
+            if (!c.RequestSortAs(target, "server", "", "", whySort))
             {
                 detail = "sort refused: " + whySort;
                 return false;
@@ -210,14 +210,35 @@ modded class DZMCP_BridgeCore
         }
         if (op == "files")
         {
+            // The box as the engine sees it, the bridge's reachability, and
+            // what sits in the exchange directory: the cache of this box and
+            // any close file of it still waiting for the bridge.
             string bid = target.OZS_GetId();
-            detail = "box " + bid + " files=" + OZS_Store.HasFiles(bid);
-            detail = detail + " bin=" + FileExist(OZS_Store.BinPath(bid)) + " list=" + FileExist(OZS_Store.ListPath(bid));
-            detail = detail + " lines=" + OZS_Store.ListLines(bid) + " roots=" + OZS_Store.RootCount(bid) + " head=[" + OZS_Store.ListHeader(bid) + "]";
-            // The two stamps an admin needs when the pair is suspect, and the
-            // orphan mark if a box with this id ever left the world.
-            detail = detail + " list_stamp=" + OZS_Store.ListStamp(bid);
-            detail = detail + " archived=" + FileExist(OZS_Const.DIR_REMOVED + "\\" + bid + "\\" + OZS_Const.FILE_REMOVED);
+            detail = "box " + bid + " " + OZS_Const.StateName(target.OZS_GetState()) + " stored=" + target.OZS_GetStoredCount() + " entities=" + target.OZS_CountEntities();
+            detail = detail + " bridge=" + OZS_Bridge.Up() + " boot_done=" + c.BootDone();
+            detail = detail + " cache=" + FileExist(OZS_Store.XchgPath(bid + ".bin"));
+            string name;
+            FileAttr attr;
+            int waiting = 0;
+            int others = 0;
+            FindFileHandle h = FindFile(OZS_Const.DIR_XCHG + "\\*", name, attr, FindFileFlags.ALL);
+            if (h)
+            {
+                bool more = true;
+                while (more)
+                {
+                    if (name != "" && name != "." && name != ".." && name != bid + ".bin")
+                    {
+                        if (name.IndexOf(bid + "-") == 0)
+                            waiting++;
+                        else
+                            others++;
+                    }
+                    more = FindNextFile(h, name, attr);
+                }
+                CloseFindFile(h);
+            }
+            detail = detail + " close_files_waiting=" + waiting + " other_files=" + others;
             return true;
         }
         if (op == "slot")

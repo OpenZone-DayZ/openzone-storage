@@ -1,12 +1,9 @@
-// The server's one storage controller: the registry of boxes, the Open and
-// Close requests, the per-frame stepping of jobs, the viewers, the auto-close
-// and the boot reconciliation. A static singleton, reset at mission finish
-// (statics survive a mission restart inside one process).
-//
-// Implemented so far: registry, Close (store + paced deletion), Open (paced
-// materialisation with the list fallback), the deferred release of the files,
-// the viewers, the auto-close, players leaving. The boot reconciliation
-// arrives with the next task.
+// The server's one storage controller: the registry of boxes, the Open,
+// Close and Sort requests, the per-frame stepping of jobs, the viewers, the
+// auto-close, the boot exchange with the bridge and the gate that refuses
+// every transition while the bridge is down (design 2026-09-19, sections 3.3
+// and 6). A static singleton, reset at mission finish (statics survive a
+// mission restart inside one process).
 
 // One client's inventory screen showing one box.
 class OZS_Viewer
@@ -21,11 +18,9 @@ class OZS_Controller
 {
     protected static ref OZS_Controller s_Inst;
     protected static int s_IdSerial = 0;
-    // True from OnMissionFinish on. The engine deletes every entity when the
-    // world goes down, and EEDelete cannot tell that teardown from a box
-    // somebody blew up; without this flag a clean restart would mark all the
-    // stores as orphaned. Statics survive a mission restart, so it is cleared
-    // on the way in as well as set on the way out.
+    // True from OnMissionFinish on: EEDelete cannot tell the world's teardown
+    // from a box somebody blew up. Statics survive a mission restart, so it
+    // is cleared on the way in as well as set on the way out.
     protected static bool s_Shutdown = false;
 
     // Weak references on purpose: a deleted box reads null, and Unregister
@@ -33,21 +28,22 @@ class OZS_Controller
     protected ref array<OZ_StorageBox> m_Boxes;
     protected ref array<ref OZS_CloseJob> m_CloseJobs;
     protected ref array<ref OZS_OpenJob> m_OpenJobs;
-    // Boxes opened since the engine last saved them: their files are still
-    // the truth and go only after that save (spec section 7).
-    protected ref array<string> m_FilesPending;
-    // Boxes the engine has saved open: their files go at the tick time held.
-    protected ref map<string, float> m_FilesRelease;
     // Who is looking at which box, as reported by the clients' inventory
     // screens (OZS_ClientViewer); pruned by time and distance.
     protected ref array<ref OZS_Viewer> m_Viewers;
     protected float m_AutoTimer;
     // The world's persistent entities load a few frames after
-    // OnMissionStart (measured 2026-09-16), so the boot summary waits.
+    // OnMissionStart (measured 2026-09-16), so the boot exchange waits.
     protected float m_SummaryDue;
-    protected int m_BootFilesWon;
-    protected int m_BootClosedFromCargo;
-    protected int m_BootEmptied;
+    // The boot exchange: not done until the bridge answered; retried every
+    // BOOT_RETRY seconds while it is down; every box is unavailable before.
+    protected bool m_BootDone;
+    protected bool m_BootInFlight;
+    protected float m_BootRetryAt;
+    protected bool m_BootWaitSaid;
+    protected int m_BootSqlWon;
+    protected int m_BootClosed;
+    protected int m_BootNew;
 
     static OZS_Controller Get()
     {
@@ -59,6 +55,7 @@ class OZS_Controller
     static void Reset()
     {
         s_Inst = null;
+        OZS_Audit.Reset();
     }
 
     static bool IsShuttingDown()
@@ -76,30 +73,28 @@ class OZS_Controller
         m_Boxes = new array<OZ_StorageBox>();
         m_CloseJobs = new array<ref OZS_CloseJob>();
         m_OpenJobs = new array<ref OZS_OpenJob>();
-        m_FilesPending = new array<string>();
-        m_FilesRelease = new map<string, float>();
         m_Viewers = new array<ref OZS_Viewer>();
         m_AutoTimer = 0;
         m_SummaryDue = -1;
+        m_BootDone = false;
+        m_BootInFlight = false;
+        m_BootRetryAt = -1;
+        m_BootWaitSaid = false;
     }
 
-    // Mission start: the summary line goes out once the world has loaded.
+    // Mission start: the boot exchange goes out once the world has loaded.
     void OnMissionStarted()
     {
         s_Shutdown = false;
+        OZS_Store.EnsureDirs();
         m_SummaryDue = GetGame().GetTickTime() + OZS_Const.SUMMARY_DELAY;
     }
 
-    protected void BootSummary()
-    {
-        Prune();
-        string s = "storage: world loaded: boxes=" + m_Boxes.Count() + " open=" + OpenCount();
-        s = s + " (boot rules: files won " + m_BootFilesWon + ", closed from cargo " + m_BootClosedFromCargo + ", emptied " + m_BootEmptied + ")";
-        OZ_Log.Info(s);
-    }
+    // ---- ids -------------------------------------------------------------
 
-    // Box ids are the store key and must not repeat across restarts: UTC
-    // date and time, a per-process serial and a random tail.
+    // The fallback when the engine has not given a persistent id yet: UTC
+    // date and time, a per-process serial and a random tail. Every box on
+    // the stand and the live server gets the persistent id (OZ_StorageBox).
     static string NewId()
     {
         s_IdSerial++;
@@ -200,16 +195,29 @@ class OZS_Controller
         }
     }
 
-    // ---- requests --------------------------------------------------------
+    // ---- the gate ----------------------------------------------------------
 
-    // Open = OPENING and a paced job that reads the store; a box without a
-    // store opens at once.
-    bool RequestOpen(OZ_StorageBox box, PlayerBase player, out string why)
+    // Transitions need the bridge: answered the boot exchange, and alive now.
+    bool Ready()
     {
-        return RequestOpenAs(box, Who(player), why);
+        if (!m_BootDone)
+            return false;
+        return OZS_Bridge.Up();
     }
 
-    bool RequestOpenAs(OZ_StorageBox box, string who, out string why)
+    bool BootDone()
+    {
+        return m_BootDone;
+    }
+
+    // ---- requests --------------------------------------------------------
+
+    bool RequestOpen(OZ_StorageBox box, PlayerBase player, out string why)
+    {
+        return RequestOpenAs(box, Who(player), Uid(player), why);
+    }
+
+    bool RequestOpenAs(OZ_StorageBox box, string who, string uid, out string why)
     {
         int state = box.OZS_GetState();
         if (state != OZS_Const.STATE_CLOSED)
@@ -217,15 +225,13 @@ class OZS_Controller
             why = "#STR_OZS_OPENING";
             return false;
         }
-        if (!OZS_Store.HasFiles(box.OZS_GetId()))
+        if (!Ready())
         {
-            box.OZS_SetState(OZS_Const.STATE_OPEN);
-            box.OZS_SetStoredCount(0);
-            box.OZS_SetTouchedAt(GetGame().GetTickTime());
-            OZ_Log.Info("storage: box " + box.OZS_GetId() + " opened by " + who + " (no store, empty)");
-            return true;
+            why = "#STR_OZ_ERR_NO_BRIDGE";
+            OZS_Audit.Log("unavailable", box.OZS_GetId(), uid, who, "", 0, -1, -1, "", "open refused: the bridge is down");
+            return false;
         }
-        OZS_OpenJob job = new OZS_OpenJob(box, who);
+        OZS_OpenJob job = new OZS_OpenJob(box, who, uid);
         string err;
         if (!job.Begin(err))
         {
@@ -238,14 +244,14 @@ class OZS_Controller
         return true;
     }
 
-    // The open job finished: the files stay until the engine saves the box,
-    // and the auto-close timer starts.
     void OnOpened(OZ_StorageBox box)
     {
-        string id = box.OZS_GetId();
-        if (m_FilesPending.Find(id) < 0)
-            m_FilesPending.Insert(id);
         box.OZS_SetTouchedAt(GetGame().GetTickTime());
+    }
+
+    void OnOpenFailed(OZ_StorageBox box, string uid, string why)
+    {
+        NotifyUid(uid, "#STR_OZS_OPEN_FAILED");
     }
 
     protected OZS_OpenJob FindOpenJob(OZ_StorageBox box)
@@ -258,17 +264,13 @@ class OZS_Controller
         return null;
     }
 
-    // Close = lock, capture, then delete over frames. The lock (state
-    // CLOSING) comes first so that nothing enters or leaves the box after the
-    // capture; a failed capture unlocks and refuses, and nothing is removed.
     bool RequestClose(OZ_StorageBox box, PlayerBase player, out string why)
     {
-        // The player at the box has their inventory screen closed (actions
-        // run from the world view), so their own stale entry does not count.
-        return RequestCloseAs(box, Who(player), PlayerId(player), why);
+        return RequestCloseAs(box, Who(player), Uid(player), "player", PlayerId(player), why);
     }
 
-    bool RequestCloseAs(OZ_StorageBox box, string who, string exceptPlayerId, out string why)
+    // `cause` is the bridge's word: player, idle, boot.
+    bool RequestCloseAs(OZ_StorageBox box, string who, string uid, string cause, string exceptPlayerId, out string why)
     {
         int state = box.OZS_GetState();
         if (state != OZS_Const.STATE_OPEN)
@@ -276,29 +278,30 @@ class OZS_Controller
             why = "#STR_OZS_OPENING";
             return false;
         }
+        if (!Ready())
+        {
+            why = "#STR_OZ_ERR_NO_BRIDGE";
+            return false;
+        }
         if (HasViewers(box, exceptPlayerId))
         {
             why = "#STR_OZS_BUSY";
             return false;
         }
-        OZS_CloseJob job = BeginClose(box, who, why);
+        OZS_CloseJob job = BeginClose(box, who, uid, cause, why);
         if (!job)
             return false;
         m_CloseJobs.Insert(job);
         return true;
     }
 
-    // Sort = a close whose records carry a sorted layout, then a reopen; the
-    // player who pressed the button keeps their screen open and sees the
-    // items come back in order. Refused while anyone else is looking, and
-    // more than once per SORT_COOLDOWN.
     void RequestSort(OZ_StorageBox box, PlayerIdentity sender)
     {
         if (!sender || !box)
             return;
         PlayerBase player = FindPlayer(sender.GetId());
         string why;
-        if (!RequestSortAs(box, sender.GetName(), sender.GetId(), why))
+        if (!RequestSortAs(box, sender.GetName(), sender.GetPlainId(), sender.GetId(), why))
         {
             Notify(player, why);
             return;
@@ -306,11 +309,16 @@ class OZS_Controller
         Notify(player, "#STR_OZS_SORTING");
     }
 
-    bool RequestSortAs(OZ_StorageBox box, string who, string exceptPlayerId, out string why)
+    bool RequestSortAs(OZ_StorageBox box, string who, string uid, string exceptPlayerId, out string why)
     {
         if (box.OZS_GetState() != OZS_Const.STATE_OPEN)
         {
             why = "#STR_OZS_OPENING";
+            return false;
+        }
+        if (!Ready())
+        {
+            why = "#STR_OZ_ERR_NO_BRIDGE";
             return false;
         }
         float now = GetGame().GetTickTime();
@@ -324,7 +332,7 @@ class OZS_Controller
             why = "#STR_OZS_BUSY";
             return false;
         }
-        OZS_CloseJob job = new OZS_CloseJob(box, who + " (sort)", true);
+        OZS_CloseJob job = new OZS_CloseJob(box, who + " (sort)", uid, "sort", true);
         string err;
         if (!job.Begin(err))
         {
@@ -334,33 +342,27 @@ class OZS_Controller
         }
         box.OZS_SetLastSort(now);
         m_CloseJobs.Insert(job);
+        OZS_Audit.Log("sort", box.OZS_GetId(), uid, who, "", 0, -1, -1, "", "");
         return true;
     }
 
-    // A close job finished; a sort reopens the box at once.
-    void OnClosed(OZ_StorageBox box, bool reopen, string who)
+    void OnClosed(OZ_StorageBox box, bool reopen, string who, string uid)
     {
         if (!reopen || !box)
             return;
         string why;
-        if (!RequestOpenAs(box, who, why))
+        if (!RequestOpenAs(box, who, uid, why))
             OZ_Log.Warn("storage: box " + box.OZS_GetId() + " could not reopen after the sort: " + why);
     }
 
-    // Synchronous close: files, then every entity in this frame. Mission
-    // finish and the boot rules use it; players never do.
-    bool CloseNow(OZ_StorageBox box, string who, out string why)
+    void OnCloseFailed(OZ_StorageBox box, string uid, string why)
     {
-        OZS_CloseJob job = BeginClose(box, who, why);
-        if (!job)
-            return false;
-        job.Flush();
-        return true;
+        NotifyUid(uid, "#STR_OZS_STORE_FAILED");
     }
 
-    protected OZS_CloseJob BeginClose(OZ_StorageBox box, string who, out string why)
+    protected OZS_CloseJob BeginClose(OZ_StorageBox box, string who, string uid, string cause, out string why)
     {
-        OZS_CloseJob job = new OZS_CloseJob(box, who);
+        OZS_CloseJob job = new OZS_CloseJob(box, who, uid, cause);
         string err;
         if (!job.Begin(err))
         {
@@ -373,7 +375,6 @@ class OZS_Controller
 
     // ---- viewers ---------------------------------------------------------
 
-    // A client's inventory screen started or stopped showing the box.
     void OnView(OZ_StorageBox box, PlayerIdentity sender, bool viewing)
     {
         if (!sender || !box)
@@ -419,6 +420,41 @@ class OZS_Controller
                 n++;
         }
         return n;
+    }
+
+    // The actor of an item moving in or out of a box: its single viewer,
+    // with the Steam id of the player behind the screen; several viewers
+    // are named in the note instead (design section 3.4).
+    void ViewerWho(OZ_StorageBox box, out string uid, out string name, out string note)
+    {
+        uid = "";
+        name = "";
+        note = "";
+        PruneViewers();
+        int n = 0;
+        string names = "";
+        for (int i = 0; i < m_Viewers.Count(); i++)
+        {
+            OZS_Viewer v = m_Viewers.Get(i);
+            if (v.m_Box != box)
+                continue;
+            n++;
+            if (n == 1)
+            {
+                name = v.m_Name;
+                PlayerBase p = FindPlayer(v.m_PlayerId);
+                uid = Uid(p);
+            }
+            if (names != "")
+                names = names + ", ";
+            names = names + v.m_Name;
+        }
+        if (n > 1)
+        {
+            uid = "";
+            name = "";
+            note = "viewers: " + names;
+        }
     }
 
     protected OZS_Viewer FindViewer(OZ_StorageBox box, string pid)
@@ -490,6 +526,21 @@ class OZS_Controller
         return null;
     }
 
+    static PlayerBase FindPlayerByUid(string uid)
+    {
+        if (uid == "")
+            return null;
+        array<Man> players = new array<Man>();
+        GetGame().GetPlayers(players);
+        for (int i = 0; i < players.Count(); i++)
+        {
+            Man m = players.Get(i);
+            if (m && m.GetIdentity() && m.GetIdentity().GetPlainId() == uid)
+                return PlayerBase.Cast(m);
+        }
+        return null;
+    }
+
     static string PlayerId(PlayerBase player)
     {
         if (!player || !player.GetIdentity())
@@ -497,15 +548,24 @@ class OZS_Controller
         return player.GetIdentity().GetId();
     }
 
+    // The Steam id: what the events and the bridge's history are keyed by.
+    static string Uid(PlayerBase player)
+    {
+        if (!player || !player.GetIdentity())
+            return "";
+        return player.GetIdentity().GetPlainId();
+    }
+
     // ---- auto-close and players leaving --------------------------------
 
     // Every AUTO_TICK seconds: an OPEN box closes AutoCloseSeconds after it
-    // was opened -- a plain timer (owner 2026-09-16), no distance and no
-    // player events in it. While someone is still looking at the box the
-    // close waits for them; the tick tries again.
+    // was last touched. While someone is still looking at the box, or the
+    // bridge is down, the close waits; the tick tries again.
     protected void AutoCloseTick()
     {
         Prune();
+        if (!Ready())
+            return;
         OZS_Settings st = OZS_Settings.Get();
         float now = GetGame().GetTickTime();
         for (int i = 0; i < m_Boxes.Count(); i++)
@@ -526,13 +586,11 @@ class OZS_Controller
             if (HasViewers(b))
                 continue;
             string why;
-            if (!RequestCloseAs(b, "auto-close", "", why))
+            if (!RequestCloseAs(b, "auto-close", "", "idle", "", why))
                 OZ_Log.Warn("storage: box " + b.OZS_GetId() + " auto-close refused: " + why);
         }
     }
 
-    // A player disconnects or dies: only their viewer entries go. The box
-    // itself is left to the timer.
     void OnPlayerLeft(PlayerBase player)
     {
         if (!player)
@@ -552,29 +610,30 @@ class OZS_Controller
         return null;
     }
 
-    // ---- lifecycle hooks -------------------------------------------------
+    // ---- per frame -------------------------------------------------------
 
-    // Every job gets the whole budget: two boxes closing in the same frame
-    // is rare, and the budget is far under the frame criterion anyway.
     void OnFrame(float timeslice)
     {
-        if (m_SummaryDue > 0 && GetGame().GetTickTime() >= m_SummaryDue)
+        float now = GetGame().GetTickTime();
+        if (m_SummaryDue > 0 && now >= m_SummaryDue)
         {
             m_SummaryDue = -1;
-            BootSummary();
+            BootExchange();
+        }
+        if (!m_BootDone && !m_BootInFlight && m_BootRetryAt > 0 && now >= m_BootRetryAt)
+        {
+            m_BootRetryAt = -1;
+            BootExchange();
         }
         m_AutoTimer = m_AutoTimer + timeslice;
         if (m_AutoTimer >= OZS_Const.AUTO_TICK)
         {
             m_AutoTimer = 0;
             AutoCloseTick();
-            ReleaseFiles();
         }
+        OZS_Audit.Flush(now);
         if (m_CloseJobs.Count() == 0 && m_OpenJobs.Count() == 0)
             return;
-        // The budgets are per frame and per server, not per box: several
-        // boxes in flight share them, so four boxes opening at once cost the
-        // frame the same as one.
         OZS_Settings st = OZS_Settings.Get();
         int closing = m_CloseJobs.Count();
         if (closing > 0)
@@ -602,125 +661,214 @@ class OZS_Controller
         }
     }
 
-    // The engine is saving the box. Once it has saved an OPEN box, its cargo
-    // is in the engine's own store and the files may go -- a little later,
-    // because OnStoreSave runs while that save is still being written.
-    void OnBoxSaved(OZ_StorageBox box)
-    {
-        if (m_FilesPending.Count() == 0)
-            return;
-        if (box.OZS_GetState() != OZS_Const.STATE_OPEN)
-            return;
-        string id = box.OZS_GetId();
-        int i = m_FilesPending.Find(id);
-        if (i < 0)
-            return;
-        m_FilesPending.Remove(i);
-        m_FilesRelease.Set(id, GetGame().GetTickTime() + OZS_Const.RELEASE_DELAY);
-    }
+    // ---- boot ------------------------------------------------------------
 
-    protected void ReleaseFiles()
-    {
-        if (m_FilesRelease.Count() == 0)
-            return;
-        float now = GetGame().GetTickTime();
-        array<string> due = new array<string>();
-        for (int i = 0; i < m_FilesRelease.Count(); i++)
-        {
-            if (m_FilesRelease.GetElement(i) <= now)
-                due.Insert(m_FilesRelease.GetKey(i));
-        }
-        for (int d = 0; d < due.Count(); d++)
-        {
-            string id = due.Get(d);
-            m_FilesRelease.Remove(id);
-            OZ_StorageBox box = FindById(id);
-            // Closed again in the meantime: the new files are the truth, keep them.
-            if (box && box.OZS_GetState() != OZS_Const.STATE_OPEN)
-                continue;
-            OZS_Store.Delete(id);
-            OZ_Log.Dbg("storage: box " + id + " saved open by the engine; its files are released");
-        }
-    }
-
-    // Boot, per loaded box (spec section 7): one truth. Files present: they
-    // win, and the cargo of a half-done transition goes. No files: the
-    // engine's own cargo is the truth and is closed into files now.
+    // A box loaded from the world's save: nothing is decided here. The boot
+    // exchange asks the bridge what SQL knows and applies the rules once.
     void Reconcile(OZ_StorageBox box)
     {
-        string id = box.OZS_GetId();
-        int state = box.OZS_GetState();
-        int entities = box.OZS_CountEntities();
-        bool files = OZS_Store.HasFiles(id);
-        string s = "storage: boot: box " + id + " " + OZS_Const.StateName(state) + " with " + entities + " entities, files=" + files;
         box.OZS_SetRestoring(false);
         box.OZS_SetTouchedAt(0);
-
-        if (files)
-        {
-            if (entities > 0)
-            {
-                array<EntityAI> stale = new array<EntityAI>();
-                box.OZS_GetRoots(stale);
-                for (int i = 0; i < stale.Count(); i++)
-                {
-                    if (stale.Get(i))
-                        GetGame().ObjectDelete(stale.Get(i));
-                }
-                s = s + " -> files win, " + stale.Count() + " stale item(s) removed";
-            }
-            else
-            {
-                s = s + " -> files win";
-            }
-            int roots = OZS_Store.HeaderRoots(id);
-            if (roots >= 0)
-                box.OZS_SetStoredCount(roots);
-            box.OZS_SetState(OZS_Const.STATE_CLOSED);
-            if (entities > 0 || state != OZS_Const.STATE_CLOSED)
-            {
-                m_BootFilesWon++;
-                OZ_Log.Info(s);
-            }
-            else
-            {
-                OZ_Log.Dbg(s);
-            }
-            return;
-        }
-
-        if (entities > 0)
-        {
-            string why;
-            if (CloseNow(box, "boot", why))
-            {
-                m_BootClosedFromCargo++;
-                OZ_Log.Info(s + " -> no files, closed from the engine's cargo");
-            }
-            else
-            {
-                box.OZS_SetState(OZS_Const.STATE_OPEN);
-                OZ_Log.Error(s + " -> no files and the store cannot be written (" + why + "); the box stays open with its cargo");
-            }
-            return;
-        }
-
-        if (state != OZS_Const.STATE_CLOSED || box.OZS_GetStoredCount() > 0)
-        {
-            m_BootEmptied++;
-            if (box.OZS_GetStoredCount() > 0)
-                OZ_Log.Warn(s + " -> no files and nothing inside, but " + box.OZS_GetStoredCount() + " items were recorded: the store is missing; the box is empty now");
-            else
-                OZ_Log.Info(s + " -> no files and nothing inside; the box is empty now");
-            box.OZS_SetState(OZS_Const.STATE_CLOSED);
-            box.OZS_SetStoredCount(0);
-            return;
-        }
-        OZ_Log.Dbg(s + " -> nothing to do");
+        OZ_Log.Dbg("storage: boot: box " + box.OZS_GetId() + " " + OZS_Const.StateName(box.OZS_GetState()) + " with " + box.OZS_CountEntities() + " entities, waiting for the bridge");
     }
 
-    // Mission finish: every open box is closed in this frame; a box already
-    // closing finishes now.
+    // Every box the engine has, with the state it remembers, to the bridge
+    // (design section 3.3). Retried while the bridge is down.
+    protected void BootExchange()
+    {
+        if (m_BootDone || m_BootInFlight)
+            return;
+        if (!OZS_Bridge.Up())
+        {
+            if (!m_BootWaitSaid)
+            {
+                OZ_Log.Warn("storage: boot: the bridge is down; every box is unavailable until it answers (asking every " + OZS_Const.BOOT_RETRY.ToString() + " s)");
+                m_BootWaitSaid = true;
+            }
+            m_BootRetryAt = GetGame().GetTickTime() + OZS_Const.BOOT_RETRY;
+            return;
+        }
+        Prune();
+        OZS_BootLetter letter = new OZS_BootLetter();
+        for (int i = 0; i < m_Boxes.Count(); i++)
+        {
+            OZ_StorageBox b = m_Boxes.Get(i);
+            OZS_BootBox bb = new OZS_BootBox();
+            bb.id = b.OZS_GetId();
+            bb.cls = b.GetType();
+            bb.state = OZS_Const.StateName(b.OZS_GetState());
+            bb.entities = b.OZS_CountEntities();
+            bb.pos = b.GetPosition().ToString(false);
+            letter.boxes.Insert(bb);
+        }
+        string json;
+        string err;
+        if (!JsonFileLoader<OZS_BootLetter>.MakeData(letter, json, err, false))
+        {
+            OZ_Log.Error("storage: boot: the letter cannot be written: " + err);
+            m_BootRetryAt = GetGame().GetTickTime() + OZS_Const.BOOT_RETRY;
+            return;
+        }
+        m_BootInFlight = true;
+        OZS_Bridge.Post(OZS_Const.ROUTE_BOOT, json, new OZS_BootReply());
+        OZ_Log.Info("storage: boot: asking the bridge about " + m_Boxes.Count().ToString() + " box(es)");
+    }
+
+    // The bridge's answer, or the reason there is none.
+    void OnBootAnswer(OZS_BootAnswer a, string failure)
+    {
+        m_BootInFlight = false;
+        if (!a || !a.ok)
+        {
+            string why = failure;
+            if (a)
+                why = a.why;
+            OZ_Log.Warn("storage: boot: the bridge did not answer the boot exchange (" + why + "); asking again in " + OZS_Const.BOOT_RETRY.ToString() + " s");
+            m_BootRetryAt = GetGame().GetTickTime() + OZS_Const.BOOT_RETRY;
+            return;
+        }
+        // The bridge answered: from here the gate is open, and the boot
+        // closes below go through it like any other close.
+        m_BootDone = true;
+        m_BootWaitSaid = false;
+        m_BootSqlWon = 0;
+        m_BootClosed = 0;
+        m_BootNew = 0;
+        int answered = 0;
+        if (a.boxes)
+            answered = a.boxes.Count();
+        for (int i = 0; i < answered; i++)
+        {
+            OZS_BootAnswerBox ab = a.boxes.Get(i);
+            OZ_StorageBox box = FindById(ab.id);
+            if (!box)
+                continue;
+            ApplyBootRule(box, ab);
+        }
+        string s = "storage: boot: " + answered.ToString() + " box(es) answered by the bridge: SQL won " + m_BootSqlWon.ToString();
+        s = s + ", closed from the engine's cargo " + m_BootClosed.ToString() + ", new to the bridge " + m_BootNew.ToString();
+        OZ_Log.Info(s);
+        int classes = 0;
+        if (a.classes)
+            classes = a.classes.Count();
+        ClassesCheck(a.classes);
+        OZ_Log.Info("storage: world loaded: boxes=" + BoxCount() + " open=" + OpenCount() + " classes checked=" + classes.ToString());
+    }
+
+    // One box, one rule (design section 3.3): SQL wins over a half-done
+    // transition; an OPEN box with cargo is the engine's truth and closes
+    // into a new version; a box the bridge does not know starts from what
+    // it holds.
+    protected void ApplyBootRule(OZ_StorageBox box, OZS_BootAnswerBox ab)
+    {
+        int state = box.OZS_GetState();
+        int entities = box.OZS_CountEntities();
+        string id = box.OZS_GetId();
+        string s = "storage: boot: box " + id + " " + OZS_Const.StateName(state) + " with " + entities.ToString() + " entities, bridge says " + ab.status;
+        bool engineWins = false;
+        if (entities > 0 && state == OZS_Const.STATE_OPEN)
+            engineWins = true;
+        if (entities > 0 && ab.status != "closed")
+            engineWins = true;
+        if (engineWins)
+        {
+            box.OZS_SetState(OZS_Const.STATE_OPEN);
+            string why;
+            if (RequestCloseAs(box, "boot", "", "boot", "", why))
+            {
+                m_BootClosed++;
+                OZ_Log.Info(s + " -> the engine's cargo is the truth, closing it into a new version");
+            }
+            else
+            {
+                OZ_Log.Error(s + " -> the engine's cargo is the truth but it cannot be closed (" + why + "); the box stays open");
+            }
+            return;
+        }
+        if (entities > 0)
+        {
+            array<EntityAI> stale = new array<EntityAI>();
+            box.OZS_GetRoots(stale);
+            for (int i = 0; i < stale.Count(); i++)
+            {
+                if (stale.Get(i))
+                    GetGame().ObjectDelete(stale.Get(i));
+            }
+            m_BootSqlWon++;
+            OZ_Log.Info(s + " -> SQL wins, " + stale.Count().ToString() + " stale item(s) of a half-done transition removed");
+        }
+        if (ab.status == "closed")
+        {
+            box.OZS_SetState(OZS_Const.STATE_CLOSED);
+            box.OZS_SetStoredCount(ab.roots);
+            if (entities == 0)
+                OZ_Log.Dbg(s + " -> closed, " + ab.roots.ToString() + " stored");
+            return;
+        }
+        if (ab.status == "open")
+        {
+            // The engine has nothing and SQL believes the box open: it is
+            // empty, and a close with no roots tells the bridge so.
+            box.OZS_SetState(OZS_Const.STATE_OPEN);
+            string emptyWhy;
+            if (RequestCloseAs(box, "boot", "", "boot", "", emptyWhy))
+                OZ_Log.Info(s + " -> nothing inside; a version with no roots closes it");
+            else
+                OZ_Log.Warn(s + " -> nothing inside and the empty close was refused (" + emptyWhy + ")");
+            return;
+        }
+        m_BootNew++;
+        box.OZS_SetState(OZS_Const.STATE_CLOSED);
+        box.OZS_SetStoredCount(0);
+        OZ_Log.Info(s + " -> new to the bridge, empty");
+    }
+
+    // Which of the classes SQL holds exist on this server: the bridge parks
+    // the roots of the missing ones and returns parked roots whose classes
+    // are back (design section 3.3, step 4).
+    protected void ClassesCheck(array<string> classes)
+    {
+        OZS_ClassesLetter letter = new OZS_ClassesLetter();
+        int n = 0;
+        if (classes)
+            n = classes.Count();
+        for (int i = 0; i < n; i++)
+        {
+            string t = classes.Get(i);
+            if (t == "")
+                continue;
+            if (GetGame().ConfigIsExisting("CfgVehicles " + t))
+                letter.present.Insert(t);
+            else
+                letter.missing.Insert(t);
+        }
+        if (letter.missing.Count() > 0)
+        {
+            string names = "";
+            for (int m = 0; m < letter.missing.Count(); m++)
+            {
+                if (m > 0)
+                    names = names + ", ";
+                names = names + letter.missing.Get(m);
+            }
+            OZ_Log.Warn("storage: boot: " + letter.missing.Count().ToString() + " stored class(es) do not exist on this server: " + names + "; their roots are parked by the bridge");
+        }
+        string json;
+        string err;
+        if (!JsonFileLoader<OZS_ClassesLetter>.MakeData(letter, json, err, false))
+        {
+            OZ_Log.Error("storage: boot: the classes letter cannot be written: " + err);
+            return;
+        }
+        OZS_Bridge.Post(OZS_Const.ROUTE_CLASSES, json, new OZS_ClassesReply());
+    }
+
+    // ---- mission finish ------------------------------------------------------
+
+    // No close can complete here (a close waits for the bridge and there is
+    // no frame loop to wait in), so an open box stays open in the engine's
+    // own save and the boot rules close it next time. A deletion already
+    // under way completes, an open under way is undone.
     void CloseAll()
     {
         Prune();
@@ -728,13 +876,7 @@ class OZS_Controller
         {
             OZ_StorageBox b = m_Boxes.Get(i);
             int state = b.OZS_GetState();
-            if (state == OZS_Const.STATE_OPEN)
-            {
-                string why;
-                if (!CloseNow(b, "mission finish", why))
-                    OZ_Log.Error("storage: box " + b.OZS_GetId() + " stays open at mission finish: " + why);
-            }
-            else if (state == OZS_Const.STATE_CLOSING)
+            if (state == OZS_Const.STATE_CLOSING)
             {
                 OZS_CloseJob job = FindCloseJob(b);
                 if (job)
@@ -746,19 +888,21 @@ class OZS_Controller
                 if (opening)
                     opening.Cancel("mission finish");
             }
+            else if (state == OZS_Const.STATE_OPEN)
+            {
+                OZ_Log.Info("storage: box " + b.OZS_GetId() + " stays open at mission finish with " + b.OZS_CountEntities() + " entities; the boot rules close it");
+            }
         }
         m_CloseJobs.Clear();
         m_OpenJobs.Clear();
     }
 
-    // ---- reporting -------------------------------------------------------
-
     string Status()
     {
         Prune();
         PruneViewers();
-        string s = "boxes=" + m_Boxes.Count() + " closing=" + m_CloseJobs.Count() + " opening=" + m_OpenJobs.Count() + " files_pending=" + m_FilesPending.Count();
-        s = s + " viewers=" + m_Viewers.Count();
+        string s = "boxes=" + m_Boxes.Count() + " closing=" + m_CloseJobs.Count() + " opening=" + m_OpenJobs.Count();
+        s = s + " viewers=" + m_Viewers.Count() + " bridge=" + OZS_Bridge.Up() + " boot_done=" + m_BootDone;
         for (int i = 0; i < m_Boxes.Count(); i++)
         {
             OZ_StorageBox b = m_Boxes.Get(i);
@@ -783,5 +927,12 @@ class OZS_Controller
         if (!player || !player.GetIdentity())
             return;
         NotificationSystem.SendNotificationToPlayerIdentityExtended(player.GetIdentity(), 4, "#STR_OZS_TITLE", text, "set:dayz_inventory image:cat_common_cargo");
+    }
+
+    static void NotifyUid(string uid, string text)
+    {
+        PlayerBase p = FindPlayerByUid(uid);
+        if (p)
+            Notify(p, text);
     }
 }

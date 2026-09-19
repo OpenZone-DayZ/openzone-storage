@@ -70,6 +70,7 @@ class OZ_StorageBoxKit_Base : ItemBase
         if (pb)
             who = OZS_Controller.Who(pb);
         OZ_Log.Info("storage: " + who + " placed " + type + " id=" + box.OZS_GetId() + " at " + position.ToString());
+        OZS_Audit.Log("placed", box.OZS_GetId(), OZS_Controller.Uid(pb), who, type, 0, -1, -1, "", position.ToString(false));
         // The kit stays invisible until the deploy action deletes it.
         HideAllSelections();
     }

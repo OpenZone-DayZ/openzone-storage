@@ -43,8 +43,13 @@ class OZ_StorageBox : DeployableContainer_Base
         super.EEInit();
         if (!GetGame() || !GetGame().IsServer())
             return;
-        // A fresh box gets an id here; a loaded one is overwritten by OnStoreLoad.
-        if (m_OZS_Id == "")
+        // The engine's persistent id is the box id (owner, 2026-09-19): it is
+        // valid the frame the box is created and the same after every boot.
+        // OZS_GetId() computes it lazily as well, in case it is not there yet.
+        string pid = OZS_Store.PersistentIdOf(this);
+        if (pid != "")
+            m_OZS_Id = pid;
+        else if (m_OZS_Id == "")
             m_OZS_Id = OZS_Controller.NewId();
         SetTakeable(false);
         // Every boot renews the lifetime, so a box outlives the central
@@ -53,11 +58,10 @@ class OZ_StorageBox : DeployableContainer_Base
         OZS_Controller.Get().Register(this);
     }
 
-    // A box leaving the world is worth a line AND a mark in its own directory:
-    // the store stays on disk either way, and an admin looking at the files
-    // has no other way to tell an orphan from a box that is merely closed.
-    // The mission teardown deletes every entity too, and EEDelete cannot tell
-    // the two apart, so the controller's shutdown flag decides.
+    // A box leaving the world is worth a line and an event: the bridge marks
+    // it removed and keeps its versions by the retention. The mission
+    // teardown deletes every entity too, and EEDelete cannot tell the two
+    // apart, so the controller's shutdown flag decides.
     override void EEDelete(EntityAI parent)
     {
         if (GetGame() && GetGame().IsServer())
@@ -66,8 +70,8 @@ class OZ_StorageBox : DeployableContainer_Base
             {
                 string what = "removed from the world as " + OZS_Const.StateName(m_OZS_State);
                 what = what + " with " + OZS_CountEntities() + " entities, " + m_OZS_StoredCount + " stored";
-                OZ_Log.Warn("storage: box " + m_OZS_Id + " " + what + "; its files go to the archive");
-                OZS_Store.Archive(m_OZS_Id, GetType() + " " + what + " at " + GetPosition().ToString(false));
+                OZ_Log.Warn("storage: box " + m_OZS_Id + " " + what);
+                OZS_Audit.Log("removed", m_OZS_Id, "", "", GetType(), 0, -1, -1, "", what + " at " + GetPosition().ToString(false));
             }
             OZS_Controller.Get().Unregister(this);
         }
@@ -83,8 +87,6 @@ class OZ_StorageBox : DeployableContainer_Base
         ctx.Write(m_OZS_Id);
         ctx.Write(m_OZS_State);
         ctx.Write(m_OZS_StoredCount);
-        if (GetGame() && GetGame().IsServer())
-            OZS_Controller.Get().OnBoxSaved(this);
     }
 
     override bool OnStoreLoad(ParamsReadContext ctx, int version)
@@ -115,7 +117,17 @@ class OZ_StorageBox : DeployableContainer_Base
     {
         super.EEOnAfterLoad();
         if (GetGame() && GetGame().IsServer())
+        {
+            // A box saved under an older id (a stamp) takes the persistent
+            // id now; the bridge learns the new one at the boot exchange.
+            string pid = OZS_Store.PersistentIdOf(this);
+            if (pid != "" && pid != m_OZS_Id)
+            {
+                OZ_Log.Info("storage: box " + m_OZS_Id + " is " + pid + " by its persistent id from now on");
+                m_OZS_Id = pid;
+            }
             OZS_Controller.Get().Reconcile(this);
+        }
     }
 
     // ---- state -----------------------------------------------------------
@@ -127,6 +139,12 @@ class OZ_StorageBox : DeployableContainer_Base
 
     string OZS_GetId()
     {
+        if (m_OZS_Id == "" && GetGame() && GetGame().IsServer())
+        {
+            string pid = OZS_Store.PersistentIdOf(this);
+            if (pid != "")
+                m_OZS_Id = pid;
+        }
         return m_OZS_Id;
     }
 
@@ -180,16 +198,37 @@ class OZ_StorageBox : DeployableContainer_Base
         m_OZS_TouchedAt = GetGame().GetTickTime();
     }
 
+    // An item moving in or out while the box is open and not being restored
+    // is a player's doing: it restarts the idle clock and becomes an event.
+    // The restore and the close move hundreds of items through these hooks
+    // and are not events.
+    protected bool OZS_Live()
+    {
+        if (!GetGame() || !GetGame().IsServer())
+            return false;
+        if (m_OZS_State != OZS_Const.STATE_OPEN || m_OZS_Restoring)
+            return false;
+        return true;
+    }
+
     override void EECargoIn(EntityAI item)
     {
         super.EECargoIn(item);
-        OZS_Touch();
+        if (OZS_Live())
+        {
+            OZS_Touch();
+            OZS_Audit.Item("put", this, item, "");
+        }
     }
 
     override void EECargoOut(EntityAI item)
     {
         super.EECargoOut(item);
-        OZS_Touch();
+        if (OZS_Live())
+        {
+            OZS_Touch();
+            OZS_Audit.Item("take", this, item, "");
+        }
     }
 
     override void EECargoMove(EntityAI item)
@@ -201,13 +240,21 @@ class OZ_StorageBox : DeployableContainer_Base
     override void EEItemAttached(EntityAI item, string slot_name)
     {
         super.EEItemAttached(item, slot_name);
-        OZS_Touch();
+        if (OZS_Live())
+        {
+            OZS_Touch();
+            OZS_Audit.Item("put", this, item, slot_name);
+        }
     }
 
     override void EEItemDetached(EntityAI item, string slot_name)
     {
         super.EEItemDetached(item, slot_name);
-        OZS_Touch();
+        if (OZS_Live())
+        {
+            OZS_Touch();
+            OZS_Audit.Item("take", this, item, slot_name);
+        }
     }
 
     float OZS_GetLastSort()

@@ -50,6 +50,15 @@ class CfgMods
 class CfgVehicles
 {
     class SeaChest;
+    class Paper;
+
+    // An item only this stand pbo declares: closed into a box and then booted
+    // without the probe, it is the "vanished mod" of the design (section 3.3).
+    class OZ_ProbeToken: Paper
+    {
+        scope = 2;
+        displayName = "Probe token";
+    };
 
     // The nested Cargo class inherits everything from SeaChest's own Cargo and
     // overrides only the grid. 10 x 500 = 5000 cells for one-slot items.

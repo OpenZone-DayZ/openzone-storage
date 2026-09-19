@@ -1,23 +1,29 @@
-// The paced jobs of a box. A job owns nothing in the world: it holds the box
-// and the entities by plain (weak) reference, so a box or an item deleted by
-// someone else reads null and is skipped.
+// The two transitions of a box as jobs that run a slice per frame and wait
+// for one bridge reply each (design 2026-09-19, sections 3.1 and 3.2).
+//
+// Close: write the wire file within the frame budget, tell the bridge,
+// wait for its answer, and only then delete the entities -- the engine's
+// cargo is the truth until SQL has the box. Refused or unanswered: the file
+// goes and the box stays open with everything in it.
+//
+// Open: ask the bridge, read the cache it names root by root at the item
+// rate, publish each root once. A root the engine cannot read is deleted
+// with everything this open created so far, parked with the bridge, and
+// the open is asked again; a half-restored box is never left standing.
 
-// CLOSING, in two phases. CAPTURE writes the root entities into the store a
-// frame's time budget at a time (0.17 ms per entity measured 2026-09-16),
-// then commits the files. DELETE removes the roots a budget of entities per
-// frame (5000 deletes in one frame = 259 ms measured, batches of 50 =
-// 4--8 ms) and flips the box to CLOSED after the last one. The box is locked
-// (state CLOSING, gates shut) from Begin on, so the capture sees a still
-// picture.
 class OZS_CloseJob
 {
     static const int PHASE_CAPTURE = 0;
-    static const int PHASE_DELETE  = 1;
+    static const int PHASE_WAIT    = 1;
+    static const int PHASE_DELETE  = 2;
+    static const int PHASE_DONE    = 3;
 
     protected OZ_StorageBox m_Box;
     protected ref array<EntityAI> m_Roots;
     protected ref OZS_StoreWriter m_Writer;
     protected string m_Who;
+    protected string m_Uid;
+    protected string m_Why;
     protected int m_Phase;
     protected int m_Next;
     protected int m_Entities;
@@ -25,20 +31,26 @@ class OZS_CloseJob
     protected int m_CaptureFrames;
     protected int m_DeleteFrames;
     protected float m_CaptureMs;
-    protected float m_CommitMs;
     protected float m_DeleteMs;
     protected float m_MaxStepMs;
-    // A sort: the cargo roots get new cells from OZS_Sorter (aligned with
-    // m_Roots, -1 = keep), and the box reopens when the close is done.
+    protected float m_Posted;
+    protected float m_WaitMs;
+    protected int m_Version;
     protected bool m_Sorted;
     protected bool m_Reopen;
     protected ref array<int> m_NewRows;
     protected ref array<int> m_NewCols;
+    protected bool m_Answered;
+    protected bool m_Accepted;
+    protected string m_Refusal;
 
-    void OZS_CloseJob(OZ_StorageBox box, string who, bool sorted = false)
+    // `why` is the bridge's word for the close: player, idle, sort, boot.
+    void OZS_CloseJob(OZ_StorageBox box, string who, string uid, string why, bool sorted = false)
     {
         m_Box = box;
         m_Who = who;
+        m_Uid = uid;
+        m_Why = why;
         m_Roots = new array<EntityAI>();
         m_Phase = PHASE_CAPTURE;
         m_Sorted = sorted;
@@ -57,8 +69,6 @@ class OZS_CloseJob
         return m_Box == box;
     }
 
-    // Locks the box, lists its roots and opens the store. False when the
-    // store cannot be opened: the box is OPEN again and nothing was touched.
     bool Begin(out string why)
     {
         m_Box.OZS_SetState(OZS_Const.STATE_CLOSING);
@@ -69,20 +79,21 @@ class OZS_CloseJob
         if (m_Sorted)
         {
             int placed = OZS_Sorter.Plan(m_Box, m_Roots, m_NewRows, m_NewCols);
-            OZ_Log.Dbg("storage: box " + m_Box.OZS_GetId() + " sort plan: " + placed + " of " + m_Roots.Count() + " roots placed");
+            OZ_Log.Dbg("storage: box " + m_Box.OZS_GetId() + " sort plan: " + placed.ToString() + " of " + m_Roots.Count().ToString() + " roots placed");
         }
+        m_Next = 0;
+        if (m_Roots.Count() == 0)
+            return true;
         m_Writer = new OZS_StoreWriter();
         if (!m_Writer.Open(m_Box, m_Roots.Count(), m_Entities, why))
         {
+            m_Writer = null;
             m_Box.OZS_SetState(OZS_Const.STATE_OPEN);
             return false;
         }
-        m_Box.OZS_SetStoredCount(m_Roots.Count());
-        m_Next = 0;
         return true;
     }
 
-    // One frame of work. True when the job is over (done or abandoned).
     bool Tick(float budgetSec, int deleteBudget)
     {
         if (!m_Box)
@@ -90,8 +101,11 @@ class OZS_CloseJob
             Abandon("the box is gone");
             return true;
         }
+        if (m_Phase == PHASE_DONE)
+            return true;
         float frameStart = GetGame().GetTickTime();
         float now = frameStart;
+
         if (m_Phase == PHASE_CAPTURE)
         {
             while (m_Next < m_Roots.Count())
@@ -109,21 +123,27 @@ class OZS_CloseJob
             Account(frameStart, now, m_CaptureMs);
             if (m_Next < m_Roots.Count())
                 return false;
+            PostClose();
+            return m_Phase == PHASE_DONE;
+        }
 
-            string why;
-            float c0 = GetGame().GetTickTime();
-            bool committed = m_Writer.Commit(why);
-            float c1 = GetGame().GetTickTime();
-            Account(c0, c1, m_CommitMs);
-            if (!committed)
+        if (m_Phase == PHASE_WAIT)
+        {
+            if (!m_Answered)
             {
-                m_Box.OZS_SetState(OZS_Const.STATE_OPEN);
-                OZ_Log.Error("storage: box " + m_Box.OZS_GetId() + " could not be closed by " + m_Who + ": " + why + "; nothing was removed");
+                if (now - m_Posted <= OZS_Const.REPLY_TIMEOUT)
+                    return false;
+                OnBridge(false, "no answer within " + OZS_Const.REPLY_TIMEOUT.ToString() + " s", 0);
+            }
+            m_WaitMs = (now - m_Posted) * 1000;
+            if (!m_Accepted)
+            {
+                Revert("the bridge did not take the close: " + m_Refusal);
                 return true;
             }
-            string s = "storage: box " + m_Box.OZS_GetId() + " closing by " + m_Who + ": " + m_Roots.Count() + " items";
-            s = s + " (" + m_Entities + " entities) written in " + m_CaptureFrames + " frame(s), " + R1(m_CaptureMs) + " ms";
-            s = s + " + commit " + R1(m_CommitMs) + " ms";
+            string s = "storage: box " + m_Box.OZS_GetId() + " closing by " + m_Who + ": " + m_Roots.Count().ToString() + " items";
+            s = s + " (" + m_Entities.ToString() + " entities) written in " + m_CaptureFrames.ToString() + " frame(s), " + R1(m_CaptureMs) + " ms";
+            s = s + "; the bridge holds version " + m_Version.ToString() + " after " + R1(m_WaitMs) + " ms";
             OZ_Log.Info(s);
             m_Phase = PHASE_DELETE;
             m_Next = 0;
@@ -150,15 +170,72 @@ class OZS_CloseJob
         return true;
     }
 
-    // Everything that is left, in this frame (mission finish, boot rules).
+    // The file is complete: tell the bridge and wait.
+    protected void PostClose()
+    {
+        string fileName = "";
+        string stamp = OZS_Store.Stamp();
+        if (m_Writer)
+        {
+            string err;
+            if (!m_Writer.Finish(err))
+            {
+                Revert("the file could not be finished: " + err);
+                return;
+            }
+            fileName = m_Writer.Name();
+            stamp = m_Writer.Stamp();
+        }
+        OZS_CloseLetter letter = new OZS_CloseLetter();
+        letter.id = m_Box.OZS_GetId();
+        letter.stamp = stamp;
+        letter.file = fileName;
+        letter.roots = m_Roots.Count();
+        letter.entities = m_Entities;
+        letter.by = m_Uid;
+        letter.why = m_Why;
+        string json;
+        string jerr;
+        if (!JsonFileLoader<OZS_CloseLetter>.MakeData(letter, json, jerr, false))
+        {
+            Revert("the close letter cannot be written: " + jerr);
+            return;
+        }
+        m_Answered = false;
+        m_Accepted = false;
+        m_Refusal = "";
+        m_Posted = GetGame().GetTickTime();
+        m_Phase = PHASE_WAIT;
+        OZS_Bridge.Post(OZS_Const.ROUTE_CLOSE, json, new OZS_CloseReply(this));
+    }
+
+    // From the reply, or from the timeout above.
+    void OnBridge(bool ok, string why, int version)
+    {
+        if (m_Phase != PHASE_WAIT)
+            return;
+        m_Answered = true;
+        m_Accepted = ok;
+        m_Refusal = why;
+        m_Version = version;
+    }
+
+    // Mission finish: a deletion under way completes now (SQL already holds
+    // the box); a close still writing or still waiting is undone, the box
+    // stays open in the engine's own save and the boot rules close it.
     void Flush()
     {
-        for (int guard = 0; guard < 4; guard++)
+        if (m_Phase == PHASE_DELETE)
         {
-            bool over = Tick(1000000, 1000000);
-            if (over)
-                return;
+            for (int guard = 0; guard < 4; guard++)
+            {
+                if (Tick(1000000, 1000000))
+                    return;
+            }
+            return;
         }
+        if (m_Phase == PHASE_CAPTURE || m_Phase == PHASE_WAIT)
+            Revert("mission finish");
     }
 
     protected void Account(float from, float to, inout float total)
@@ -169,20 +246,55 @@ class OZS_CloseJob
             m_MaxStepMs = ms;
     }
 
+    // The close did not happen: the file goes (the bridge never read it
+    // into SQL, or refused it; a file the bridge already promoted into the
+    // cache no longer has this name and stays), the box keeps its cargo.
+    protected void Revert(string why)
+    {
+        if (m_Writer)
+        {
+            why = why + " (file " + m_Writer.Name() + ")";
+            m_Writer.Abort();
+        }
+        m_Phase = PHASE_DONE;
+        string id = "";
+        if (m_Box)
+        {
+            id = m_Box.OZS_GetId();
+            m_Box.OZS_SetState(OZS_Const.STATE_OPEN);
+            m_Box.OZS_SetTouchedAt(GetGame().GetTickTime());
+        }
+        OZ_Log.Error("storage: box " + id + " could not be closed by " + m_Who + ": " + why + "; nothing was removed");
+        OZS_Controller.Get().OnCloseFailed(m_Box, m_Uid, why);
+    }
+
     protected void Abandon(string why)
     {
         if (m_Writer)
             m_Writer.Abort();
+        m_Phase = PHASE_DONE;
         OZ_Log.Warn("storage: close job abandoned: " + why);
     }
 
     protected void Finish()
     {
+        m_Phase = PHASE_DONE;
         m_Box.OZS_SetState(OZS_Const.STATE_CLOSED);
-        string s = "storage: box " + m_Box.OZS_GetId() + " closed by " + m_Who + ": deleted " + m_Deleted + " entities in ";
-        s = s + m_DeleteFrames + " frame(s), " + R1(m_DeleteMs) + " ms; longest step " + R1(m_MaxStepMs) + " ms";
+        m_Box.OZS_SetStoredCount(m_Roots.Count());
+        string id = m_Box.OZS_GetId();
+        string s = "storage: box " + id + " closed by " + m_Who + ": deleted " + m_Deleted.ToString() + " entities in ";
+        s = s + m_DeleteFrames.ToString() + " frame(s), " + R1(m_DeleteMs) + " ms; longest step " + R1(m_MaxStepMs) + " ms";
         OZ_Log.Info(s);
-        OZS_Controller.Get().OnClosed(m_Box, m_Reopen, m_Who);
+        OZS_IdLetter ack = new OZS_IdLetter();
+        ack.id = id;
+        ack.version = m_Version;
+        string json;
+        string err;
+        if (JsonFileLoader<OZS_IdLetter>.MakeData(ack, json, err, false))
+            OZS_Bridge.Post(OZS_Const.ROUTE_CLOSED, json, new OZS_AckReply("closed"));
+        string note = m_Why + " version=" + m_Version.ToString() + " write_ms=" + R1(m_CaptureMs) + " wait_ms=" + R1(m_WaitMs) + " delete_ms=" + R1(m_DeleteMs);
+        OZS_Audit.Log("close", id, m_Uid, m_Who, "", m_Roots.Count(), -1, -1, "", note);
+        OZS_Controller.Get().OnClosed(m_Box, m_Reopen, m_Who, m_Uid);
     }
 
     static string R1(float v)
@@ -192,64 +304,59 @@ class OZS_CloseJob
     }
 }
 
-// OPENING: reads items.bin a root at a time within a frame budget and a
-// rate of entities per second (250/s never stalled a client next to the box,
-// one 5000-burst did -- measured 2026-09-16), falls back to items.list when
-// the blob cannot be followed, and flips the box to OPEN after the last
-// root. The files stay until the engine has saved the open box once
-// (OZS_Controller.OnBoxSaved), so a crash before that loses nothing.
 class OZS_OpenJob
 {
-    static const int MODE_BIN  = 0;
-    static const int MODE_LIST = 1;
-    static const int MODE_NONE = 2;
-    static const int LIST_UNREAD  = 0;
-    static const int LIST_USABLE  = 1;
-    static const int LIST_REFUSED = 2;
+    static const int PHASE_REQUEST = 0;
+    static const int PHASE_READ    = 1;
+    static const int PHASE_PARK    = 2;
+    static const int PHASE_DONE    = 3;
 
     protected OZ_StorageBox m_Box;
     protected string m_Id;
     protected string m_Who;
-    protected int m_Mode;
-    protected ref FileSerializer m_Bin;
+    protected string m_Uid;
+    protected int m_Phase;
+    protected ref FileSerializer m_File;
+    protected string m_FileName;
     protected int m_SaveVer;
-    // The stamp of the items.bin header, kept so the list fallback can prove
-    // the two files are the same commit before it splices one onto the other.
-    protected string m_BinStamp;
+    protected string m_Stamp;
     protected int m_Roots;
     protected int m_Entities;
     protected int m_Next;
-    protected ref array<ref OZS_ListRec> m_List;
-    protected int m_ListState;
-    protected int m_ListAt;
-    protected int m_FallbackFrom;
-    // Roots that came from items.list because their own file could not be
-    // read (the index itself fine).
-    protected int m_FromList;
+    protected int m_M0;
+    protected int m_M1;
+    protected int m_M2;
+    protected int m_M3;
     protected float m_Tokens;
     protected float m_Started;
+    protected float m_Posted;
     protected int m_Frames;
     protected float m_WorkMs;
     protected float m_MaxStepMs;
     protected int m_Created;
     protected int m_Missed;
-    protected int m_Fails;
-    // Containers created this frame, moved into their parents next frame.
+    protected int m_Attempt;
+    protected int m_Parked;
     protected ref array<ref OZS_Move> m_Moves;
+    protected bool m_Answered;
+    protected ref OZS_OpenAnswer m_Answer;
+    protected string m_Failure;
+    protected bool m_ParkAnswered;
+    protected bool m_ParkOk;
+    protected string m_ParkWhy;
 
-    void OZS_OpenJob(OZ_StorageBox box, string who)
+    void OZS_OpenJob(OZ_StorageBox box, string who, string uid)
     {
         m_Moves = new array<ref OZS_Move>();
         m_Box = box;
         m_Who = who;
-        m_Mode = MODE_NONE;
-        m_FallbackFrom = -1;
-        m_ListState = LIST_UNREAD;
-        m_FromList = 0;
-        m_BinStamp = "";
+        m_Uid = uid;
+        m_Phase = PHASE_REQUEST;
+        m_Attempt = 0;
+        m_Parked = 0;
         m_Created = 0;
         m_Missed = 0;
-        m_Fails = 0;
+        m_Stamp = "";
     }
 
     bool IsFor(OZ_StorageBox box)
@@ -257,8 +364,6 @@ class OZS_OpenJob
         return m_Box == box;
     }
 
-    // Locks the box as OPENING and opens the store. False when nothing is
-    // readable: the box is CLOSED again and the files are untouched.
     bool Begin(out string why)
     {
         m_Id = m_Box.OZS_GetId();
@@ -267,160 +372,148 @@ class OZS_OpenJob
         m_Box.OZS_SetRestoring(true);
         m_Tokens = 0;
         m_Next = 0;
-        string binWhy;
-        if (!OpenBin(binWhy))
+        if (!OZS_Bridge.Up())
         {
-            OZ_Log.Warn("storage: box " + m_Id + ": " + binWhy + "; trying items.list");
-            if (!OpenList(0))
-            {
-                m_Box.OZS_SetRestoring(false);
-                m_Box.OZS_SetState(OZS_Const.STATE_CLOSED);
-                why = binWhy + ", and items.list cannot be used either";
-                return false;
-            }
+            m_Box.OZS_SetRestoring(false);
+            m_Box.OZS_SetState(OZS_Const.STATE_CLOSED);
+            why = "the bridge is down";
+            return false;
         }
+        Request();
         return true;
     }
 
-    protected bool OpenBin(out string why)
+    protected void Request()
     {
-        string path = OZS_Store.BinPath(m_Id);
-        if (!FileExist(path))
+        m_Attempt++;
+        OZS_IdLetter letter = new OZS_IdLetter();
+        letter.id = m_Id;
+        letter.by = m_Uid;
+        string json;
+        string err;
+        m_Answered = false;
+        m_Answer = null;
+        m_Failure = "";
+        m_Posted = GetGame().GetTickTime();
+        m_Phase = PHASE_REQUEST;
+        if (!JsonFileLoader<OZS_IdLetter>.MakeData(letter, json, err, false))
         {
-            why = "no items.bin";
-            return false;
+            OnOpenFailed("the open letter cannot be written: " + err);
+            return;
         }
-        FileSerializer index = new FileSerializer();
-        if (!index.Open(path, FileMode.READ))
-        {
-            why = "items.bin cannot be opened";
-            return false;
-        }
-        int ver;
-        if (!index.Read(ver) || ver != OZS_Const.BIN_VERSION)
-        {
-            index.Close();
-            why = "items.bin format version " + ver + " is not " + OZS_Const.BIN_VERSION;
-            return false;
-        }
-        string type;
-        string id;
-        index.Read(m_SaveVer);
-        index.Read(m_BinStamp);
-        index.Read(type);
-        index.Read(id);
-        index.Read(m_Roots);
-        index.Read(m_Entities);
-        index.Close();
-        if (id != m_Id)
-            OZ_Log.Warn("storage: box " + m_Id + " items.bin was written for box " + id);
-        if (m_SaveVer != GetGame().SaveVersion())
-            OZ_Log.Info("storage: box " + m_Id + " was stored under game save version " + m_SaveVer + ", the game runs " + GetGame().SaveVersion() + "; items load their older state");
-        m_Mode = MODE_BIN;
-        return true;
+        OZS_Bridge.Post(OZS_Const.ROUTE_OPEN, json, new OZS_OpenReply(this));
     }
 
-    // Reads items.list once and checks that it belongs to the index's
-    // commit. The two are written in one pass with one stamp, so a list
-    // stamped otherwise is a survivor of an older commit whose delete
-    // failed, and splicing it onto this store would restore the wrong items:
-    // refused, kept aside, both stamps said. True when the list can be used.
-    protected bool LoadList()
+    void OnOpenAnswer(OZS_OpenAnswer a)
     {
-        if (m_ListState != LIST_UNREAD)
-            return m_ListState == LIST_USABLE;
-        m_ListState = LIST_REFUSED;
-        m_List = new array<ref OZS_ListRec>();
-        if (OZS_ListFallback.Read(m_Id, m_List) < 0)
-        {
-            m_List = null;
-            OZ_Log.Error("storage: box " + m_Id + " has no readable items.list");
-            return false;
-        }
-        if (m_BinStamp != "")
-        {
-            string listStamp = OZS_Store.ListStamp(m_Id);
-            if (listStamp != m_BinStamp)
-            {
-                // Copied aside, or the box's next close overwrites the only
-                // copy of the state this list describes.
-                string keep = OZS_Store.ListPath(m_Id) + ".failed-" + OZS_Store.FileStamp();
-                CopyFile(OZS_Store.ListPath(m_Id), keep);
-                string e = "storage: box " + m_Id + " items.list is stamped " + listStamp;
-                e = e + " but items.bin is stamped " + m_BinStamp;
-                e = e + "; the pair does not match, the fallback is refused and the list is kept as " + keep;
-                OZ_Log.Error(e);
-                m_List = null;
-                return false;
-            }
-        }
-        m_ListState = LIST_USABLE;
-        return true;
+        if (m_Phase != PHASE_REQUEST)
+            return;
+        m_Answered = true;
+        m_Answer = a;
     }
 
-    // Every root from `fromRoot` on comes from items.list: the index cannot
-    // be used at all (absent, unreadable, or of an older format).
-    protected bool OpenList(int fromRoot)
+    void OnOpenFailed(string why)
     {
-        if (!LoadList())
-        {
-            m_Mode = MODE_NONE;
-            return false;
-        }
-        int listRoots = OZS_ListFallback.RootCount(m_List);
-        if (m_Roots == 0)
-            m_Roots = listRoots;
-        m_ListAt = OZS_ListFallback.RootIndex(m_List, fromRoot);
-        m_FallbackFrom = fromRoot;
-        if (m_ListAt < 0)
-        {
-            OZ_Log.Warn("storage: box " + m_Id + " items.list holds " + listRoots + " roots, nothing left from root " + fromRoot);
-            m_Mode = MODE_NONE;
-            return true;
-        }
-        OZ_Log.Warn("storage: box " + m_Id + ": roots " + fromRoot + ".." + (listRoots - 1) + " come from items.list without script state");
-        m_Mode = MODE_LIST;
-        return true;
+        if (m_Phase != PHASE_REQUEST)
+            return;
+        m_Answered = true;
+        m_Answer = null;
+        m_Failure = why;
     }
 
-    // One frame of work. True when the job is over.
+    void OnParked(bool ok, string why)
+    {
+        if (m_Phase != PHASE_PARK)
+            return;
+        m_ParkAnswered = true;
+        m_ParkOk = ok;
+        m_ParkWhy = why;
+    }
+
     bool Tick(float budgetSec, float rate, float timeslice)
     {
         if (!m_Box)
         {
             Abort();
             int dropped = OZS_Records.DropMoves(m_Moves);
-            OZ_Log.Warn("storage: open job abandoned: the box is gone; " + dropped + " container(s) waiting on the ground removed");
+            OZ_Log.Warn("storage: open job abandoned: the box is gone; " + dropped.ToString() + " container(s) waiting on the ground removed");
             return true;
         }
+        if (m_Phase == PHASE_DONE)
+            return true;
+        float now = GetGame().GetTickTime();
+
+        if (m_Phase == PHASE_REQUEST)
+        {
+            if (!m_Answered)
+            {
+                if (now - m_Posted <= OZS_Const.REPLY_TIMEOUT)
+                    return false;
+                OnOpenFailed("no answer within " + OZS_Const.REPLY_TIMEOUT.ToString() + " s");
+            }
+            if (!m_Answer)
+            {
+                Fail(m_Failure);
+                return true;
+            }
+            if (!m_Answer.ok)
+            {
+                Fail("the bridge refused: " + m_Answer.why);
+                return true;
+            }
+            if (m_Answer.empty)
+            {
+                m_Roots = 0;
+                m_Entities = 0;
+                Finish();
+                return true;
+            }
+            if (!OpenFile(m_Answer.file))
+            {
+                Fail(m_Failure);
+                return true;
+            }
+            m_Phase = PHASE_READ;
+            m_Next = 0;
+        }
+
+        if (m_Phase == PHASE_PARK)
+        {
+            if (!m_ParkAnswered)
+            {
+                if (now - m_Posted <= OZS_Const.REPLY_TIMEOUT)
+                    return false;
+                OnParked(false, "no answer within " + OZS_Const.REPLY_TIMEOUT.ToString() + " s");
+            }
+            if (!m_ParkOk)
+            {
+                Fail("a root could not be parked: " + m_ParkWhy);
+                return true;
+            }
+            if (m_Attempt >= OZS_Const.OPEN_RETRIES)
+            {
+                Fail("too many unreadable roots in one open (" + m_Parked.ToString() + " parked)");
+                return true;
+            }
+            Request();
+            return false;
+        }
+
         m_Tokens = m_Tokens + rate * timeslice;
         if (m_Tokens > rate)
             m_Tokens = rate;
-        float frameStart = GetGame().GetTickTime();
-        float now = frameStart;
-        // The moves queued by the previous frame's records go first: every
-        // container they target is at least one frame old by now.
+        float frameStart = now;
         if (m_Moves.Count() > 0)
         {
             int missedByMoves = OZS_Records.s_Missed;
             OZS_Records.ApplyMoves(m_Moves);
             m_Missed = m_Missed + OZS_Records.s_Missed - missedByMoves;
         }
-        while (m_Mode != MODE_NONE && m_Tokens >= 1)
+        while (m_Phase == PHASE_READ && m_Next < m_Roots && m_Tokens >= 1)
         {
-            // The record counters are static and shared by every job in
-            // flight, so each step's delta is credited to this job at once.
-            int created0 = OZS_Records.s_Created;
-            int missed0 = OZS_Records.s_Missed;
-            int fails0 = OZS_Records.s_LoadFails;
-            if (m_Mode == MODE_BIN)
-                StepBin();
-            else
-                StepList();
-            int made = OZS_Records.s_Created + OZS_Records.s_Missed - created0 - missed0;
-            m_Created = m_Created + OZS_Records.s_Created - created0;
-            m_Missed = m_Missed + OZS_Records.s_Missed - missed0;
-            m_Fails = m_Fails + OZS_Records.s_LoadFails - fails0;
+            int made = StepRoot();
+            if (made < 0)
+                break;
             if (made < 1)
                 made = 1;
             m_Tokens = m_Tokens - made;
@@ -433,154 +526,133 @@ class OZS_OpenJob
         m_WorkMs = m_WorkMs + ms;
         if (ms > m_MaxStepMs)
             m_MaxStepMs = ms;
-        // Moves queued this frame run next frame, so the job lasts one more.
-        if (m_Mode != MODE_NONE || m_Moves.Count() > 0)
+        if (m_Phase != PHASE_READ)
             return false;
+        if (m_Next < m_Roots || m_Moves.Count() > 0)
+            return false;
+        CloseFile();
         Finish();
         return true;
     }
 
-    // One root from its own file. A file that is missing, of another
-    // commit or broken inside costs that root alone: it comes from
-    // items.list instead, and the next root is read from its own file.
-    protected void StepBin()
+    // One root; the entities it created, or -1 when it was parked.
+    protected int StepRoot()
     {
-        if (m_Next >= m_Roots)
-        {
-            m_Mode = MODE_NONE;
-            return;
-        }
         int n = m_Next;
-        m_Next++;
-        string path = OZS_Store.RootPath(m_Id, n);
-        EntityAI made;
-        string why;
-        int missedBefore = OZS_Records.s_Missed;
         int queued = m_Moves.Count();
-        if (ReadRootFile(path, n, made, why))
-            return;
-        // Drop what the broken file left: its ground containers are the
-        // moves queued from `queued` on, the rest sits in the box under
-        // `made`, and what ReadEntity deleted itself is no longer `made`.
-        OZS_Records.s_Missed = missedBefore;
-        OZS_Records.DropMovesFrom(m_Moves, queued);
-        if (made && !made.IsSetForDeletion())
-            GetGame().ObjectDelete(made);
-        string kept = "";
-        if (FileExist(path))
+        int missedBefore = OZS_Records.s_Missed;
+        int created;
+        string why;
+        string type;
+        if (OZS_Records.ReadRoot(m_File, m_Box, m_SaveVer, m_M0, m_M1, m_M2, m_M3, m_Moves, created, why, type))
         {
-            kept = path + ".failed-" + OZS_Store.FileStamp();
-            CopyFile(path, kept);
-            kept = "; kept as " + kept;
+            m_Next++;
+            m_Created = m_Created + created;
+            m_Missed = m_Missed + OZS_Records.s_Missed - missedBefore;
+            if (m_Next == m_Roots)
+                CheckTrailer();
+            return created;
         }
-        OZ_Log.Error("storage: box " + m_Id + " root " + n + " of " + m_Roots + " cannot be read (" + why + ")" + kept + "; it comes from items.list");
-        RootFromList(n);
+        OZS_Records.DropMovesFrom(m_Moves, queued);
+        OZ_Log.Error("storage: box " + m_Id + " root " + n.ToString() + " of " + m_Roots.ToString() + " (" + type + ") cannot be read: " + why + "; the bridge is asked to park it");
+        Park(n, type, why);
+        return -1;
     }
 
-    // False with `why` when the file is absent, of another commit, or
-    // breaks inside its record.
-    protected bool ReadRootFile(string path, int n, out EntityAI made, out string why)
+    // Everything this open created goes, the bridge parks the root, and the
+    // open is asked again from a box that is empty once more.
+    protected void Park(int root, string type, string why)
     {
-        made = null;
-        why = "";
+        CloseFile();
+        OZS_Records.DropMoves(m_Moves);
+        RemoveRestored();
+        m_Created = 0;
+        m_Missed = 0;
+        m_Parked++;
+        string reason = "refused";
+        if (why.Contains("marker"))
+            reason = "desync";
+        OZS_ParkLetter letter = new OZS_ParkLetter();
+        letter.id = m_Id;
+        letter.stamp = m_Stamp;
+        letter.root = root;
+        letter.type = type;
+        letter.why = reason;
+        string json;
+        string err;
+        m_ParkAnswered = false;
+        m_ParkOk = false;
+        m_ParkWhy = "";
+        m_Posted = GetGame().GetTickTime();
+        m_Phase = PHASE_PARK;
+        OZS_Audit.Log(reason, m_Id, m_Uid, m_Who, type, 0, -1, -1, "", "root " + root.ToString() + ": " + why);
+        if (!JsonFileLoader<OZS_ParkLetter>.MakeData(letter, json, err, false))
+        {
+            OnParked(false, "the park letter cannot be written: " + err);
+            return;
+        }
+        OZS_Bridge.Post(OZS_Const.ROUTE_PARK, json, new OZS_ParkReply(this));
+    }
+
+    protected bool OpenFile(string name)
+    {
+        m_FileName = name;
+        string path = OZS_Store.XchgPath(name);
         if (!FileExist(path))
         {
-            why = "no file " + path;
+            m_Failure = "the bridge named " + name + ", which does not exist";
             return false;
         }
-        m_Bin = new FileSerializer();
-        if (!m_Bin.Open(path, FileMode.READ))
+        m_File = new FileSerializer();
+        if (!m_File.Open(path, FileMode.READ))
         {
-            m_Bin = null;
-            why = path + " cannot be opened";
+            m_File = null;
+            m_Failure = "cannot open " + name;
             return false;
         }
-        int ver;
-        string stamp;
-        int index;
-        if (!m_Bin.Read(ver) || ver != OZS_Const.BIN_VERSION)
+        string boxClass;
+        string boxId;
+        string why;
+        if (OZS_Store.ReadHeader(m_File, m_SaveVer, m_Stamp, boxClass, boxId, m_Roots, m_Entities, why) == 0)
         {
-            CloseBin();
-            why = "format version " + ver;
+            CloseFile();
+            m_Failure = name + ": " + why;
             return false;
         }
-        m_Bin.Read(stamp);
-        m_Bin.Read(index);
-        if (stamp != m_BinStamp || index != n)
+        if (!m_File.Read(m_M0) || !m_File.Read(m_M1) || !m_File.Read(m_M2) || !m_File.Read(m_M3))
         {
-            CloseBin();
-            why = "stamped " + stamp + " as root " + index + " where the index says " + m_BinStamp + " root " + n;
+            CloseFile();
+            m_Failure = name + ": the marker cannot be read";
             return false;
         }
-        if (!OZS_Records.ReadEntity(m_Bin, m_Box, m_SaveVer, made, m_Moves))
-        {
-            CloseBin();
-            why = "the record cannot be followed";
-            return false;
-        }
-        int end;
-        if (!m_Bin.Read(end) || end != OZS_Const.BIN_END)
-            OZ_Log.Warn("storage: box " + m_Id + " root " + n + " has no trailer; its file may be truncated");
-        CloseBin();
+        if (boxId != m_Id)
+            OZ_Log.Warn("storage: box " + m_Id + ": the file " + name + " was written for box " + boxId);
+        if (m_SaveVer != GetGame().SaveVersion())
+            OZ_Log.Info("storage: box " + m_Id + " was stored under game save version " + m_SaveVer.ToString() + ", the game runs " + GetGame().SaveVersion().ToString() + "; items load their older state");
         return true;
     }
 
-    // Root n from items.list, when the list can be trusted.
-    protected void RootFromList(int n)
+    protected void CheckTrailer()
     {
-        if (!LoadList())
-        {
-            OZS_Records.s_Missed++;
-            OZ_Log.Error("storage: box " + m_Id + " root " + n + " is lost: neither its file nor items.list can be used");
-            return;
-        }
-        int at = OZS_ListFallback.RootIndex(m_List, n);
-        if (at < 0)
-        {
-            OZS_Records.s_Missed++;
-            OZ_Log.Error("storage: box " + m_Id + " root " + n + " is lost: items.list holds " + OZS_ListFallback.RootCount(m_List) + " roots");
-            return;
-        }
-        OZS_ListFallback.Make(m_List, at, m_Box, m_Moves);
-        m_FromList++;
+        int end;
+        if (!m_File.Read(end) || end != OZS_Const.BIN_END)
+            OZ_Log.Warn("storage: box " + m_Id + ": " + m_FileName + " does not end with BIN_END after the last root");
     }
 
-    protected void StepList()
+    protected void CloseFile()
     {
-        if (m_ListAt < 0 || m_ListAt >= m_List.Count())
+        if (m_File)
         {
-            m_Mode = MODE_NONE;
-            return;
-        }
-        OZS_ListFallback.Make(m_List, m_ListAt, m_Box, m_Moves);
-        m_ListAt = OZS_ListFallback.SubtreeEnd(m_List, m_ListAt);
-        m_Next++;
-    }
-
-    protected void CloseBin()
-    {
-        if (m_Bin)
-        {
-            m_Bin.Close();
-            m_Bin = null;
+            m_File.Close();
+            m_File = null;
         }
     }
 
-    // Nothing more is read or created.
-    void Abort()
+    // The roots this open has already put into the box.
+    protected int RemoveRestored()
     {
-        CloseBin();
-        m_Mode = MODE_NONE;
-    }
-
-    // Mission finish while opening: the files stay (they win at boot), the
-    // half-restored cargo goes, the box is CLOSED.
-    void Cancel(string why)
-    {
-        Abort();
-        int waiting = OZS_Records.DropMoves(m_Moves);
         if (!m_Box)
-            return;
+            return 0;
         array<EntityAI> roots = new array<EntityAI>();
         m_Box.OZS_GetRoots(roots);
         for (int i = 0; i < roots.Count(); i++)
@@ -588,24 +660,60 @@ class OZS_OpenJob
             if (roots.Get(i))
                 GetGame().ObjectDelete(roots.Get(i));
         }
+        return roots.Count();
+    }
+
+    void Abort()
+    {
+        CloseFile();
+        m_Phase = PHASE_DONE;
+    }
+
+    // Mission finish, or the box gone: nothing half-restored survives.
+    void Cancel(string why)
+    {
+        Abort();
+        int waiting = OZS_Records.DropMoves(m_Moves);
+        if (!m_Box)
+            return;
+        int gone = RemoveRestored();
         m_Box.OZS_SetRestoring(false);
         m_Box.OZS_SetState(OZS_Const.STATE_CLOSED);
-        OZ_Log.Warn("storage: box " + m_Id + " opening cancelled (" + why + "): " + roots.Count() + " half-restored items and " + waiting + " container(s) waiting on the ground removed, the files stay");
+        OZ_Log.Warn("storage: box " + m_Id + " opening cancelled (" + why + "): " + gone.ToString() + " half-restored items and " + waiting.ToString() + " container(s) on the ground removed");
+    }
+
+    protected void Fail(string why)
+    {
+        Abort();
+        OZS_Records.DropMoves(m_Moves);
+        RemoveRestored();
+        m_Box.OZS_SetRestoring(false);
+        m_Box.OZS_SetState(OZS_Const.STATE_CLOSED);
+        OZ_Log.Error("storage: box " + m_Id + " could not be opened by " + m_Who + ": " + why);
+        OZS_Controller.Get().OnOpenFailed(m_Box, m_Uid, why);
     }
 
     protected void Finish()
     {
+        m_Phase = PHASE_DONE;
+        CloseFile();
         m_Box.OZS_SetRestoring(false);
         m_Box.OZS_SetState(OZS_Const.STATE_OPEN);
+        m_Box.OZS_SetStoredCount(m_Roots);
         OZS_Controller.Get().OnOpened(m_Box);
         float wall = GetGame().GetTickTime() - m_Started;
-        string s = "storage: box " + m_Id + " opened by " + m_Who + ": " + m_Next + " items (" + m_Created + " entities) in " + m_Frames + " frame(s),";
+        string s = "storage: box " + m_Id + " opened by " + m_Who + ": " + m_Roots.ToString() + " items (" + m_Created.ToString() + " entities) in " + m_Frames.ToString() + " frame(s),";
         s = s + " work " + OZS_CloseJob.R1(m_WorkMs) + " ms, longest step " + OZS_CloseJob.R1(m_MaxStepMs) + " ms, wall " + OZS_CloseJob.R1(wall) + " s";
-        s = s + ", missed " + m_Missed + ", refusals " + m_Fails;
-        if (m_FallbackFrom >= 0)
-            s = s + ", items.list from root " + m_FallbackFrom;
-        if (m_FromList > 0)
-            s = s + ", " + m_FromList + " root(s) from items.list";
+        s = s + ", missed " + m_Missed.ToString() + ", parked " + m_Parked.ToString() + ", attempts " + m_Attempt.ToString();
         OZ_Log.Info(s);
+        OZS_IdLetter ack = new OZS_IdLetter();
+        ack.id = m_Id;
+        ack.stamp = m_Stamp;
+        string json;
+        string err;
+        if (JsonFileLoader<OZS_IdLetter>.MakeData(ack, json, err, false))
+            OZS_Bridge.Post(OZS_Const.ROUTE_OPENED, json, new OZS_AckReply("opened"));
+        string note = "roots=" + m_Roots.ToString() + " work_ms=" + OZS_CloseJob.R1(m_WorkMs) + " parked=" + m_Parked.ToString();
+        OZS_Audit.Log("open", m_Id, m_Uid, m_Who, "", m_Roots, -1, -1, "", note);
     }
 }

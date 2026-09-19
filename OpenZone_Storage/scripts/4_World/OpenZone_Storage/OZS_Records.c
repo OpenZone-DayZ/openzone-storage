@@ -1,34 +1,22 @@
-// The record format of a box's store: how one entity and its children are
-// written to and read back from items.bin (full fidelity through OnStoreSave)
-// and items.list (the readable fallback without blobs).
+// One root of a box on the wire (design 2026-09-19, section 2): first the
+// descriptor of the whole subtree -- every node's class, parent, cell and
+// the list-level state the bridge indexes -- then the bodies of the nodes in
+// the same order: chambers, OnStoreSave, magazine, health per zone,
+// lifetime. The bridge parses the descriptor and keeps the bodies as bytes.
 //
-// items.bin record of one entity, in this order:
-//   type, location (type, slot, row, col, flip), attachment count, cargo
-//   count, then every child as a full record (attachments first, then cargo),
-//   then the body: weapon chambers and internal magazines, the OnStoreSave
-//   blob, magazine cartridges, health (global and per zone), lifetime.
-// Children go before the parent's body so that on restore they exist before
-// the parent's OnStoreLoad runs -- the order chosen on purpose, and
-// the one measured to round-trip a loaded rifle, a radio's frequency and a
-// CF_ModStorage carrier exactly (docs/measurements/2026-09-16, run 4).
+// Reading creates every node first (parents come first in the descriptor),
+// then applies the bodies, then checks the marker. A root that cannot be
+// read is deleted whole and the caller parks it with the bridge; nothing
+// half-read is ever kept, so a degraded state never gets written back.
 //
-// items.list line of one entity: fields separated by '|':
-//   depth|type|loctype|slot|row|col|flip|health|quantity|liquid|ammo|chambers|zone=hp;zone=hp
-// A container with cargo, created LOCAL (unknown to the clients) on the
-// ground, waiting to be moved into its parent's cargo in a LATER frame.
-//
-// Two engine faults shaped this, both measured 2026-09-18 with the storage
-// probe. On the server, an entity that a script moved into a container
-// created in the SAME frame can never be deleted again: the deletion stops
-// halfway, the entity keeps its place in the world with network id 0,
-// players see it lying where it last was and cannot pick it up, and a
-// restart turns it into a real item -- a dupe. One frame between the
-// creation of the target and the move is enough. On the client the same
-// stuck deletion follows a SYNC_MOVE of a container with children into a
-// cargo, whatever the delay, so the clients never see the moves at all: the
-// tree is built out of local entities and published once, in its final
-// place, with RemoteObjectTreeCreate -- the way the game's own
-// ReplaceItemWithNewLambdaBase hands a rebuilt item to the clients.
+// The trees are built the way vanilla's ReplaceItemWithNewLambdaBase builds
+// them (measured 2026-09-18): a container that holds cargo is created LOCAL
+// on the ground, its children local under it, the whole tree moved into its
+// cell a frame later in InventoryMode.LOCAL and published once with
+// RemoteObjectTreeCreate. A script move into a container created the same
+// frame leaves an undeletable entity behind; this order does not.
+
+// One move to run next frame: the container into its cell.
 class OZS_Move
 {
     EntityAI item;
@@ -37,8 +25,8 @@ class OZS_Move
     int col;
     bool flip;
     int children;
-    // True for the move into a networked parent (the box): the tree is
-    // published right after it. Moves between local containers are silent.
+    // true for the move into a networked parent (the box or a networked
+    // item): that is the move which publishes the tree.
     bool publish;
 
     void OZS_Move(EntityAI i, EntityAI p, int r, int c, bool f, int n, bool pub)
@@ -53,16 +41,41 @@ class OZS_Move
     }
 }
 
+// One node of a root's subtree as the descriptor names it, plus what the
+// reader made of it.
+class OZS_Node
+{
+    int parent;
+    string cls;
+    int lt;
+    int slot;
+    int row;
+    int col;
+    int flip;
+    float health;
+    float quantity;
+    int liquid;
+    int ammo;
+    int hasBlob;
+
+    EntityAI made;
+    // The node's entity is local (unpublished): its children are created
+    // local too.
+    bool isLocal;
+    // Created on the ground beside the box, moved into its cell next frame.
+    bool ground;
+    // Could not be created where it belongs: a throwaway that consumes the
+    // body and is deleted.
+    bool standIn;
+    int cargoKids;
+}
+
 class OZS_Records
 {
-    // Statistics of one read pass (the open job reports them).
     static int s_Created;
     static int s_Missed;
     static int s_LoadFails;
 
-    // ---- counting ----------------------------------------------------------
-
-    // The entity and everything under it.
     static int CountTree(EntityAI e)
     {
         if (!e)
@@ -84,21 +97,51 @@ class OZS_Records
         return n;
     }
 
-    // ---- items.bin: write --------------------------------------------------
+    // ---- writing ----
 
-    // Writes the entity's record; returns the number of entities written.
-    // `newRow`/`newCol` >= 0 replace the cell of a cargo root (the sorted
-    // layout); children are always written where they are.
-    static int WriteEntity(FileSerializer f, EntityAI e, int newRow = -1, int newCol = -1)
+    // The subtree in depth-first order: the node, its attachments, its cargo.
+    static void Flatten(EntityAI e, int parent, array<EntityAI> nodes, array<int> parents)
     {
-        int count = 1;
-        f.Write(e.GetType());
+        int me = nodes.Count();
+        nodes.Insert(e);
+        parents.Insert(parent);
+        GameInventory inv = e.GetInventory();
+        if (!inv)
+            return;
+        int ac = inv.AttachmentCount();
+        for (int a = 0; a < ac; a++)
+            Flatten(inv.GetAttachmentFromIndex(a), me, nodes, parents);
+        CargoBase cargo = inv.GetCargo();
+        if (cargo)
+        {
+            int cc = cargo.GetItemCount();
+            for (int c = 0; c < cc; c++)
+                Flatten(cargo.GetItem(c), me, nodes, parents);
+        }
+    }
+
+    // Returns the number of entities written.
+    static int WriteRoot(FileSerializer f, EntityAI root, int newRow = -1, int newCol = -1)
+    {
+        array<EntityAI> nodes = new array<EntityAI>();
+        array<int> parents = new array<int>();
+        Flatten(root, -1, nodes, parents);
+        f.Write(nodes.Count());
+        for (int i = 0; i < nodes.Count(); i++)
+            WriteDescriptor(f, nodes.Get(i), parents.Get(i), i == 0, newRow, newCol);
+        for (int b = 0; b < nodes.Count(); b++)
+            WriteBody(f, nodes.Get(b));
+        return nodes.Count();
+    }
+
+    protected static void WriteDescriptor(FileSerializer f, EntityAI e, int parent, bool isRoot, int newRow, int newCol)
+    {
         InventoryLocation loc = new InventoryLocation();
         int lt = -1;
         int slot = -1;
         int row = 0;
         int col = 0;
-        bool flip = false;
+        int flip = 0;
         GameInventory inv = e.GetInventory();
         if (inv && inv.GetCurrentInventoryLocation(loc))
         {
@@ -106,44 +149,45 @@ class OZS_Records
             slot = loc.GetSlot();
             row = loc.GetRow();
             col = loc.GetCol();
-            flip = loc.GetFlip();
+            if (loc.GetFlip())
+                flip = 1;
         }
-        if (newRow >= 0 && newCol >= 0 && lt == InventoryLocationType.CARGO)
+        // The sort hands the root a new cell.
+        if (isRoot && newRow >= 0 && newCol >= 0 && lt == InventoryLocationType.CARGO)
         {
             row = newRow;
             col = newCol;
-            flip = false;
+            flip = 0;
         }
+        float quantity = 0;
+        int liquid = 0;
+        ItemBase item = ItemBase.Cast(e);
+        if (item)
+        {
+            if (item.HasQuantity())
+                quantity = item.GetQuantity();
+            liquid = item.GetLiquidType();
+        }
+        int ammo = 0;
+        Magazine mag = Magazine.Cast(e);
+        if (mag)
+            ammo = mag.GetAmmoCount();
+        f.Write(parent);
+        f.Write(e.GetType());
         f.Write(lt);
         f.Write(slot);
         f.Write(row);
         f.Write(col);
         f.Write(flip);
-
-        int ac = 0;
-        int cc = 0;
-        CargoBase cargo;
-        if (inv)
-        {
-            ac = inv.AttachmentCount();
-            cargo = inv.GetCargo();
-            if (cargo)
-                cc = cargo.GetItemCount();
-        }
-        f.Write(ac);
-        f.Write(cc);
-        for (int a = 0; a < ac; a++)
-            count += WriteEntity(f, inv.GetAttachmentFromIndex(a));
-        for (int c = 0; c < cc; c++)
-            count += WriteEntity(f, cargo.GetItem(c));
-
-        WriteBody(f, e);
-        return count;
+        f.Write(e.GetHealth("", "Health"));
+        f.Write(quantity);
+        f.Write(liquid);
+        f.Write(ammo);
+        f.Write(1);
     }
 
     static void WriteBody(FileSerializer f, EntityAI e)
     {
-        // 1) weapon chambers and internal magazines, before the script blob
         Weapon_Base w = Weapon_Base.Cast(e);
         int muzzles = 0;
         if (w)
@@ -172,11 +216,7 @@ class OZS_Records
                 f.Write(it);
             }
         }
-
-        // 2) the script state: vanilla variables, energy, agents, CF_ModStorage, mods
         e.OnStoreSave(f);
-
-        // 3) magazine cartridges
         Magazine mag = Magazine.Cast(e);
         bool isMag = false;
         if (mag)
@@ -200,8 +240,6 @@ class OZS_Records
                 }
             }
         }
-
-        // 4) health, global and per zone
         f.Write(e.GetHealth("", "Health"));
         TStringArray zones = new TStringArray();
         e.GetDamageZones(zones);
@@ -211,158 +249,256 @@ class OZS_Records
             f.Write(zones.Get(z));
             f.Write(e.GetHealth(zones.Get(z), "Health"));
         }
-
-        // 5) lifetime
         f.Write(e.GetLifetime());
     }
 
-    // ---- items.bin: read ---------------------------------------------------
+    // ---- reading ----
 
-    // Reads the next record and creates the entity under `parent`; `made` is
-    // that entity (null for a stand-in), so the caller can remove a half-built
-    // tree. A container with cargo is created on the ground and its move into
-    // `parent` is queued on `moves` for a LATER frame (see OZS_Move). False when the stream can no longer be followed: a class that does
-    // not exist and could not even be stood in for, or an OnStoreLoad that
-    // refused (the blob's length is unknown, so nothing behind it can be read
-    // either).
-    static bool ReadEntity(FileSerializer f, EntityAI parent, int saveVer, out EntityAI made, array<ref OZS_Move> moves, bool parentLocal = false)
+    static bool ReadDescriptor(FileSerializer f, OZS_Node n)
     {
-        made = null;
-        string type;
-        int lt;
-        int slot;
-        int row;
-        int col;
-        bool flip;
-        int ac;
-        int cc;
-        if (!f.Read(type))
+        if (!f.Read(n.parent))
             return false;
-        f.Read(lt);
-        f.Read(slot);
-        f.Read(row);
-        f.Read(col);
-        f.Read(flip);
-        f.Read(ac);
-        f.Read(cc);
+        if (!f.Read(n.cls))
+            return false;
+        if (!f.Read(n.lt) || !f.Read(n.slot) || !f.Read(n.row) || !f.Read(n.col) || !f.Read(n.flip))
+            return false;
+        if (!f.Read(n.health) || !f.Read(n.quantity) || !f.Read(n.liquid) || !f.Read(n.ammo) || !f.Read(n.hasBlob))
+            return false;
+        return true;
+    }
 
-        EntityAI e;
-        bool viaGround = false;
-        bool standIn = false;
-        if (cc > 0)
+    // Reads one root out of the wire and builds it in the box. On success
+    // `created` counts the real entities and the moves for the ground-built
+    // containers are queued; on failure every entity this root created is
+    // deleted, `why` says what happened and `type` names the root's class.
+    static bool ReadRoot(FileSerializer f, EntityAI box, int saveVer, int m0, int m1, int m2, int m3, array<ref OZS_Move> moves, out int created, out string why, out string type)
+    {
+        created = 0;
+        type = "";
+        int count;
+        if (!f.Read(count) || count < 1 || count > 100000)
         {
-            // A container with cargo children: the engine refuses children
-            // while it sits in cargo, so build it on the ground and move it
-            // afterwards (measured 2026-09-16, run 4). LOCAL, so the clients
-            // learn of it only when the finished tree is published (OZS_Move).
-            vector pos = parent.GetPosition();
-            pos[0] = pos[0] + 2;
-            e = EntityAI.Cast(GetGame().CreateObjectEx(type, pos, ECE_LOCAL | ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME));
-            viaGround = true;
+            why = "the node count cannot be read";
+            return false;
         }
-        else if (lt == InventoryLocationType.ATTACHMENT)
+        array<ref OZS_Node> nodes = new array<ref OZS_Node>();
+        for (int i = 0; i < count; i++)
+        {
+            OZS_Node n = new OZS_Node();
+            if (!ReadDescriptor(f, n))
+            {
+                why = "the descriptor of node " + i.ToString() + " cannot be read";
+                return false;
+            }
+            if (i == 0)
+            {
+                if (n.parent != -1)
+                {
+                    why = "node 0 is not a root";
+                    return false;
+                }
+                type = n.cls;
+            }
+            else if (n.parent < 0 || n.parent >= i)
+            {
+                why = "node " + i.ToString() + " has parent " + n.parent.ToString();
+                return false;
+            }
+            nodes.Insert(n);
+        }
+        for (int k = 1; k < count; k++)
+        {
+            OZS_Node kid = nodes.Get(k);
+            if (kid.lt == InventoryLocationType.CARGO)
+            {
+                OZS_Node holder = nodes.Get(kid.parent);
+                holder.cargoKids = holder.cargoKids + 1;
+            }
+        }
+
+        // Every node exists before any body is read: parents first.
+        for (int c = 0; c < count; c++)
+        {
+            OZS_Node node = nodes.Get(c);
+            EntityAI parent = box;
+            bool parentLocal = false;
+            if (node.parent >= 0)
+            {
+                parent = nodes.Get(node.parent).made;
+                parentLocal = nodes.Get(node.parent).isLocal;
+            }
+            Create(node, parent, parentLocal, box);
+            if (!node.made)
+            {
+                why = "cannot create " + node.cls;
+                Cleanup(nodes);
+                return false;
+            }
+        }
+
+        for (int b = 0; b < count; b++)
+        {
+            OZS_Node nb = nodes.Get(b);
+            if (nb.hasBlob == 0)
+            {
+                ApplyDescriptorState(nb);
+                continue;
+            }
+            if (!ReadBody(f, nb.made, saveVer))
+            {
+                why = nb.cls + " refused its stored state";
+                Cleanup(nodes);
+                return false;
+            }
+        }
+
+        int r0;
+        int r1;
+        int r2;
+        int r3;
+        bool markerRead = f.Read(r0) && f.Read(r1) && f.Read(r2) && f.Read(r3);
+        if (!markerRead || r0 != m0 || r1 != m1 || r2 != m2 || r3 != m3)
+        {
+            why = "the marker after the root does not match: the record was read out of step";
+            Cleanup(nodes);
+            return false;
+        }
+
+        // Stand-ins consumed their bodies; they go, with whatever was
+        // created local under them.
+        int real = 0;
+        for (int s = 0; s < count; s++)
+        {
+            OZS_Node ns = nodes.Get(s);
+            if (ns.standIn)
+                GetGame().ObjectDelete(ns.made);
+            else
+                real++;
+        }
+
+        // Ground-built containers move into their cells next frame, children
+        // before parents (the reverse of the descriptor's order does that).
+        for (int m = count - 1; m >= 0; m--)
+        {
+            OZS_Node nm = nodes.Get(m);
+            if (!nm.ground || nm.standIn)
+                continue;
+            EntityAI into = box;
+            bool intoLocal = false;
+            if (nm.parent >= 0)
+            {
+                into = nodes.Get(nm.parent).made;
+                intoLocal = nodes.Get(nm.parent).isLocal;
+            }
+            moves.Insert(new OZS_Move(nm.made, into, nm.row, nm.col, nm.flip == 1, nm.cargoKids, !intoLocal));
+        }
+        created = real;
+        s_Created = s_Created + real;
+        return true;
+    }
+
+    // Where and how a node is created: the same rules the restore has used
+    // since the ghost fix, now driven by the descriptor instead of the
+    // stream's own recursion. A cargo cell of -1 means "any free cell": a
+    // parked root coming back, or a gift from the admin web.
+    protected static void Create(OZS_Node n, EntityAI parent, bool parentLocal, EntityAI box)
+    {
+        EntityAI e = null;
+        n.isLocal = false;
+        n.ground = false;
+        n.standIn = false;
+        if (!parent)
+        {
+            // The parent is a stand-in that could not be made: nothing real
+            // to hang on; a stand-in of our own consumes the body below.
+        }
+        else if (n.cargoKids > 0)
+        {
+            vector pos = box.GetPosition();
+            pos[0] = pos[0] + 2;
+            e = EntityAI.Cast(GetGame().CreateObjectEx(n.cls, pos, ECE_LOCAL | ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME));
+            n.ground = true;
+        }
+        else if (n.lt == InventoryLocationType.ATTACHMENT)
         {
             InventoryLocation il = new InventoryLocation();
-            il.SetAttachment(parent, null, slot);
+            il.SetAttachment(parent, null, n.slot);
             if (parentLocal)
-                e = GameInventory.LocationCreateLocalEntity(il, type, ECE_IN_INVENTORY, RF_DEFAULT);
+                e = GameInventory.LocationCreateLocalEntity(il, n.cls, ECE_IN_INVENTORY, RF_DEFAULT);
             else
-                e = GameInventory.LocationCreateEntity(il, type, ECE_IN_INVENTORY, RF_DEFAULT);
+                e = GameInventory.LocationCreateEntity(il, n.cls, ECE_IN_INVENTORY, RF_DEFAULT);
         }
         else if (parentLocal)
         {
-            // Inside a local container: a local child, in the recorded cell
-            // or, failing that, in any free one.
-            InventoryLocation cell = new InventoryLocation();
-            cell.SetCargo(parent, null, 0, row, col, flip);
-            e = GameInventory.LocationCreateLocalEntity(cell, type, ECE_IN_INVENTORY, RF_DEFAULT);
+            if (n.row >= 0)
+            {
+                InventoryLocation cell = new InventoryLocation();
+                cell.SetCargo(parent, null, 0, n.row, n.col, n.flip == 1);
+                e = GameInventory.LocationCreateLocalEntity(cell, n.cls, ECE_IN_INVENTORY, RF_DEFAULT);
+            }
             if (!e)
             {
                 InventoryLocation any = new InventoryLocation();
-                if (parent.GetInventory().FindFirstFreeLocationForNewEntity(type, FindInventoryLocationType.CARGO, any))
-                    e = GameInventory.LocationCreateLocalEntity(any, type, ECE_IN_INVENTORY, RF_DEFAULT);
+                if (parent.GetInventory().FindFirstFreeLocationForNewEntity(n.cls, FindInventoryLocationType.CARGO, any))
+                    e = GameInventory.LocationCreateLocalEntity(any, n.cls, ECE_IN_INVENTORY, RF_DEFAULT);
             }
         }
         else
         {
-            e = parent.GetInventory().CreateEntityInCargoEx(type, 0, row, col, flip);
-            // The cell may be taken or wrong (a sorted layout that did not
-            // fit, an item whose size a mod update changed): any free cell
-            // beats a lost item.
+            if (n.row >= 0)
+                e = parent.GetInventory().CreateEntityInCargoEx(n.cls, 0, n.row, n.col, n.flip == 1);
             if (!e)
-                e = parent.GetInventory().CreateEntityInCargo(type);
+                e = parent.GetInventory().CreateEntityInCargo(n.cls);
         }
-
         if (!e)
         {
-            // The record behind this header cannot be consumed without an
-            // entity of this class. A LOCAL stand-in reads it and is thrown away.
             s_Missed++;
-            OZ_Log.Warn("storage: cannot create " + type + " in " + parent.GetType() + " at " + row + "," + col + " (slot " + slot + ")");
-            vector spare = parent.GetPosition();
+            string where = "nowhere";
+            if (parent)
+                where = parent.GetType();
+            OZ_Log.Warn("storage: cannot create " + n.cls + " in " + where + " at " + n.row.ToString() + "," + n.col.ToString() + " (slot " + n.slot.ToString() + ")");
+            vector spare = box.GetPosition();
             spare[1] = spare[1] + 50;
-            e = EntityAI.Cast(GetGame().CreateObjectEx(type, spare, ECE_LOCAL));
-            if (!e)
-                return false;
-            standIn = true;
+            e = EntityAI.Cast(GetGame().CreateObjectEx(n.cls, spare, ECE_LOCAL));
+            n.standIn = true;
         }
-        if (!standIn)
-            made = e;
-
-        // Children first: attachments, then cargo, each a full record. Under
-        // a ground-built container (local) or a stand-in (local too) the
-        // children are local as well.
-        bool childrenLocal = viaGround || standIn || parentLocal;
-        EntityAI child;
-        for (int a = 0; a < ac; a++)
-        {
-            if (!ReadEntity(f, e, saveVer, child, moves, childrenLocal))
-            {
-                Discard(e, standIn || viaGround, made);
-                return false;
-            }
-        }
-        for (int c = 0; c < cc; c++)
-        {
-            if (!ReadEntity(f, e, saveVer, child, moves, childrenLocal))
-            {
-                Discard(e, standIn || viaGround, made);
-                return false;
-            }
-        }
-
-        bool bodyOk = ReadBody(f, e, saveVer);
-        if (standIn)
-        {
-            GetGame().ObjectDelete(e);
-            return bodyOk;
-        }
-        if (!bodyOk)
-        {
-            Discard(e, viaGround, made);
-            return false;
-        }
-
-        if (viaGround)
-            moves.Insert(new OZS_Move(e, parent, row, col, flip, cc, !parentLocal));
-        s_Created++;
-        return true;
+        n.made = e;
+        bool isLoc = n.ground || n.standIn || parentLocal;
+        n.isLocal = isLoc;
     }
 
-    // A container that cannot be finished: a stand-in or a ground-built
-    // (local, unqueued) one is deleted here, because nobody else holds it;
-    // `made` is cleared so the caller does not delete it a second time.
-    protected static void Discard(EntityAI e, bool ours, out EntityAI made)
+    // A node without a body (hasBlob = 0) carries only what the descriptor
+    // says: health and quantity.
+    protected static void ApplyDescriptorState(OZS_Node n)
     {
-        if (!ours)
+        if (!n.made || n.standIn)
             return;
-        GetGame().ObjectDelete(e);
-        made = null;
+        n.made.SetHealth("", "Health", n.health);
+        ItemBase item = ItemBase.Cast(n.made);
+        if (item && item.HasQuantity() && n.quantity > 0)
+            item.SetQuantity(n.quantity);
+        n.made.SetSynchDirty();
     }
 
-    // Runs the queued moves, innermost first (the order they were queued in),
-    // and empties the queue. Returns how many could not be placed; those are
-    // published where they lie, beside the box, and counted as misses.
+    // Everything this root created goes: the ground-built containers (local,
+    // with their children inside), the root when it sits in the box (its
+    // children go with it), every stand-in.
+    protected static void Cleanup(array<ref OZS_Node> nodes)
+    {
+        for (int i = 0; i < nodes.Count(); i++)
+        {
+            OZS_Node n = nodes.Get(i);
+            if (!n.made)
+                continue;
+            bool own = n.ground || n.standIn || i == 0;
+            if (!own)
+                continue;
+            if (!n.made.IsSetForDeletion())
+                GetGame().ObjectDelete(n.made);
+            n.made = null;
+        }
+    }
+
     static int ApplyMoves(array<ref OZS_Move> moves)
     {
         int failed = 0;
@@ -382,23 +518,22 @@ class OZS_Records
                 InventoryLocation src = new InventoryLocation();
                 m.item.GetInventory().GetCurrentInventoryLocation(src);
                 InventoryLocation dst = new InventoryLocation();
-                dst.SetCargo(m.parent, m.item, 0, m.row, m.col, m.flip);
-                // LOCAL: the tree is not on the network yet, so there is
-                // nobody to send a SYNC_MOVE to; the clients get the finished
-                // tree below.
-                placed = m.parent.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
-                if (!placed)
+                if (m.row >= 0)
+                {
+                    dst.SetCargo(m.parent, m.item, 0, m.row, m.col, m.flip);
+                    placed = m.parent.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
+                }
+                if (!placed && m.row >= 0)
                     placed = m.parent.GetInventory().TakeEntityToCargoEx(InventoryMode.LOCAL, m.item, 0, m.row, m.col);
+                if (!placed)
+                    placed = m.parent.GetInventory().TakeEntityToCargo(InventoryMode.LOCAL, m.item);
             }
             if (!placed)
             {
                 failed++;
                 s_Missed++;
-                OZ_Log.Warn("storage: " + m.item.GetType() + " with " + m.children + " items could not be moved into " + into + " at " + m.row + "," + m.col + "; it stays on the ground");
+                OZ_Log.Warn("storage: " + m.item.GetType() + " with " + m.children.ToString() + " items could not be moved into " + into + " at " + m.row.ToString() + "," + m.col.ToString() + "; it stays where it was built");
             }
-            // The clients learn of it now: the root of a finished tree once
-            // it is in the box, and anything that could not be placed where
-            // it lies -- a local entity nobody publishes is a lost one.
             if (m.publish || !placed)
                 GetGame().RemoteObjectTreeCreate(m.item);
         }
@@ -406,16 +541,11 @@ class OZS_Records
         return failed;
     }
 
-    // Removes what a cancelled job left on the ground: every queued item that
-    // has not been moved yet is a root of its own out there.
     static int DropMoves(array<ref OZS_Move> moves)
     {
         return DropMovesFrom(moves, 0);
     }
 
-    // The same for the moves queued from index `from` on -- the ones a root
-    // that could not be read left behind, while the roots read before it in
-    // the same frame keep theirs.
     static int DropMovesFrom(array<ref OZS_Move> moves, int from)
     {
         int removed = 0;
@@ -433,8 +563,6 @@ class OZS_Records
         return removed;
     }
 
-    // The body in the order WriteBody wrote it. Chambers go in before
-    // OnStoreLoad, cartridges and health after it.
     static bool ReadBody(FileSerializer f, EntityAI e, int saveVer)
     {
         int muzzles;
@@ -466,14 +594,12 @@ class OZS_Records
                     w.PushCartridgeToInternalMagazine(m, id, it);
             }
         }
-
         if (!e.OnStoreLoad(f, saveVer))
         {
             s_LoadFails++;
-            OZ_Log.Warn("storage: " + e.GetType() + " refused its stored state (OnStoreLoad false, game save version " + saveVer + ")");
+            OZ_Log.Warn("storage: " + e.GetType() + " refused its stored state (OnStoreLoad false, game save version " + saveVer.ToString() + ")");
             return false;
         }
-
         bool isMag;
         f.Read(isMag);
         if (isMag)
@@ -503,7 +629,6 @@ class OZS_Records
                 }
             }
         }
-
         float hp;
         f.Read(hp);
         e.SetHealth("", "Health", hp);
@@ -517,102 +642,14 @@ class OZS_Records
             f.Read(zh);
             e.SetHealth(zn, "Health", zh);
         }
-
         float life;
         f.Read(life);
         e.SetLifetime(life);
-
         e.AfterStoreLoad();
         e.SetSynchDirty();
         if (w)
             w.Synchronize();
         GetGame().GetCallQueue(CALL_CATEGORY_SYSTEM).Call(e.EEOnAfterLoad);
         return true;
-    }
-
-    // ---- items.list: write -------------------------------------------------
-
-    // One line per entity, children indented by depth; returns the number
-    // of lines written. `newRow`/`newCol` as in WriteEntity.
-    static int WriteListEntity(FileHandle fh, EntityAI e, int depth, int newRow = -1, int newCol = -1)
-    {
-        int count = 1;
-        FPrintln(fh, ListLine(e, depth, newRow, newCol));
-        GameInventory inv = e.GetInventory();
-        if (!inv)
-            return count;
-        int ac = inv.AttachmentCount();
-        for (int a = 0; a < ac; a++)
-            count += WriteListEntity(fh, inv.GetAttachmentFromIndex(a), depth + 1);
-        CargoBase cargo = inv.GetCargo();
-        if (cargo)
-        {
-            int cc = cargo.GetItemCount();
-            for (int c = 0; c < cc; c++)
-                count += WriteListEntity(fh, cargo.GetItem(c), depth + 1);
-        }
-        return count;
-    }
-
-    static string ListLine(EntityAI e, int depth, int newRow = -1, int newCol = -1)
-    {
-        InventoryLocation loc = new InventoryLocation();
-        int lt = -1;
-        int slot = -1;
-        int row = 0;
-        int col = 0;
-        int flip = 0;
-        GameInventory inv = e.GetInventory();
-        if (inv && inv.GetCurrentInventoryLocation(loc))
-        {
-            lt = loc.GetType();
-            slot = loc.GetSlot();
-            row = loc.GetRow();
-            col = loc.GetCol();
-            if (loc.GetFlip())
-                flip = 1;
-        }
-        if (newRow >= 0 && newCol >= 0 && lt == InventoryLocationType.CARGO)
-        {
-            row = newRow;
-            col = newCol;
-            flip = 0;
-        }
-        float quantity = 0;
-        int liquid = 0;
-        ItemBase item = ItemBase.Cast(e);
-        if (item)
-        {
-            if (item.HasQuantity())
-                quantity = item.GetQuantity();
-            liquid = item.GetLiquidType();
-        }
-        int ammo = 0;
-        Magazine mag = Magazine.Cast(e);
-        if (mag)
-            ammo = mag.GetAmmoCount();
-        int chambers = 0;
-        Weapon_Base w = Weapon_Base.Cast(e);
-        if (w)
-        {
-            for (int m = 0; m < w.GetMuzzleCount(); m++)
-            {
-                if (!w.IsChamberEmpty(m))
-                    chambers++;
-            }
-        }
-        string zones = "";
-        TStringArray names = new TStringArray();
-        e.GetDamageZones(names);
-        for (int z = 0; z < names.Count(); z++)
-        {
-            if (z > 0)
-                zones = zones + ";";
-            zones = zones + names.Get(z) + "=" + e.GetHealth(names.Get(z), "Health");
-        }
-        string line = depth.ToString() + "|" + e.GetType() + "|" + lt + "|" + slot + "|" + row;
-        line = line + "|" + col + "|" + flip + "|" + e.GetHealth("", "Health") + "|" + quantity;
-        line = line + "|" + liquid + "|" + ammo + "|" + chambers + "|" + zones;
-        return line;
     }
 }
