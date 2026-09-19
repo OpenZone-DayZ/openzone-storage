@@ -47,3 +47,7 @@ the full set; the tags each item carries:
 | OZ_Storage (3803455084) | Mod, Mechanics, Props |
 
 The procedure and its reasons are written out in `openzone-radio/docs/publishing.md`.
+
+`packaging/<Mod>.workshop.png` is the preview image the item's page shows: 1024x512 PNG, under
+1 MB, sent with `workshop_publish("<Mod>", preview="packaging/<Mod>.workshop.png", content=False)`
+-- like the listing text, beside the folder so it never ships as a file of the mod.
