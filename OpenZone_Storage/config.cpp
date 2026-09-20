@@ -85,7 +85,7 @@ class CfgVehicles
         attachments[] = {"OZ_Weapon_1", "OZ_Weapon_2"};
         class Cargo
         {
-            itemsCargoSize[] = {10, 50};
+            itemsCargoSize[] = {10, 25};
             openable = 0;
             allowOwnedCargoManipulation = 1;
         };
@@ -111,7 +111,7 @@ class CfgVehicles
         attachments[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
         class Cargo
         {
-            itemsCargoSize[] = {10, 100};
+            itemsCargoSize[] = {10, 50};
             openable = 0;
             allowOwnedCargoManipulation = 1;
         };
@@ -138,7 +138,7 @@ class CfgVehicles
         attachments[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
         class Cargo
         {
-            itemsCargoSize[] = {10, 150};
+            itemsCargoSize[] = {10, 100};
             openable = 0;
             allowOwnedCargoManipulation = 1;
         };

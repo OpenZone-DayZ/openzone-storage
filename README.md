@@ -20,9 +20,9 @@ every item whose name does not contain the text and keeps a container lit if any
 inside it matches, however deep; a **Sort** button that lays the open box out by name; and
 a **Count** button beside it that lists what the open box holds, total and by class.
 
-Three boxes -- `OZ_StorageBox_Small` (500 cells, 2 weapon slots, wooden crate model),
-`OZ_StorageBox_Medium` (1000 cells, 4 slots, sea chest) and `OZ_StorageBox_Large`
-(1500 cells, 6 slots, sea chest). Two verbs on the box, "Open the box (N)" and
+Three boxes -- `OZ_StorageBox_Small` (250 cells, 2 weapon slots, wooden crate model),
+`OZ_StorageBox_Medium` (500 cells, 4 slots, sea chest) and `OZ_StorageBox_Large`
+(1000 cells, 6 slots, sea chest). Two verbs on the box, "Open the box (N)" and
 "Close the box". While a box is open its cargo and slots are ordinary engine
 inventory; a close writes everything into one file under
 `$profile:OpenZone/Storage/xchg/` and deletes the entities a few dozen per
