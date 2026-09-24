@@ -39,7 +39,7 @@ class CfgMods
         dir = "OpenZone_Storage";
         name = "OpenZone Storage";
         author = "Zone Protocol";
-        version = "0.1.0";
+        version = "0.3.0";
         type = "mod";
 
         // > 0 keeps CF's ModStorage happy for every ItemBase; the box itself

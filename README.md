@@ -20,6 +20,28 @@ every item whose name does not contain the text and keeps a container lit if any
 inside it matches, however deep; a **Sort** button that lays the open box out by name; and
 a **Count** button beside it that lists what the open box holds, total and by class.
 
+### The personal stash
+
+An admin places a **locker** (`OZ_StashAnchor`). A player presses F on it and gets a
+container of their own at their feet, keyed by which locker and whose -- the same player
+at two lockers has two stashes, and one locker holds one per player. It carries the
+character's own slots (headgear, mask, eyewear, body, vest, back, hips, legs, feet,
+gloves, armband, shoulder, melee) plus four of the box's weapon slots, so a whole kit can
+be hung up rather than piled into a grid. Clothing kept in those slots keeps working
+pockets, which vanilla otherwise refuses to anything that is not a person.
+
+It exists only while it is in use, and every way out ends the same way and in this order:
+the contents go to the database, then the entity goes. The window is shut; the owner walks
+away or stands idle; they disconnect; they die. A server that falls over is not one of the
+four -- the next boot stores whatever survived and removes it.
+
+**Privacy here is a filter and not a lock.** Other players' stashes are kept out of the
+vicinity panel on their own client, and the server does not check the owner on an
+inventory move. It hides a stash from an ordinary player and from nobody else.
+
+Still to come: placing anchors from a JSON file (today an admin spawns them), and the
+ten-at-once concurrency run.
+
 Three boxes -- `OZ_StorageBox_Small` (250 cells, 2 weapon slots, wooden crate model),
 `OZ_StorageBox_Medium` (500 cells, 4 slots, sea chest) and `OZ_StorageBox_Large`
 (1000 cells, 6 slots, sea chest). Two verbs on the box, "Open the box (N)" and
@@ -83,9 +105,11 @@ bridge sets `ADMIN_URL`. See openzone-bridge's own README.
 - [Community Framework](https://steamcommunity.com/sharedfiles/filedetails/?id=1559212036)
 - [OpenZone Core](https://steamcommunity.com/sharedfiles/filedetails/?id=3798432022)
 - **On the server, as a separate process (not a PBO):**
-  [openzone-bridge](https://github.com/covalschi/openzone-bridge), reachable and
-  configured with `STORAGE_XCHG_DIR` pointed at this server's
+  [openzone-bridge](https://github.com/OpenZone-DayZ/openzone-bridge) **0.5.0 or newer**,
+  reachable and configured with `STORAGE_XCHG_DIR` pointed at this server's
   `profiles/OpenZone/Storage/xchg` (this repo's `$profile:OpenZone/Storage/xchg`).
+  An older bridge does not know the personal stash's key and turns every stash away with
+  `bad box id`; the boxes themselves keep working.
 
 ## Build and run
 
