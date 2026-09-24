@@ -34,13 +34,21 @@ class OZS_Settings : OZ_ConfigBase
     // not be left behind them. AutoCloseSeconds still applies to boxes.
     int StashIdleSeconds;
     float StashMaxDistance;
+    // The PROXY (design 2026-09-24). A box's contents go to one player as
+    // chunked RPCs; these say how big a chunk is and how many chunks may
+    // leave in one frame. ProxyIdleSeconds is how long an authoritative
+    // container waits after the last watcher left -- this is about memory,
+    // not about hiding loot, so it can be far shorter than AutoCloseSeconds.
+    int ProxyRowsPerMessage;
+    int ProxyMessagesPerFrame;
+    int ProxyIdleSeconds;
     bool DebugLog;
 
     private static ref OZS_Settings s_Inst;
 
     override int LatestVersion()
     {
-        return 2;
+        return 3;
     }
 
     override void LoadDefaults()
@@ -68,6 +76,13 @@ class OZS_Settings : OZ_ConfigBase
         // distance, so neither of those fires first by accident.
         StashIdleSeconds = 60;
         StashMaxDistance = 6;
+        // 40 rows per message and 4 messages a frame: the size is measured
+        // (see docs/measurements/2026-09-24), the pace is 160 items a frame,
+        // which puts a thousand-item box on a client inside a second without
+        // a burst either end would feel.
+        ProxyRowsPerMessage = 40;
+        ProxyMessagesPerFrame = 4;
+        ProxyIdleSeconds = 20;
         DebugLog = false;
     }
 
@@ -82,6 +97,12 @@ class OZS_Settings : OZ_ConfigBase
         {
             StashIdleSeconds = 60;
             StashMaxDistance = 6;
+        }
+        if (from < 3)
+        {
+            ProxyRowsPerMessage = 40;
+            ProxyMessagesPerFrame = 4;
+            ProxyIdleSeconds = 20;
         }
         Version = LatestVersion();
         return true;
@@ -150,6 +171,24 @@ class OZS_Settings : OZ_ConfigBase
             ViewerMaxDistance = 5;
             warnings++;
         }
+        if (ProxyRowsPerMessage < 1 || ProxyRowsPerMessage > 200)
+        {
+            OZ_Log.Warn("storage settings: ProxyRowsPerMessage " + ProxyRowsPerMessage + " is outside 1..200, using 40");
+            ProxyRowsPerMessage = 40;
+            warnings++;
+        }
+        if (ProxyMessagesPerFrame < 1 || ProxyMessagesPerFrame > 100)
+        {
+            OZ_Log.Warn("storage settings: ProxyMessagesPerFrame " + ProxyMessagesPerFrame + " is outside 1..100, using 4");
+            ProxyMessagesPerFrame = 4;
+            warnings++;
+        }
+        if (ProxyIdleSeconds < 1 || ProxyIdleSeconds > 3600)
+        {
+            OZ_Log.Warn("storage settings: ProxyIdleSeconds " + ProxyIdleSeconds + " is outside 1..3600, using 20");
+            ProxyIdleSeconds = 20;
+            warnings++;
+        }
     }
 
     // Defaults until Load() ran (the client never loads the file and never
@@ -174,6 +213,7 @@ class OZS_Settings : OZ_ConfigBase
         string s = "storage settings: budget=" + s_Inst.OpenFrameBudgetMs + "ms rate=" + s_Inst.OpenItemsPerSecond + "/s";
         s = s + " close=" + s_Inst.CloseFrameBudgetMs + "ms/" + s_Inst.CloseDeletesPerFrame + " autoclose=" + s_Inst.AutoCloseSeconds + "s";
         s = s + " viewers=" + s_Inst.ViewerHeartbeatSeconds + "/" + s_Inst.ViewerTimeoutSeconds + "s/" + s_Inst.ViewerMaxDistance + "m";
+        s = s + " proxy=" + s_Inst.ProxyRowsPerMessage + "x" + s_Inst.ProxyMessagesPerFrame + "/frame idle=" + s_Inst.ProxyIdleSeconds + "s";
         OZ_Log.Info(s);
     }
 }

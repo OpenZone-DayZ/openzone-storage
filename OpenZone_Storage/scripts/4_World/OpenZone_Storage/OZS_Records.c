@@ -286,10 +286,17 @@ class OZS_Records
     // `created` counts the real entities and the moves for the ground-built
     // containers are queued; on failure every entity this root created is
     // deleted, `why` says what happened and `type` names the root's class.
+    // The entity that became node 0 of the last root read. The open job puts
+    // the roots into the box in the order the file lists them, and the proxy
+    // design needs that order kept: a commit names a root by its POSITION in
+    // the box's record, and the bridge numbers them the same way.
+    static EntityAI s_LastRoot;
+
     static bool ReadRoot(FileSerializer f, EntityAI box, int saveVer, int m0, int m1, int m2, int m3, array<ref OZS_Move> moves, out int created, out string why, out string type)
     {
         created = 0;
         type = "";
+        s_LastRoot = null;
         int count;
         if (!f.Read(count) || count < 1 || count > 100000)
         {
@@ -426,6 +433,7 @@ class OZS_Records
         }
         created = real;
         s_Created = s_Created + real;
+        s_LastRoot = nodes.Get(0).made;
         return true;
     }
 

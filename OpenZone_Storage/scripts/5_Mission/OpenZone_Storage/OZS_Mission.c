@@ -28,7 +28,10 @@ modded class MissionServer
     {
         super.OnUpdate(timeslice);
         if (GetGame() && GetGame().IsDedicatedServer())
+        {
             OZS_Controller.Get().OnFrame(timeslice);
+            OZS_Proxies.Get().OnFrame(timeslice);
+        }
     }
 
     override void OnMissionFinish()
@@ -39,6 +42,11 @@ modded class MissionServer
             // every box the engine deletes is teardown and not a removal, so
             // EEDelete must not mark their stores as orphaned.
             OZS_Controller.SetShuttingDown(true);
+            // The proxy sessions go first and write nothing: SQL is current to
+            // the last committed turn, which is the whole point of committing
+            // per turn (design 2026-09-24 §7, §9).
+            OZS_Proxies.Get().EndAll();
+            OZS_Proxies.Reset();
             OZS_Controller.Get().CloseAll();
             OZS_Controller.Reset();
         }

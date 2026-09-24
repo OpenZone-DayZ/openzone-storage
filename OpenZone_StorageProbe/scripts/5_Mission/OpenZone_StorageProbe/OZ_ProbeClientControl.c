@@ -97,6 +97,42 @@ class OZ_ProbeClientControl
         {
             RoundTrip(line);
         }
+        else if (line.IndexOf("rpc ") == 0)
+        {
+            DayZGame.s_OZ_Trace = line.IndexOf("rpc on") == 0;
+            Note("=== rpc trace " + DayZGame.s_OZ_Trace.ToString());
+        }
+        else if (line.IndexOf("pxopen ") == 0)
+        {
+            // The CLIENT asks for a box, which is what a screen does. The
+            // stand's own `proxy do=open` asks from the server side; this is
+            // the other half of the same wire.
+            string wantId = line.Substring(7, line.Length() - 7);
+            wantId.TrimInPlace();
+            OZS_Mirror.Ask(wantId);
+            Note("=== asked for " + wantId);
+        }
+        else if (line.IndexOf("pxshut ") == 0)
+        {
+            OZS_Mirror shutting = OZS_Mirrors.Get().Find(line.Substring(7, line.Length() - 7));
+            if (shutting)
+            {
+                shutting.Shut();
+                Note("=== shut " + shutting.m_Id);
+            }
+        }
+        else if (line.IndexOf("pxmove ") == 0)
+        {
+            // pxmove <id> <handle> <row> <col>
+            PxMove(line);
+        }
+        else if (line.IndexOf("px") == 0)
+        {
+            // What this client's PROXIES hold (design 2026-09-24): the answer
+            // to "did the wire deliver the box", asked of the client itself.
+            Note("=== " + line + " -> " + OZS_Mirrors.Get().Status());
+            PxTree(line);
+        }
         else if (line.IndexOf("mirror") == 0)
         {
             Mirror(line);
@@ -496,6 +532,66 @@ class OZ_ProbeClientControl
         // the client compiles too, and it only reads.
         string done = OZ_ProbeState.Tree(me.GetPosition(), radius, SCAN_FILE);
         Note("=== " + line + " -> " + done);
+    }
+
+    // A move the way the screen will make it: the proxy is moved at once with
+    // LOCAL, and the server is asked to agree. Both halves, so the round trip
+    // can be watched.
+    protected void PxMove(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        if (parts.Count() < 5)
+        {
+            Note("pxmove <id> <handle> <row> <col>");
+            return;
+        }
+        OZS_Mirror m = OZS_Mirrors.Get().Find(parts.Get(1));
+        if (!m)
+        {
+            Note("pxmove: no mirror of " + parts.Get(1));
+            return;
+        }
+        int handle = parts.Get(2).ToInt();
+        int row = parts.Get(3).ToInt();
+        int col = parts.Get(4).ToInt();
+        EntityAI e = m.ByHandle(handle);
+        if (!e)
+        {
+            Note("pxmove: no handle " + handle.ToString());
+            return;
+        }
+        OZS_Row want = new OZS_Row();
+        want.Set(handle, 0, InventoryLocationType.CARGO, -1, row, col, 0, e.GetType());
+        bool here = m.Place(e, want);
+        m.Move(handle, 0, InventoryLocationType.CARGO, -1, row, col, 0);
+        Note("pxmove #" + handle.ToString() + " to " + row.ToString() + "," + col.ToString() + ": the proxy said " + here.ToString() + ", the server was asked");
+    }
+
+    // The proxy's contents as this client sees them, so the two sides can be
+    // diffed item by item.
+    protected void PxTree(string line)
+    {
+        array<ref OZS_Mirror> all = OZS_Mirrors.Get().All();
+        for (int i = 0; i < all.Count(); i++)
+        {
+            OZS_Mirror m = all.Get(i);
+            if (!m.m_Box)
+                continue;
+            Note("px " + m.m_Id + " tree " + (OZS_Records.CountTree(m.m_Box) - 1).ToString());
+            array<EntityAI> roots = new array<EntityAI>();
+            m.Roots(roots);
+            for (int r = 0; r < roots.Count(); r++)
+            {
+                EntityAI e = roots.Get(r);
+                InventoryLocation il = new InventoryLocation();
+                e.GetInventory().GetCurrentInventoryLocation(il);
+                string where = il.GetRow().ToString() + "," + il.GetCol().ToString();
+                if (il.GetType() == InventoryLocationType.ATTACHMENT)
+                    where = "slot " + il.GetSlot().ToString();
+                Note("  #" + m.HandleOf(e).ToString() + " " + e.GetType() + " at " + where + " tree " + OZS_Records.CountTree(e).ToString() + " netid " + e.GetNetworkIDString());
+            }
+        }
     }
 
     protected void Note(string text)

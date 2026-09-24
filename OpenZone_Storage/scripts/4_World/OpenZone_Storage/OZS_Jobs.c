@@ -370,6 +370,9 @@ class OZS_OpenJob
         m_Started = GetGame().GetTickTime();
         m_Box.OZS_SetState(OZS_Const.STATE_OPENING);
         m_Box.OZS_SetRestoring(true);
+        // The order the record lists the roots in is the order they are read;
+        // a per-operation commit names a root by that position (§7).
+        m_Box.OZS_ForgetRoots();
         m_Tokens = 0;
         m_Next = 0;
         if (!OZS_Bridge.Up())
@@ -386,6 +389,10 @@ class OZS_OpenJob
     protected void Request()
     {
         m_Attempt++;
+        // A retry re-reads the whole record from the beginning, so whatever
+        // root positions were noted belong to a file that is being replaced.
+        if (m_Box)
+            m_Box.OZS_ForgetRoots();
         OZS_IdLetter letter = new OZS_IdLetter();
         letter.id = m_Id;
         letter.by = m_Uid;
@@ -546,6 +553,7 @@ class OZS_OpenJob
         string type;
         if (OZS_Records.ReadRoot(m_File, m_Box, m_SaveVer, m_M0, m_M1, m_M2, m_M3, m_Moves, created, why, type))
         {
+            m_Box.OZS_NoteRoot(OZS_Records.s_LastRoot);
             m_Next++;
             m_Created = m_Created + created;
             m_Missed = m_Missed + OZS_Records.s_Missed - missedBefore;

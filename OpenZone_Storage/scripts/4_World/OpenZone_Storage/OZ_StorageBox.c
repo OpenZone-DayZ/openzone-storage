@@ -23,6 +23,9 @@ class OZ_StorageBox : DeployableContainer_Base
     // Server only: this box is an authority -- unannounced, unsaved, standing
     // for a box somewhere else. See OZS_Authority.
     protected bool   m_OZS_Authority;
+    // Server only: the top-level items in the order the stored record lists
+    // them. See OZS_RootOrder.
+    protected ref array<EntityAI> m_OZS_RootOrder;
     // Server only: tick time of the last activity in this box, which is the
     // opening itself or any item going in, out or across (0 = not open);
     // the auto-close counts idle time from it. And the time of the last
@@ -171,6 +174,42 @@ class OZ_StorageBox : DeployableContainer_Base
     void OZS_StandForId(string id)
     {
         m_OZS_Id = id;
+    }
+
+    // The ROOTS in the order the record lists them, filled by the open. A
+    // commit names a root by its POSITION here and the bridge numbers the
+    // roots of a version the same way, so the two stay in step without either
+    // side sending an index the other has to trust (design 2026-09-24 §7).
+    // Empty on a box that is not being used through a proxy.
+    array<EntityAI> OZS_RootOrder()
+    {
+        if (!m_OZS_RootOrder)
+            m_OZS_RootOrder = new array<EntityAI>();
+        return m_OZS_RootOrder;
+    }
+
+    void OZS_NoteRoot(EntityAI e)
+    {
+        if (e)
+            OZS_RootOrder().Insert(e);
+    }
+
+    void OZS_ForgetRoots()
+    {
+        OZS_RootOrder().Clear();
+    }
+
+    // -1 when this entity is not a root of the record: it is nested in one,
+    // or the box was never opened through a proxy.
+    int OZS_RootPosition(EntityAI e)
+    {
+        array<EntityAI> order = OZS_RootOrder();
+        for (int i = 0; i < order.Count(); i++)
+        {
+            if (order.Get(i) == e)
+                return i;
+        }
+        return -1;
     }
 
     // True for a container created by OZS_Authority. Everything built into

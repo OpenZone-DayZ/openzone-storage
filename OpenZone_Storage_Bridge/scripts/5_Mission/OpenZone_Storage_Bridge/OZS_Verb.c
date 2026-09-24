@@ -11,6 +11,7 @@
 //   world_exec verb=oz_storage args={"op":"stash","uid":"76561198000000000","offset":"2"}          (stand: a stash with a chosen owner)
 //   world_exec verb=oz_storage args={"op":"fill","id":"<box id>","class":"BandageDressing","count":"5","into":"MountainBag","kids":"3"}   (stand)
 //   world_exec verb=oz_storage args={"op":"auth","do":"make","id":"<box id>"}                 (stand: the authoritative box, design 2026-09-24)
+//   world_exec verb=oz_storage args={"op":"proxy","do":"open","id":"<box id>"}                (stand: a proxy session, design 2026-09-24)
 modded class DZMCP_BridgeCore
 {
     override protected string KnownVerbs()
@@ -93,8 +94,18 @@ modded class DZMCP_BridgeCore
             v = OZS_Arg(args, "close_budget", "");
             if (v != "")
                 st.CloseFrameBudgetMs = v.ToInt();
+            v = OZS_Arg(args, "px_rows", "");
+            if (v != "")
+                st.ProxyRowsPerMessage = v.ToInt();
+            v = OZS_Arg(args, "px_msgs", "");
+            if (v != "")
+                st.ProxyMessagesPerFrame = v.ToInt();
+            v = OZS_Arg(args, "px_idle", "");
+            if (v != "")
+                st.ProxyIdleSeconds = v.ToInt();
             detail = "autoclose=" + st.AutoCloseSeconds + "s viewers=" + st.ViewerTimeoutSeconds + "s/" + st.ViewerMaxDistance + "m rate=" + st.OpenItemsPerSecond;
             detail = detail + " close=" + st.CloseFrameBudgetMs + "ms/" + st.CloseDeletesPerFrame;
+            detail = detail + " proxy=" + st.ProxyRowsPerMessage + "x" + st.ProxyMessagesPerFrame + "/frame idle=" + st.ProxyIdleSeconds + "s";
             return true;
         }
 
@@ -470,6 +481,132 @@ modded class DZMCP_BridgeCore
             else
                 detail += "; " + probeItem + " REFUSED";
             return true;
+        }
+
+        if (op == "proxy")
+        {
+            // STAND ONLY (proxy design 2026-09-24, stage B): drives a proxy
+            // session without a screen, so the wire can be measured before the
+            // screen exists.
+            //
+            //   do=open   id=<box id>              show it to the first player
+            //   do=shut   id=<box id>
+            //   do=status
+            //   do=move   id=<box id> handle=N row=R col=C [into=H] [slot=S]
+            //   do=out    id=<box id> handle=N
+            //   do=in     id=<box id> item=<class> [row=R col=C]
+            string pxDo = OZS_Arg(args, "do", "status");
+            if (pxDo == "status")
+            {
+                detail = OZS_Proxies.Get().Status();
+                return true;
+            }
+            string pxId = OZS_Arg(args, "id", "");
+            if (pxId == "")
+            {
+                detail = "proxy do=" + pxDo + " needs id=<box id>";
+                return false;
+            }
+            array<Man> pxMen = new array<Man>();
+            GetGame().GetPlayers(pxMen);
+            if (pxMen.Count() == 0)
+            {
+                detail = "nobody is connected";
+                return false;
+            }
+            PlayerIdentity pxWho = pxMen.Get(0).GetIdentity();
+            if (!pxWho)
+            {
+                detail = "the player has no identity";
+                return false;
+            }
+            if (pxDo == "open")
+            {
+                OZ_StorageBox pxAnchor = c.FindById(pxId);
+                if (!pxAnchor)
+                {
+                    detail = "no box with id " + pxId + " is in the world to be the anchor";
+                    return false;
+                }
+                string pxWhy;
+                if (!OZS_Proxies.Get().Open(pxId, pxAnchor.GetType(), pxAnchor.GetPosition(), pxWho, pxWhy))
+                {
+                    detail = "open refused: " + pxWhy;
+                    return false;
+                }
+                detail = "session opening for " + pxId + " -> " + OZS_Proxies.Get().Status();
+                return true;
+            }
+            if (pxDo == "shut")
+            {
+                OZS_Proxies.Get().Shut(pxId, pxWho);
+                detail = "shut -> " + OZS_Proxies.Get().Status();
+                return true;
+            }
+            OZS_Session pxS = OZS_Proxies.Get().Find(pxId);
+            if (!pxS)
+            {
+                detail = "no session for " + pxId;
+                return false;
+            }
+            OZS_Watcher pxW = pxS.WatcherOf(pxWho);
+            if (!pxW)
+            {
+                detail = "that player is not watching " + pxId;
+                return false;
+            }
+            int pxHandle = OZS_Arg(args, "handle", "1").ToInt();
+            int pxRow = OZS_Arg(args, "row", "-1").ToInt();
+            int pxCol = OZS_Arg(args, "col", "-1").ToInt();
+            int pxInto = OZS_Arg(args, "into", "0").ToInt();
+            string pxSlot = OZS_Arg(args, "slot", "");
+            int pxLt = InventoryLocationType.CARGO;
+            int pxSlotId = -1;
+            if (pxSlot != "")
+            {
+                pxSlotId = InventorySlots.GetSlotIdFromString(pxSlot);
+                pxLt = InventoryLocationType.ATTACHMENT;
+            }
+            if (pxDo == "move")
+            {
+                pxS.Operate(pxWho, OZS_Const.OP_MOVE, pxHandle, pxInto, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                detail = "move sent -> " + pxS.Status();
+                return true;
+            }
+            if (pxDo == "out")
+            {
+                pxS.Operate(pxWho, OZS_Const.OP_OUT, pxHandle, 0, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                detail = "out sent -> " + pxS.Status();
+                return true;
+            }
+            if (pxDo == "combine")
+            {
+                pxS.Operate(pxWho, OZS_Const.OP_COMBINE, pxHandle, OZS_Arg(args, "other", "2").ToInt(), pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                detail = "combine sent -> " + pxS.Status();
+                return true;
+            }
+            if (pxDo == "in")
+            {
+                // The item is made in the player's hands first, exactly as one
+                // they picked up would be, and then named by its network id.
+                string pxItem = OZS_Arg(args, "item", "BandageDressing");
+                EntityAI pxMade = EntityAI.Cast(pxMen.Get(0).GetHumanInventory().CreateInHands(pxItem));
+                if (!pxMade)
+                    pxMade = EntityAI.Cast(pxMen.Get(0).GetInventory().CreateInInventory(pxItem));
+                if (!pxMade)
+                {
+                    detail = "the player cannot hold a " + pxItem;
+                    return false;
+                }
+                int pxLow;
+                int pxHigh;
+                pxMade.GetNetworkID(pxLow, pxHigh);
+                pxS.Operate(pxWho, OZS_Const.OP_IN, pxLow, pxHigh, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                detail = "in sent for " + pxMade.GetType() + " netid " + pxMade.GetNetworkIDString() + " -> " + pxS.Status();
+                return true;
+            }
+            detail = "proxy: unknown do=" + pxDo;
+            return false;
         }
 
         if (op == "fill")

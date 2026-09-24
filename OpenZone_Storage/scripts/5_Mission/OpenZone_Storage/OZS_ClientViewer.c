@@ -94,6 +94,15 @@ class OZS_ClientViewer
 
 modded class MissionGameplay
 {
+    override void OnInit()
+    {
+        super.OnInit();
+        // The proxy wire's client end. See OZS_Mirrors.Listen: it has to be
+        // the game's own invoker, because a server -> client message arrives
+        // with no target and never reaches an Object.OnRPC.
+        OZS_Mirrors.Listen();
+    }
+
     override void OnUpdate(float timeslice)
     {
         super.OnUpdate(timeslice);

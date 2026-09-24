@@ -34,6 +34,9 @@ class OZS_Const
     static const string ROUTE_OPENED  = "v1/storage/opened";
     static const string ROUTE_PARK    = "v1/storage/park";
     static const string ROUTE_EVENTS  = "v1/storage/events";
+    // One turn of a proxy session: the roots that changed, went or arrived
+    // (design 2026-09-24 §7).
+    static const string ROUTE_OP      = "v1/storage/op";
     // The kind of the poll items the bridge may send this mod (live
     // commands, a later sub-project) and the name of its sink.
     static const string SINK_KIND     = "storage";
@@ -53,6 +56,43 @@ class OZS_Const
 
     static const int RPC_VIEW_ID = 20260916;
     static const int RPC_SORT_ID = 20260917;
+
+    // The proxy wire (design 2026-09-24). Every one of these travels on the
+    // ANCHOR object -- the placed box or the stash's locker -- because the
+    // authoritative container has no network id to address, and the anchor is
+    // the one thing both sides already agree on.
+    //
+    // THE IDS ARE SMALL ON PURPOSE. A date-shaped id like 20260924 travels
+    // client -> server perfectly well (RPC_VIEW_ID above is one), but the same
+    // id sent server -> ONE CLIENT never arrives: measured 2026-09-24, the
+    // server logged the send with the right target and the right recipient and
+    // the client's DayZGame.OnRPC never saw it. Vanilla's own ERPCs end in the
+    // low hundreds and CF's whole framework rides on 10042.
+    //
+    // Server -> ONE client:
+    static const int RPC_PX_BEGIN  = 20501;  // a stream starts: id, class, count
+    static const int RPC_PX_ROWS   = 20502;  // a chunk of item descriptors
+    static const int RPC_PX_END    = 20503;  // the stream is whole
+    static const int RPC_PX_CHANGE = 20504;  // one change, to every proxy of this box
+    static const int RPC_PX_NO     = 20505;  // an operation was refused
+    // Client -> server:
+    static const int RPC_PX_OPEN   = 20506;  // show me this box
+    static const int RPC_PX_OP     = 20507;  // do this to it
+    static const int RPC_PX_SHUT   = 20508;  // I have closed the screen
+
+    // What an operation is. MOVE stays inside the box; OUT and IN cross the
+    // boundary; COMBINE and SWAP are the engine's own, asked of the authority.
+    static const int OP_MOVE    = 1;
+    static const int OP_OUT     = 2;
+    static const int OP_IN      = 3;
+    static const int OP_COMBINE = 4;
+    static const int OP_SWAP    = 5;
+
+    // What a change is, as the server tells it to every proxy.
+    static const int CH_MOVED   = 1;   // handle -> a new place
+    static const int CH_GONE    = 2;   // handle is no longer in the box
+    static const int CH_ADDED   = 3;   // a whole item arrived (one descriptor)
+    static const int CH_QTY     = 4;   // a stack changed size
 
     static const float SORT_COOLDOWN = 10.0;
     // 45 days: our classes are not in types.xml, so the central economy

@@ -19,6 +19,14 @@ class OZS_Store
         return id + "-" + FileStamp() + ".bin";
     }
 
+    // A TURN's file (design 2026-09-24 §7). Several turns can land in the
+    // same second, so the name carries a serial the close name has no need
+    // of; the bridge knows both shapes.
+    static string OpName(string id, int serial)
+    {
+        return id + "-" + FileStamp() + "-" + serial.ToString() + ".bin";
+    }
+
     static void EnsureDirs()
     {
         MakeDirectory(OZS_Const.DIR);
@@ -125,6 +133,17 @@ class OZS_StoreWriter
     protected int m_Written;
     protected int m_RootsWritten;
     protected bool m_Open;
+    // Non-zero for a turn's file rather than a close's.
+    protected int m_OpSerial;
+
+    // A TURN's file: the same format, a name of its own, and the box's id
+    // taken from what the box STANDS FOR -- an authority answers with the id
+    // of the box whose contents it holds.
+    bool OpenOp(OZ_StorageBox box, int roots, int entities, int serial, out string why)
+    {
+        m_OpSerial = serial;
+        return Open(box, roots, entities, why);
+    }
 
     bool Open(OZ_StorageBox box, int roots, int entities, out string why)
     {
@@ -136,7 +155,10 @@ class OZS_StoreWriter
         }
         OZS_Store.EnsureDirs();
         m_Stamp = OZS_Store.Stamp();
-        m_Name = OZS_Store.CloseName(m_Id);
+        if (m_OpSerial > 0)
+            m_Name = OZS_Store.OpName(m_Id, m_OpSerial);
+        else
+            m_Name = OZS_Store.CloseName(m_Id);
         m_Path = OZS_Store.XchgPath(m_Name);
         m_File = new FileSerializer();
         if (!m_File.Open(m_Path, FileMode.WRITE))
