@@ -724,7 +724,29 @@ class OZS_OpenJob
         string s = "storage: box " + m_Id + " opened by " + m_Who + ": " + m_Roots.ToString() + " items (" + m_Created.ToString() + " entities) in " + m_Frames.ToString() + " frame(s),";
         s = s + " work " + OZS_CloseJob.R1(m_WorkMs) + " ms, longest step " + OZS_CloseJob.R1(m_MaxStepMs) + " ms, wall " + OZS_CloseJob.R1(wall) + " s";
         s = s + ", missed " + m_Missed.ToString() + ", parked " + m_Parked.ToString() + ", attempts " + m_Attempt.ToString();
+        // The record's order is what every later commit names a root by, so a
+        // box that ends an open knowing fewer roots than it read will add the
+        // missing ones back as duplicates at the first move.
+        int noted = m_Box.OZS_RootOrder().Count();
+        int inBox = OZS_Records.CountTree(m_Box) - 1;
+        s = s + ", order " + noted.ToString() + ", in the box " + inBox.ToString();
         OZ_Log.Info(s);
+        // WHAT WAS READ AND WHAT IS THERE MUST BE THE SAME NUMBER. A restore
+        // that reports "missed 0" and still ends with fewer entities than it
+        // created has lost them somewhere between the two, and the box will be
+        // written back short.
+        if (inBox != m_Created)
+        {
+            OZ_Log.Error("storage: box " + m_Id + " created " + m_Created.ToString() + " entities and ended with " + inBox.ToString() + " in it; " + (m_Created - inBox).ToString() + " went missing during the restore");
+            array<EntityAI> left = new array<EntityAI>();
+            m_Box.OZS_GetRoots(left);
+            string had = "";
+            for (int q = 0; q < left.Count(); q++)
+                had = had + " " + left.Get(q).GetType() + "(" + OZS_Records.CountTree(left.Get(q)).ToString() + ")";
+            OZ_Log.Error("storage: box " + m_Id + " holds:" + had);
+        }
+        if (noted != m_Roots)
+            OZ_Log.Error("storage: box " + m_Id + " read " + m_Roots.ToString() + " root(s) but noted " + noted.ToString() + " in its order; every commit after this one will name the wrong root");
         OZS_IdLetter ack = new OZS_IdLetter();
         ack.id = m_Id;
         ack.stamp = m_Stamp;

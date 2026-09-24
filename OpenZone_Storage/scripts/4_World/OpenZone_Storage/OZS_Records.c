@@ -590,6 +590,38 @@ class OZS_Records
                     spot = "slot " + m.slot.ToString();
                 OZ_Log.Warn("storage: " + m.item.GetType() + " with " + m.children.ToString() + " items could not be moved into " + into + " at " + spot + "; it stays where it was built");
             }
+            if (placed)
+            {
+                // Where it ACTUALLY landed. A move that reports success and
+                // puts the item somewhere else -- another container, or
+                // nowhere at all -- is how a restore loses things while
+                // counting none missed.
+                EntityAI now = m.item.GetHierarchyParent();
+                if (now != m.parent)
+                {
+                    string where = "nowhere";
+                    if (now)
+                        where = now.GetType();
+                    OZ_Log.Error("storage: " + m.item.GetType() + " said it moved into " + into + " and is in " + where);
+                }
+            }
+            // AN AUTHORITY NEVER PUTS A FAILED ITEM ON THE GROUND.
+            //
+            // `m.publish` is false only for a box nobody is told about, and
+            // announcing there is not a rescue but a DUPLICATE: the record
+            // still holds the item, so a copy on the ground is a second one.
+            // Measured against the owner 2026-09-24 -- kits kept appearing
+            // beside the box, one per session, each also still in the record.
+            //
+            // The old scheme keeps its rescue: there the world IS the truth
+            // while a box is open, and an item left unannounced would be lost
+            // for good.
+            if (!placed && !m.publish)
+            {
+                OZ_Log.Error("storage: " + m.item.GetType() + " could not be put into an unannounced box and is deleted rather than dropped beside it; the record still has it and the next open will try again");
+                GetGame().ObjectDelete(m.item);
+                continue;
+            }
             if (m.publish || !placed)
                 GetGame().RemoteObjectTreeCreate(m.item);
         }

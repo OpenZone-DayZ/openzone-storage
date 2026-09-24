@@ -66,9 +66,22 @@ class OZS_Commit
         if (wasRoot >= 0 && wasRoot != now)
             letter.Rewrite(wasRoot);
         if (now >= 0)
+        {
             letter.Rewrite(now);
+        }
         else
+        {
+            // A MOVE THAT ADDS A ROOT IS ALMOST ALWAYS A DUPLICATE. It means
+            // the item's top-level parent is not in the box's record order --
+            // and if the record already has it under another position, this
+            // writes a second copy of it. Loud, with everything needed to see
+            // which item and which box.
+            string what = "nothing";
+            if (top)
+                what = top.GetType();
+            OZ_Log.Error("storage: proxy: box " + s.m_Id + ": " + what + " moved but is not in the record's order (" + s.m_Auth.OZS_RootOrder().Count().ToString() + " root(s) known); it is being ADDED, which duplicates it if the record already had it");
             letter.Add(top);
+        }
         letter.Post();
     }
 
@@ -226,6 +239,7 @@ class OZS_Letter
         for (int aa = 0; aa < m_Add.Count(); aa++)
             order.Insert(m_Add.Get(aa));
 
+        OZ_Log.Dbg("storage: proxy: turn for " + m_S.m_Id + ": rewrite " + letter.rewrite.Count().ToString() + " drop " + letter.drop.Count().ToString() + " add " + letter.adds.ToString() + ", the order now has " + order.Count().ToString() + " root(s), the box " + m_S.m_Auth.OZS_CountEntities().ToString());
         string json;
         string err;
         if (!JsonFileLoader<OZS_OpLetter>.MakeData(letter, json, err, false))
