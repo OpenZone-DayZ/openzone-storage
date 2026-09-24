@@ -20,6 +20,9 @@ class OZ_StorageBox : DeployableContainer_Base
     // Server only: the controller's job is creating entities in this box, so
     // the receive gates answer yes although the box is not OPEN yet.
     protected bool   m_OZS_Restoring;
+    // Server only: this box is an authority -- unannounced, unsaved, standing
+    // for a box somewhere else. See OZS_Authority.
+    protected bool   m_OZS_Authority;
     // Server only: tick time of the last activity in this box, which is the
     // opening itself or any item going in, out or across (0 = not open);
     // the auto-close counts idle time from it. And the time of the last
@@ -43,6 +46,18 @@ class OZ_StorageBox : DeployableContainer_Base
         super.EEInit();
         if (!GetGame() || !GetGame().IsServer())
             return;
+        // An authority is not a box in the world and must not be treated as
+        // one: no id of its own (it will be told whose contents it holds), no
+        // place in the controller's register, no lifetime, no audit when it
+        // goes. OZS_Authority holds the latch up for the one CreateObjectEx
+        // call, because EEInit runs inside it and there is no earlier moment
+        // to say so.
+        if (OZS_Authority.IsMaking())
+        {
+            m_OZS_Authority = true;
+            SetTakeable(false);
+            return;
+        }
         // The engine's persistent id is the box id (owner, 2026-09-19): it is
         // valid the frame the box is created and the same after every boot.
         // OZS_GetId() computes it lazily as well, in case it is not there yet.
@@ -64,7 +79,7 @@ class OZ_StorageBox : DeployableContainer_Base
     // apart, so the controller's shutdown flag decides.
     override void EEDelete(EntityAI parent)
     {
-        if (GetGame() && GetGame().IsServer())
+        if (GetGame() && GetGame().IsServer() && !m_OZS_Authority)
         {
             if (!OZS_Controller.IsShuttingDown())
             {
@@ -146,6 +161,25 @@ class OZ_StorageBox : DeployableContainer_Base
                 m_OZS_Id = pid;
         }
         return m_OZS_Id;
+    }
+
+    // An AUTHORITY stands for a box it is not: it is created unannounced and
+    // unsaved, and must answer with the id of the box whose contents it holds,
+    // not with a persistent id of its own (design 2026-09-24 §2). Nothing else
+    // may call this -- a placed box's id is the engine's and is not ours to
+    // change.
+    void OZS_StandForId(string id)
+    {
+        m_OZS_Id = id;
+    }
+
+    // True for a container created by OZS_Authority. Everything built into
+    // this box must be built LOCAL, because the box itself is unannounced and
+    // a networked child of an unannounced parent is a contradiction the
+    // clients would resolve badly.
+    bool OZS_IsAuthority()
+    {
+        return m_OZS_Authority;
     }
 
     int OZS_GetStoredCount()

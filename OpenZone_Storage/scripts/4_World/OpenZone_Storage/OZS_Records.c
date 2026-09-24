@@ -331,12 +331,19 @@ class OZS_Records
             }
         }
 
+        // An AUTHORITY is itself unannounced, so everything built into it must
+        // be built local too -- a networked child of an invisible parent is a
+        // contradiction the clients resolve badly. The same flag then keeps
+        // the moves below from publishing anything.
+        OZ_StorageBox asBox = OZ_StorageBox.Cast(box);
+        bool boxLocal = asBox && asBox.OZS_IsAuthority();
+
         // Every node exists before any body is read: parents first.
         for (int c = 0; c < count; c++)
         {
             OZS_Node node = nodes.Get(c);
             EntityAI parent = box;
-            bool parentLocal = false;
+            bool parentLocal = boxLocal;
             if (node.parent >= 0)
             {
                 parent = nodes.Get(node.parent).made;
@@ -408,7 +415,7 @@ class OZS_Records
             if (!nm.ground || nm.standIn)
                 continue;
             EntityAI into = box;
-            bool intoLocal = false;
+            bool intoLocal = boxLocal;
             if (nm.parent >= 0)
             {
                 into = nodes.Get(nm.parent).made;

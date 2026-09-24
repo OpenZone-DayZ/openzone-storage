@@ -97,6 +97,238 @@ class OZ_ProbeClientControl
         {
             RoundTrip(line);
         }
+        else if (line.IndexOf("mirror") == 0)
+        {
+            Mirror(line);
+        }
+        else if (line.IndexOf("shuffle") == 0)
+        {
+            Shuffle(line);
+        }
+        else if (line.IndexOf("moves") == 0)
+        {
+            Battery(line);
+        }
+    }
+
+    // THE DIVERGENCE QUESTION (2026-09-24): does a client mirror judge a move
+    // the same way the server's authoritative box would? Both are the same
+    // engine with the same classes, so they should -- but "should" is not a
+    // measurement, and a mirror that accepts what the server refuses is a
+    // snap-back on every drag.
+    //
+    // The same battery runs here and in the stand bridge's `moves` op on a
+    // server-built box with the same contents; the two outputs are compared
+    // line by line.
+    protected void Battery(string line)
+    {
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        if (!me)
+        {
+            Say("moves: no player");
+            return;
+        }
+        array<Object> around = new array<Object>();
+        GetGame().GetObjectsAtPosition(me.GetPosition(), 6, around, null);
+        EntityAI box = null;
+        for (int i = 0; i < around.Count(); i++)
+        {
+            EntityAI cand = EntityAI.Cast(around.Get(i));
+            if (cand && !cand.GetHierarchyParent() && cand.GetInventory() && cand.GetInventory().GetCargo() && cand.GetNetworkIDString() == "00")
+            {
+                box = cand;
+                break;
+            }
+        }
+        if (!box)
+        {
+            Say("moves: no client-local container within 6 m -- run mirror first");
+            return;
+        }
+        Say("moves: battery on the MIRROR of " + box.GetType());
+        array<string> report = new array<string>();
+        OZ_ProbeBattery.Run(box, report);
+        for (int r = 0; r < report.Count(); r++)
+            Say("moves: " + report.Get(r));
+    }
+
+    // The other half of the mirror question: can anything be MOVED inside a
+    // container that exists only here? The grab out of it failed, as a move to
+    // the player's real inventory must -- the server has no counterpart to
+    // agree with. A move that stays entirely inside the local tree has no
+    // server half to fail, so it is a different question, and it decides
+    // whether a screen over such a mirror can rearrange anything at all.
+    //
+    //   shuffle <row> <col> [n]   -- the first item in the local box to that cell
+    //
+    // Two modes are tried in turn, because the inventory screen uses the
+    // second: LOCAL (apply here, tell nobody) and PREDICTIVE (apply here, ask
+    // the server to agree).
+    protected void Shuffle(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        int row = 2;
+        int col = 3;
+        if (parts.Count() > 1)
+            row = parts.Get(1).ToInt();
+        if (parts.Count() > 2)
+            col = parts.Get(2).ToInt();
+
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        if (!me)
+        {
+            Say("shuffle: no player");
+            return;
+        }
+        array<Object> around = new array<Object>();
+        GetGame().GetObjectsAtPosition(me.GetPosition(), 6, around, null);
+        EntityAI box = null;
+        for (int i = 0; i < around.Count(); i++)
+        {
+            EntityAI cand = EntityAI.Cast(around.Get(i));
+            if (!cand || cand.GetHierarchyParent())
+                continue;
+            // The mirror is the one with no network id of its own.
+            if (cand.GetInventory() && cand.GetInventory().GetCargo() && cand.GetNetworkIDString() == "00")
+            {
+                box = cand;
+                break;
+            }
+        }
+        if (!box)
+        {
+            Say("shuffle: no client-local container within 6 m -- run mirror first");
+            return;
+        }
+        CargoBase cargo = box.GetInventory().GetCargo();
+        if (cargo.GetItemCount() == 0)
+        {
+            Say("shuffle: the mirror is empty");
+            return;
+        }
+        EntityAI item = EntityAI.Cast(cargo.GetItem(0));
+        InventoryLocation src = new InventoryLocation();
+        item.GetInventory().GetCurrentInventoryLocation(src);
+        Say("shuffle: " + item.GetType() + " from " + src.GetRow() + "," + src.GetCol() + " to " + row + "," + col);
+
+        InventoryLocation dst = new InventoryLocation();
+        dst.SetCargo(box, item, 0, row, col, false);
+        bool okLocal = box.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
+        InventoryLocation after = new InventoryLocation();
+        item.GetInventory().GetCurrentInventoryLocation(after);
+        Say("shuffle: LOCAL returned " + okLocal.ToString() + ", item now at " + after.GetRow() + "," + after.GetCol());
+
+        InventoryLocation src2 = new InventoryLocation();
+        item.GetInventory().GetCurrentInventoryLocation(src2);
+        InventoryLocation dst2 = new InventoryLocation();
+        dst2.SetCargo(box, item, 0, row + 1, col, false);
+        bool okPred = box.GetInventory().TakeToDst(InventoryMode.PREDICTIVE, src2, dst2);
+        InventoryLocation after2 = new InventoryLocation();
+        item.GetInventory().GetCurrentInventoryLocation(after2);
+        Say("shuffle: PREDICTIVE returned " + okPred.ToString() + ", item now at " + after2.GetRow() + "," + after2.GetCol());
+    }
+
+    // THE QUESTION THIS PROBE EXISTS FOR (2026-09-24): can a container that
+    // exists ONLY in this client's memory hold items and be shown by the
+    // vanilla inventory screen?
+    //
+    // If it can, a storage box can be private for real: the server keeps the
+    // authoritative box unannounced (ECE_LOCAL there too), sends its contents
+    // to ONE player over RPC -- the only call in game.c that takes a
+    // PlayerIdentity -- and that player's client builds this copy. Nothing
+    // reaches anybody else, because nothing is ever announced.
+    //
+    // Vanilla has no precedent: its own local entities (scriptconsoleitemstab.c
+    // :695) are made for a still picture and are never asked for an inventory.
+    // So this asks the engine instead of guessing:
+    //
+    //   mirror <container> <item> <count> [n]
+    //
+    // and writes every answer to scan.txt.
+    protected void Mirror(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        string boxCls = "SeaChest";
+        string itemCls = "BandageDressing";
+        int want = 3;
+        if (parts.Count() > 1)
+            boxCls = parts.Get(1);
+        if (parts.Count() > 2)
+            itemCls = parts.Get(2);
+        if (parts.Count() > 3)
+            want = parts.Get(3).ToInt();
+
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        if (!me)
+        {
+            Say("mirror: no player");
+            return;
+        }
+        // A step to the side, so it cannot be confused with a real box the
+        // server put under the player's feet.
+        vector at = me.GetPosition();
+        at[0] = at[0] + 1.5;
+
+        Say("mirror: asking for " + boxCls + " with " + want + " x " + itemCls);
+        float t0 = GetGame().GetTickTime();
+        Object made = GetGame().CreateObjectEx(boxCls, at, ECE_LOCAL | ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME);
+        if (!made)
+        {
+            Say("mirror: Q1 FAILED -- the client refused to create " + boxCls + " at all");
+            return;
+        }
+        EntityAI box = EntityAI.Cast(made);
+        if (!box)
+        {
+            Say("mirror: Q1 FAILED -- created, but not an EntityAI");
+            return;
+        }
+        Say("mirror: Q1 ok -- created, netid " + box.GetNetworkIDString());
+
+        GameInventory inv = box.GetInventory();
+        if (!inv)
+        {
+            Say("mirror: Q2 FAILED -- no GameInventory on a client-local container");
+            return;
+        }
+        CargoBase cargo = inv.GetCargo();
+        if (!cargo)
+        {
+            Say("mirror: Q2 FAILED -- GetCargo() is null on a client-local container");
+            return;
+        }
+        Say("mirror: Q2 ok -- cargo exists, " + cargo.GetItemCount() + " item(s) in it now");
+
+        int made2 = 0;
+        float tItems = GetGame().GetTickTime();
+        for (int i = 0; i < want; i++)
+        {
+            EntityAI kid = EntityAI.Cast(inv.CreateEntityInCargo(itemCls));
+            if (kid)
+                made2++;
+        }
+        float tDone = GetGame().GetTickTime();
+        // ALL IN ONE FRAME on purpose: this is the burst case, the one that
+        // stalled a client for 39.2 s server-side in 2026-09-17. The client
+        // monitor's client.log carries the frame statistics of the same
+        // second; these numbers say how long the loop itself took.
+        Say("mirror: Q3 " + made2 + " of " + want + " item(s) in " + ((tDone - tItems) * 1000) + " ms (box itself " + ((tItems - t0) * 1000) + " ms); cargo reports " + cargo.GetItemCount());
+        Say("mirror: Q4 -- open the inventory and look in the nearby panel for " + box.GetDisplayName());
+    }
+
+    // One line to the .RPT as a WARNING (INFO never reaches a retail client's
+    // log) and the same line appended to scan.txt, which is what a headless
+    // stand can actually read back.
+    protected void Say(string what)
+    {
+        ErrorEx("[OpenZone] probe " + what, ErrorExSeverity.WARNING);
+        FileHandle f = OpenFile(SCAN_FILE, FileMode.APPEND);
+        if (f == 0)
+            return;
+        FPrintln(f, what);
+        CloseFile(f);
     }
 
     // Every loose item the client knows about near the player, one line each,
