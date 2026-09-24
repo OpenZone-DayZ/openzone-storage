@@ -108,7 +108,7 @@ class OZS_Ops
         OZS_Commit.Moved(s, e, wasRoot);
         // Where it ACTUALLY went, not where it was asked to go: the row is
         // read back off the entity.
-        s.TellMoved(e);
+        s.TellMoved(e, w.m_Uid);
     }
 
     // Two stacks into one. The engine decides, with every mod's CanBeCombined
@@ -138,15 +138,15 @@ class OZS_Ops
         {
             GetGame().ObjectDelete(from);
             OZS_Commit.Left(s, fromRoot, fromWasRoot);
-            s.TellGone(goneHandle);
+            s.TellGone(goneHandle, w.m_Uid);
         }
         else
         {
             OZS_Commit.Quantity(s, from);
-            s.TellQuantity(from);
+            s.TellQuantity(from, w.m_Uid);
         }
         OZS_Commit.Quantity(s, into);
-        s.TellQuantity(into);
+        s.TellQuantity(into, w.m_Uid);
     }
 
     // Two items exchange places. One call, so the box is never in a state
@@ -178,8 +178,8 @@ class OZS_Ops
         s.Touch();
         OZS_Commit.Moved(s, a, -2);
         OZS_Commit.Moved(s, b, -2);
-        s.TellMoved(a);
-        s.TellMoved(b);
+        s.TellMoved(a, w.m_Uid);
+        s.TellMoved(b, w.m_Uid);
     }
 
     // ---- the questions both halves ask -----------------------------------

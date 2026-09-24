@@ -90,7 +90,7 @@ class OZS_Boundary
         GetGame().RemoteObjectTreeCreate(e);
         OZS_Authority.Forget(s.m_Auth);
         s.Touch();
-        s.TellGone(handle);
+        s.TellGone(handle, w.m_Uid);
         OZS_Audit.Log("out", s.m_Id, w.m_Uid, w.Name(), e.GetType(), 0, -1, -1, "", "taken from the box");
     }
 
@@ -169,7 +169,7 @@ class OZS_Boundary
         OZS_Commit.Added(s, e);
         OZS_Authority.Index(s.m_Auth);
         s.Touch();
-        s.TellAdded(e);
+        s.TellAdded(e, w.m_Uid);
         OZS_Audit.Log("in", s.m_Id, w.m_Uid, w.Name(), e.GetType(), 0, -1, -1, "", "put into the box");
     }
 

@@ -38,4 +38,48 @@ modded class ItemBase
         }
         super.CombineItemsClient(entity2, use_stack_max);
     }
+
+    // A SPLIT INTO A BOX MOVES THE WHOLE STACK INSTEAD, FOR NOW.
+    // `SplitItemUtils.TakeOrSplitToInventory` reaches for this when the target
+    // will not take the whole quantity; the box's cargo always will, so this
+    // fires mostly for slots with a cap. Splitting properly needs a quantity
+    // on the wire and a new stack made on the authority -- until then, moving
+    // the whole thing is the honest approximation, and far better than the
+    // nothing that happened before this override existed.
+    override void SplitIntoStackMaxClient(EntityAI destination_entity, int slot_id)
+    {
+        if (!OZS_Mirrors.None())
+        {
+            OZS_Mirror m = OZS_Mirrors.Of(destination_entity);
+            if (!m)
+                m = OZS_Mirrors.Of(this);
+            if (m)
+            {
+                int lt = InventoryLocationType.CARGO;
+                if (slot_id >= 0)
+                    lt = InventoryLocationType.ATTACHMENT;
+                m.DragTo(this, destination_entity, lt, slot_id, -1, -1);
+                return;
+            }
+        }
+        super.SplitIntoStackMaxClient(destination_entity, slot_id);
+    }
+
+    override void SplitItemToInventoryLocation(notnull InventoryLocation dst)
+    {
+        if (!OZS_Mirrors.None())
+        {
+            OZS_Mirror m = OZS_Mirrors.At(dst);
+            if (!m)
+                m = OZS_Mirrors.Of(this);
+            if (m)
+            {
+                InventoryLocation src = new InventoryLocation();
+                if (GetInventory().GetCurrentInventoryLocation(src))
+                    m.Drag(src, dst);
+                return;
+            }
+        }
+        super.SplitItemToInventoryLocation(dst);
+    }
 }

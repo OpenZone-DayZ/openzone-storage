@@ -707,6 +707,27 @@ class OZS_Mirror
         return true;
     }
 
+    // The other shape the vanilla screen moves things in: "put this item into
+    // that target", with the place either named or left to the engine. Every
+    // PredictiveTakeEntityTo* method lands here, and from here it is the same
+    // three cases as a drag.
+    bool DragTo(EntityAI item, EntityAI target, int lt, int slot, int row, int col)
+    {
+        if (!item || !target)
+            return false;
+        InventoryLocation src = new InventoryLocation();
+        if (!item.GetInventory().GetCurrentInventoryLocation(src))
+            return false;
+        InventoryLocation dst = new InventoryLocation();
+        if (lt == InventoryLocationType.ATTACHMENT)
+            dst.SetAttachment(target, item, slot);
+        else if (row >= 0 && col >= 0)
+            dst.SetCargo(target, item, 0, row, col, false);
+        else if (!target.GetInventory().FindFreeLocationFor(item, FindInventoryLocationType.ANY, dst))
+            return false;
+        return Drag(src, dst);
+    }
+
     // Two items changing places, both inside this proxy.
     bool DragSwap(EntityAI a, EntityAI b)
     {

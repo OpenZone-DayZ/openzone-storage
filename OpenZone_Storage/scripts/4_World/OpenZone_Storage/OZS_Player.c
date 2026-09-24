@@ -79,6 +79,62 @@ modded class PlayerBase
         return super.PredictiveTakeToDst(src, dst);
     }
 
+    // THE OTHER FOUR WAYS THE SCREEN PUTS SOMETHING SOMEWHERE. A drop onto a
+    // container's header, or onto a slot, does not go through
+    // PredictiveTakeToDst at all: SplitItemUtils and the container widgets
+    // reach for these instead (splititemutils.c:17, :23,
+    // containerwithcargo.c:476). Missing them is why an item could be moved
+    // INSIDE the box but not put INTO it -- the call that would have put it
+    // there was a PREDICTIVE one nobody had intercepted, and PREDICTIVE does
+    // nothing on a local container (owner's report, 2026-09-24).
+    override bool PredictiveTakeEntityToTargetCargo(notnull EntityAI target, notnull EntityAI item)
+    {
+        OZS_Mirror m = OZS_Box(target, item);
+        if (m)
+            return m.DragTo(item, target, InventoryLocationType.CARGO, -1, -1, -1);
+        return super.PredictiveTakeEntityToTargetCargo(target, item);
+    }
+
+    override bool PredictiveTakeEntityToTargetCargoEx(notnull CargoBase cargo, notnull EntityAI item, int row, int col)
+    {
+        if (!OZS_Mirrors.None() && cargo)
+        {
+            EntityAI holder = cargo.GetCargoOwner();
+            OZS_Mirror m = OZS_Box(holder, item);
+            if (m)
+                return m.DragTo(item, holder, InventoryLocationType.CARGO, -1, row, col);
+        }
+        return super.PredictiveTakeEntityToTargetCargoEx(cargo, item, row, col);
+    }
+
+    override bool PredictiveTakeEntityToTargetAttachmentEx(notnull EntityAI target, notnull EntityAI item, int slot)
+    {
+        OZS_Mirror m = OZS_Box(target, item);
+        if (m)
+            return m.DragTo(item, target, InventoryLocationType.ATTACHMENT, slot, -1, -1);
+        return super.PredictiveTakeEntityToTargetAttachmentEx(target, item, slot);
+    }
+
+    override bool PredictiveTakeEntityToTargetAttachment(notnull EntityAI target, notnull EntityAI item)
+    {
+        OZS_Mirror m = OZS_Box(target, item);
+        if (m)
+            return m.DragTo(item, target, InventoryLocationType.ATTACHMENT, -1, -1, -1);
+        return super.PredictiveTakeEntityToTargetAttachment(target, item);
+    }
+
+    // The proxy either end of this move belongs to, or null when neither does.
+    // One integer test away from null when no box is open.
+    protected OZS_Mirror OZS_Box(EntityAI target, EntityAI item)
+    {
+        if (OZS_Mirrors.None())
+            return null;
+        OZS_Mirror m = OZS_Mirrors.Of(target);
+        if (m)
+            return m;
+        return OZS_Mirrors.Of(item);
+    }
+
     override bool PredictiveSwapEntities(notnull EntityAI item1, notnull EntityAI item2)
     {
         if (!OZS_Mirrors.None())
@@ -88,12 +144,7 @@ modded class PlayerBase
             if (a && a == b)
                 return a.DragSwap(item1, item2);
             if (a || b)
-            {
-                // One end in the box and one outside: two moves, not a swap.
-                // The player can do it in two, and a half-done swap across the
-                // boundary is exactly the kind of thing that loses an item.
-                return false;
-            }
+                return CrossBoundarySwap(item1, item2);
         }
         return super.PredictiveSwapEntities(item1, item2);
     }
@@ -107,9 +158,39 @@ modded class PlayerBase
             if (a && a == b)
                 return a.DragSwap(item1, item2);
             if (a || b)
-                return false;
+                return CrossBoundarySwap(item1, item2);
         }
         return super.PredictiveForceSwapEntities(item1, item2, item2_dst);
+    }
+
+    // ONE END IN THE BOX AND ONE OUTSIDE: REFUSED, AND HERE IS THE REAL REASON.
+    //
+    // A swap across the boundary is TWO crossings, and the two want opposite
+    // orders. Design §7 puts the step that could duplicate last, which means:
+    //
+    //   out of the box   delete from SQL FIRST, then move and announce
+    //   into the box     move first, write to SQL LAST
+    //
+    // One operation cannot satisfy both. Whichever order is chosen, one half
+    // runs in its unsafe order -- and in between, the record is missing BOTH
+    // items at once. A plain move risks one item for one turn, which §9
+    // accepts; a swap would risk two, and the player could not tell afterwards
+    // which half had gone through.
+    //
+    // There is also no undo. Each crossing is its own letter to the bridge; if
+    // the second is refused -- the box is full, a mod's rule says no, the cell
+    // is taken -- the first has already been written and putting it back is a
+    // THIRD operation that can fail in turn.
+    //
+    // Two ordinary moves do the same thing with one item at risk at a time and
+    // a visible result after each. If this is ever wanted as one gesture, it
+    // belongs on the client as two operations in sequence, not as one here.
+    protected bool CrossBoundarySwap(EntityAI item1, EntityAI item2)
+    {
+        // A refusal the player cannot see is worse than a refusal: this is the
+        // only trace of why nothing happened.
+        OZ_Log.Warn("storage: proxy: a swap between " + item1.GetType() + " and " + item2.GetType() + " crosses the box's boundary and is refused; move them one at a time");
+        return false;
     }
 
     override void EEKilled(Object killer)

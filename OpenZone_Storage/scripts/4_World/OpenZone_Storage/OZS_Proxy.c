@@ -405,45 +405,48 @@ class OZS_Session
     // Every proxy of this box hears every change (§8.4), including the one
     // whose player caused it: the proxy shows its own guess at once and this
     // is the authority's word, which always wins.
-    void Tell(int change, OZS_Row r)
+    // `by` is the uid of the player whose operation caused this. It is what
+    // lets a watcher tell ITS OWN changes from somebody else's -- see
+    // OZS_Watcher.m_OthersAt and the stale test in Operate.
+    void Tell(int change, OZS_Row r, string by = "")
     {
         m_Version++;
         for (int i = 0; i < m_Watchers.Count(); i++)
-            m_Watchers.Get(i).Change(change, r, m_Version);
+            m_Watchers.Get(i).Change(change, r, m_Version, by);
     }
 
-    void TellGone(int handle)
+    void TellGone(int handle, string by = "")
     {
         OZS_Row r = new OZS_Row();
         r.Set(handle, 0, 0, 0, -1, -1, 0, "");
-        Tell(OZS_Const.CH_GONE, r);
+        Tell(OZS_Const.CH_GONE, r, by);
     }
 
-    void TellMoved(EntityAI e)
+    void TellMoved(EntityAI e, string by = "")
     {
         if (!e || !m_Auth)
             return;
         OZS_Row r = new OZS_Row();
         Describe(e, OZS_Authority.Handle(m_Auth, e), ParentHandle(e), r);
-        Tell(OZS_Const.CH_MOVED, r);
+        Tell(OZS_Const.CH_MOVED, r, by);
     }
 
-    void TellQuantity(EntityAI e)
+    void TellQuantity(EntityAI e, string by = "")
     {
         if (!e || !m_Auth)
             return;
         OZS_Row r = new OZS_Row();
         Describe(e, OZS_Authority.Handle(m_Auth, e), ParentHandle(e), r);
-        Tell(OZS_Const.CH_QTY, r);
+        Tell(OZS_Const.CH_QTY, r, by);
     }
 
-    void TellAdded(EntityAI e)
+    void TellAdded(EntityAI e, string by = "")
     {
         if (!e || !m_Auth)
             return;
         OZS_Row r = new OZS_Row();
         Describe(e, OZS_Authority.Handle(m_Auth, e), ParentHandle(e), r);
-        Tell(OZS_Const.CH_ADDED, r);
+        Tell(OZS_Const.CH_ADDED, r, by);
     }
 
     int ParentHandle(EntityAI e)
@@ -478,6 +481,19 @@ class OZS_Session
         m_SqlVersion = version;
         m_SqlRoots = roots;
         m_SqlEntities = entities;
+        // THE RECORD AND THE BOX MUST AGREE, AND WHEN THEY DO NOT IT MUST BE
+        // LOUD. A commit that drifts from the container is how a box quietly
+        // grows or loses items across a session; with nothing else saving
+        // this box, SQL being wrong is the box being wrong. Checked only when
+        // nothing else is in flight -- an answer that arrives while another
+        // turn is on the wire is expected to lag.
+        if (m_Flying > 0 || !m_Auth)
+            return;
+        int here = OZS_Records.CountTree(m_Auth) - 1;
+        int roothere = m_Auth.OZS_CountEntities();
+        if (here == entities && roothere == roots)
+            return;
+        OZ_Log.Error("storage: proxy: box " + m_Id + " and its record disagree after a turn: the box holds " + roothere.ToString() + " root(s) and " + here.ToString() + " entities, the record says " + roots.ToString() + " and " + entities.ToString());
     }
 
     // The session cannot go on: the bridge is gone, or a turn could not be
@@ -508,10 +524,15 @@ class OZS_Session
             w.No(handle, "the box is not ready", m_Version);
             return;
         }
-        if (version != m_Version)
+        // STALE MEANS "SOMEBODY ELSE CHANGED IT", NOT "I AM BEHIND MY OWN
+        // OPERATIONS" (measured against the owner on 2026-09-24: comparing
+        // against the session version refused every drag after the first,
+        // because a client's next drag leaves before the answer to the
+        // previous one arrives, and each refusal restreamed the whole box --
+        // which is exactly what "the box lags and items do not drag" looks
+        // like). A watcher only has to be up to date with OTHER players.
+        if (version < w.m_OthersAt)
         {
-            // The proxy acted on a box that has moved on. Nothing is applied;
-            // the proxy is told to catch up (§8.2).
             w.No(handle, "stale", m_Version);
             w.Restart();
             return;
@@ -551,6 +572,10 @@ class OZS_Watcher
     // Changes that happened while the stream was still running. The snapshot
     // predates them, so they go after the end and never twice.
     ref array<ref OZS_Change> m_Queued;
+    // The session version at the last change caused by SOMEBODY ELSE. An
+    // operation older than this acted on a box another player has moved on,
+    // and that is the only kind of stale there is.
+    int m_OthersAt;
 
     void OZS_Watcher(OZS_Session session, PlayerIdentity who)
     {
@@ -674,8 +699,12 @@ class OZS_Watcher
         Flush();
     }
 
-    void Change(int change, OZS_Row r, int version)
+    void Change(int change, OZS_Row r, int version, string by = "")
     {
+        // The version this watcher must be caught up with before its own
+        // operations count: only somebody else's changes raise it.
+        if (by != "" && by != m_Uid)
+            m_OthersAt = version;
         if (!m_Whole)
         {
             m_Queued.Insert(new OZS_Change(change, r, version));
