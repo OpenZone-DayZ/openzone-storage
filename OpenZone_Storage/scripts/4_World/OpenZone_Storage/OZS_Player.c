@@ -123,6 +123,74 @@ modded class PlayerBase
         return super.PredictiveTakeEntityToTargetAttachment(target, item);
     }
 
+    // INTO THE HANDS -- THE ONE THE OWNER FOUND BY DOUBLE-CLICKING.
+    // This does not go through an InventoryLocation at all: it runs the hand
+    // FSM, which serialises THE ENTITY into ScriptInputUserData -- by network
+    // id. A proxy's item has none, so the server read a null and threw
+    //
+    //   NULL pointer to instance. Variable 'itemSrc'
+    //   DayZPlayerInventory::ValidateHandEvent
+    //
+    // and rolled the client's guess back. That is what "the items went back to
+    // their old places and some vanished" was (owner, 2026-09-24): not the
+    // box's doing at all, but the hand pipeline refusing an item it cannot
+    // name. Routed like any other crossing instead.
+    override void PredictiveTakeEntityToHands(EntityAI item)
+    {
+        if (!OZS_Mirrors.None() && item)
+        {
+            OZS_Mirror m = OZS_Mirrors.Of(item);
+            if (m)
+            {
+                InventoryLocation src = new InventoryLocation();
+                if (!item.GetInventory().GetCurrentInventoryLocation(src))
+                    return;
+                InventoryLocation hands = new InventoryLocation();
+                hands.SetHands(this, item);
+                m.Drag(src, hands);
+                return;
+            }
+        }
+        super.PredictiveTakeEntityToHands(item);
+    }
+
+    // Out of the box straight onto the ground. The same problem and the same
+    // answer: the item has to leave the box through the server first, so it
+    // comes to the player and the drop is theirs to make afterwards.
+    override bool PredictiveDropEntity(notnull EntityAI item)
+    {
+        if (!OZS_Mirrors.None())
+        {
+            OZS_Mirror m = OZS_Mirrors.Of(item);
+            if (m)
+            {
+                InventoryLocation src = new InventoryLocation();
+                if (!item.GetInventory().GetCurrentInventoryLocation(src))
+                    return false;
+                InventoryLocation hands = new InventoryLocation();
+                hands.SetHands(this, item);
+                return m.Drag(src, hands);
+            }
+        }
+        return super.PredictiveDropEntity(item);
+    }
+
+    override bool PredictiveTakeEntityAsAttachment(notnull EntityAI item)
+    {
+        OZS_Mirror m = OZS_Box(this, item);
+        if (m)
+            return m.DragTo(item, this, InventoryLocationType.ATTACHMENT, -1, -1, -1);
+        return super.PredictiveTakeEntityAsAttachment(item);
+    }
+
+    override bool PredictiveTakeEntityAsAttachmentEx(notnull EntityAI item, int slot)
+    {
+        OZS_Mirror m = OZS_Box(this, item);
+        if (m)
+            return m.DragTo(item, this, InventoryLocationType.ATTACHMENT, slot, -1, -1);
+        return super.PredictiveTakeEntityAsAttachmentEx(item, slot);
+    }
+
     // The proxy either end of this move belongs to, or null when neither does.
     // One integer test away from null when no box is open.
     protected OZS_Mirror OZS_Box(EntityAI target, EntityAI item)
