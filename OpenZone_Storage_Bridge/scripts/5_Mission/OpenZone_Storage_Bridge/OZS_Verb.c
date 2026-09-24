@@ -579,6 +579,12 @@ modded class DZMCP_BridgeCore
                 detail = "out sent -> " + pxS.Status();
                 return true;
             }
+            if (pxDo == "swap")
+            {
+                pxS.Operate(pxWho, OZS_Const.OP_SWAP, pxHandle, OZS_Arg(args, "other", "2").ToInt(), 0, 0, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                detail = "swap sent -> " + pxS.Status();
+                return true;
+            }
             if (pxDo == "combine")
             {
                 pxS.Operate(pxWho, OZS_Const.OP_COMBINE, pxHandle, OZS_Arg(args, "other", "2").ToInt(), 0, 0, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);

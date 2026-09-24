@@ -124,6 +124,12 @@ class OZ_ProbeClientControl
                 Note("=== shut " + shutting.m_Id);
             }
         }
+        else if (line.IndexOf("swap") == 0)
+        {
+            // The vanilla screen's own swap call, made by hand: two items of
+            // the box change places.
+            PxSwap(line);
+        }
         else if (line.IndexOf("drag") == 0)
         {
             // THE VANILLA SCREEN'S OWN CALL, made by hand. Every drag of the
@@ -611,6 +617,52 @@ class OZ_ProbeClientControl
         OZS_Mirror.Ask(anchor);
         OZS_Mirrors.Get().ShowWhenReady();
         Note("=== asked through " + anchor.GetType() + ", the panel opens when it is whole");
+    }
+
+    protected void PxSwap(string line)
+    {
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        OZS_Mirror m = OZS_Mirrors.Get().Newest();
+        if (!me || !m)
+        {
+            Note("swap: no player or no box open");
+            return;
+        }
+        array<EntityAI> roots = new array<EntityAI>();
+        m.Roots(roots);
+        if (roots.Count() < 2)
+        {
+            Note("swap: the box needs two items");
+            return;
+        }
+        EntityAI a = roots.Get(0);
+        EntityAI b = roots.Get(1);
+        // WHICH of the checks inside CanSwapEntitiesEx says no. It is three
+        // tests in a row and they fail for very different reasons; the
+        // difference decides whether this is ours to fix at all.
+        InventoryLocation il1 = new InventoryLocation();
+        InventoryLocation il2 = new InventoryLocation();
+        a.GetInventory().GetCurrentInventoryLocation(il1);
+        b.GetInventory().GetCurrentInventoryLocation(il2);
+        ItemBase ia = ItemBase.Cast(a);
+        ItemBase ib = ItemBase.Cast(b);
+        string why = "";
+        if (ia && ia.CanBeSplit() && ia.GetQuantity() > ia.GetTargetQuantityMax(il2.GetSlot()))
+            why = why + " [a splits: " + ia.GetQuantity().ToString() + " > " + ia.GetTargetQuantityMax(il2.GetSlot()).ToString() + "]";
+        if (ib && ib.CanBeSplit() && ib.GetQuantity() > ib.GetTargetQuantityMax(il1.GetSlot()))
+            why = why + " [b splits: " + ib.GetQuantity().ToString() + " > " + ib.GetTargetQuantityMax(il1.GetSlot()).ToString() + "]";
+        if (!a.CanSwapEntities(b, il2, il1))
+            why = why + " [a.CanSwapEntities false]";
+        if (!b.CanSwapEntities(a, il1, il2))
+            why = why + " [b.CanSwapEntities false]";
+        if (!GameInventory.CanSwapEntities(a, b))
+            why = why + " [native CanSwapEntities false]";
+        if (why == "")
+            why = " (all three pass)";
+        bool can = me.GetInventory().CanSwapEntitiesEx(a, b);
+        bool force = me.GetInventory().CanForceSwapEntitiesEx(a, il2, b, il1);
+        bool ok = me.PredictiveSwapEntities(a, b);
+        Note("swap: " + a.GetType() + " #" + m.HandleOf(a).ToString() + " with " + b.GetType() + " #" + m.HandleOf(b).ToString() + ": CanSwapEntitiesEx " + can.ToString() + ", CanForceSwapEntitiesEx " + force.ToString() + ", Predictive " + ok.ToString() + " ->" + why);
     }
 
     protected void PxDrag(string line)
