@@ -30,7 +30,16 @@ class OZS_Commit
         return s_Serial;
     }
 
-    // The top-level item `e` hangs under, or `e` itself when it is one.
+    // The top-level item `e` hangs under INSIDE THE BOX, or null when `e` is
+    // not in the box at all.
+    //
+    // THE NULL IS THE WHOLE POINT. This used to walk up and return whatever it
+    // reached, which for an item still in a player's inventory is THE PLAYER.
+    // The caller then wrote the player into the box's record as a root, with
+    // their clothes and everything in them -- seven entities a time, and the
+    // next open would have materialised copies of somebody's gear inside the
+    // box. Measured against the owner 2026-09-24: two drags into the box grew
+    // the record from 10 entities to 24 while the box stayed at 10.
     static EntityAI TopOf(OZS_Session s, EntityAI e)
     {
         if (!s || !s.m_Auth || !e)
@@ -38,6 +47,8 @@ class OZS_Commit
         EntityAI up = e;
         while (up && up.GetHierarchyParent() && up.GetHierarchyParent() != s.m_Auth)
             up = up.GetHierarchyParent();
+        if (!up || up.GetHierarchyParent() != s.m_Auth)
+            return null;
         return up;
     }
 
@@ -61,6 +72,14 @@ class OZS_Commit
         if (!Ready(s))
             return;
         EntityAI top = TopOf(s, e);
+        if (!top)
+        {
+            string gone = "nothing";
+            if (e)
+                gone = e.GetType();
+            OZ_Log.Error("storage: proxy: box " + s.m_Id + ": " + gone + " moved but is no longer in the box; nothing is written");
+            return;
+        }
         int now = s.m_Auth.OZS_RootPosition(top);
         OZS_Letter letter = new OZS_Letter(s);
         if (wasRoot >= 0 && wasRoot != now)
@@ -95,8 +114,17 @@ class OZS_Commit
     {
         if (!Ready(s))
             return;
+        EntityAI top = TopOf(s, e);
+        if (!top)
+        {
+            string what = "nothing";
+            if (e)
+                what = e.GetType();
+            OZ_Log.Error("storage: proxy: box " + s.m_Id + " was told " + what + " arrived, but it is not in the box; nothing is written");
+            return;
+        }
         OZS_Letter letter = new OZS_Letter(s);
-        letter.Add(TopOf(s, e));
+        letter.Add(top);
         letter.Post();
     }
 

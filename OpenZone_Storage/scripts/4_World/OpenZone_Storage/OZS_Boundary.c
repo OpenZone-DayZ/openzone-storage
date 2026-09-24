@@ -158,11 +158,17 @@ class OZS_Boundary
         // 2. The move. Now it is in the box and in nobody's save.
         InventoryLocation src = new InventoryLocation();
         e.GetInventory().GetCurrentInventoryLocation(src);
-        if (!e.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst))
+        bool moved = e.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
+        // WHERE IT ACTUALLY IS, NOT WHAT THE CALL SAID. A move that returns
+        // true and leaves the item where it was has been seen before in this
+        // engine, and here it costs more than a wrong cell: the item is
+        // already off the network, so the player watches it vanish while it
+        // sits in their inventory, and the commit that follows would write
+        // THEM into the box's record as a root (owner, 2026-09-24).
+        if (!moved || !OZS_Commit.TopOf(s, e))
         {
-            // It is off the network and did not arrive: announce it again
-            // where it was, which is where it still is.
             GetGame().RemoteObjectTreeCreate(e);
+            OZ_Log.Error("storage: proxy: box " + s.m_Id + " did not take " + e.GetType() + " (the move said " + moved.ToString() + "); it is announced again where it was");
             w.No(0, "the box refused it", s.m_Version);
             return;
         }
