@@ -7,6 +7,8 @@
 //   world_exec verb=oz_storage args={"op":"status","id":"<box id>"}
 //   world_exec verb=oz_storage args={"op":"files","id":"<box id>"}
 //   world_exec verb=oz_storage args={"op":"slot","id":"<box id>","item":"AKM","slot":"OZ_Weapon_1","mag":"Mag_AKM_30Rnd","ammo":"17","chamber":"Bullet_762x39"}
+//   world_exec verb=oz_storage args={"op":"probe","class":"OZ_PersonalStash","slot":"Body"}          (stand measurement)
+//   world_exec verb=oz_storage args={"op":"stash","uid":"76561198000000000","offset":"2"}          (stand: a stash with a chosen owner)
 modded class DZMCP_BridgeCore
 {
     override protected string KnownVerbs()
@@ -155,6 +157,260 @@ modded class DZMCP_BridgeCore
             return true;
         }
 
+        if (op == "chain")
+        {
+            // STAND ONLY: hang a CHAIN of attachments of ANY LENGTH off a
+            // container and then put something in the last one's cargo.
+            //
+            // `chain` is "Class@Slot,Class@Slot,..." -- as many links as you
+            // like. Nothing here counts levels, because nothing in the mod
+            // counts levels either: the restore walks a parent-indexed tree of
+            // whatever depth the capture found. The only depth limit in play
+            // is the ENGINE's, AreChildrenAccessible()'s budget of
+            // INVENTORY_MAX_REACHABLE_DEPTH_ATT = 2 attachment steps, and this
+            // op exists to find where that budget actually runs out rather
+            // than to assert a number.
+            string cHost = OZS_Arg(args, "host", "OZ_PersonalStash");
+            string cChain = OZS_Arg(args, "chain", "");
+            string cInner = OZS_Arg(args, "inner", "Nail");
+            vector cAt;
+            if (!OZS_PlayerPos(cAt))
+            {
+                detail = "nobody is connected";
+                return false;
+            }
+            array<Object> cAround = new array<Object>();
+            GetGame().GetObjectsAtPosition3D(cAt, 40.0, cAround, null);
+            EntityAI cNode = null;
+            for (int ci = 0; ci < cAround.Count(); ci++)
+            {
+                EntityAI cCand = EntityAI.Cast(cAround.Get(ci));
+                if (cCand && cCand.GetType() == cHost)
+                {
+                    cNode = cCand;
+                    break;
+                }
+            }
+            if (!cNode)
+            {
+                detail = "no '" + cHost + "' within 40 m";
+                return false;
+            }
+            array<string> cLinks = new array<string>();
+            cChain.Split(",", cLinks);
+            string cPath = cHost;
+            for (int cl = 0; cl < cLinks.Count(); cl++)
+            {
+                array<string> cPair = new array<string>();
+                cLinks.Get(cl).Split("@", cPair);
+                if (cPair.Count() != 2)
+                {
+                    detail = "link " + (cl + 1).ToString() + " is not Class@Slot: '" + cLinks.Get(cl) + "'";
+                    return false;
+                }
+                EntityAI cMade = EntityAI.Cast(cNode.GetInventory().CreateAttachmentEx(cPair.Get(0), InventorySlots.GetSlotIdFromString(cPair.Get(1))));
+                if (!cMade)
+                {
+                    detail = "REFUSED at link " + (cl + 1).ToString() + ": '" + cPair.Get(0) + "' would not go into the '" + cPair.Get(1) + "' slot of " + cNode.GetType() + " (reachable=" + cNode.GetInventory().AreChildrenAccessible().ToString() + ")";
+                    return false;
+                }
+                cNode = cMade;
+                cPath = cPath + " <- " + cPair.Get(0) + "@" + cPair.Get(1);
+            }
+            Object cLoose = GetGame().CreateObjectEx(cInner, cAt, ECE_PLACE_ON_SURFACE);
+            EntityAI cItem = EntityAI.Cast(cLoose);
+            if (!cItem)
+            {
+                detail = "'" + cInner + "' could not be created at all -- is that a class?";
+                return false;
+            }
+            bool cReach = cNode.GetInventory().AreChildrenAccessible();
+            if (!cNode.GetInventory().TakeEntityToCargo(InventoryMode.SERVER, cItem))
+            {
+                detail = cPath + ": REFUSED '" + cInner + "' into the cargo of the last link (AreChildrenAccessible=" + cReach.ToString() + ")";
+                return false;
+            }
+            detail = cPath + " <- '" + cInner + "' in its cargo: every link accepted";
+            return true;
+        }
+
+        if (op == "nest")
+        {
+            // STAND ONLY: does a container of class `nestHost` take an item into
+            // its cargo, and does THAT item then take one into its own? The
+            // owner reported that items inside the personal stash refuse to
+            // hold anything, so this asks the engine the same question twice
+            // and reports which of the two refused.
+            string hostClass = OZS_Arg(args, "host", "OZ_PersonalStash");
+            string outerClass = OZS_Arg(args, "item", "TTSKOJacket");
+            string innerClass = OZS_Arg(args, "inner", "BandageDressing");
+            vector nestAt;
+            if (!OZS_PlayerPos(nestAt))
+            {
+                detail = "nobody is connected";
+                return false;
+            }
+            array<Object> nestAround = new array<Object>();
+            GetGame().GetObjectsAtPosition3D(nestAt, 40.0, nestAround, null);
+            EntityAI nestHost = null;
+            for (int ni = 0; ni < nestAround.Count(); ni++)
+            {
+                EntityAI nestCand = EntityAI.Cast(nestAround.Get(ni));
+                if (nestCand && nestCand.GetType() == hostClass)
+                {
+                    nestHost = nestCand;
+                    break;
+                }
+            }
+            if (!nestHost)
+            {
+                detail = "no '" + hostClass + "' within 40 m";
+                return false;
+            }
+
+            // With `slot`, the outer item is ATTACHED instead of dropped into
+            // cargo. That is the whole question: the engine lets an attachment
+            // keep its own cargo reachable and a cargo item does not.
+            string nestSlot = OZS_Arg(args, "slot", "");
+            EntityAI nestOuter = null;
+            if (nestSlot != "")
+                nestOuter = EntityAI.Cast(nestHost.GetInventory().CreateAttachmentEx(outerClass, InventorySlots.GetSlotIdFromString(nestSlot)));
+            else
+                nestOuter = EntityAI.Cast(nestHost.GetInventory().CreateEntityInCargo(outerClass));
+            if (!nestOuter)
+            {
+                detail = hostClass + " REFUSED '" + outerClass + "' into '" + nestSlot + "' (empty means cargo)";
+                return false;
+            }
+            // The MOVE path, not the creation path: a player dragging an item
+            // is a move, and the two have different validation. Creating into
+            // a nested container fails even in a plain vanilla box, so the
+            // creation path says nothing about what the owner saw.
+            Object nestLoose = GetGame().CreateObjectEx(innerClass, nestAt, ECE_PLACE_ON_SURFACE);
+            EntityAI nestInner = EntityAI.Cast(nestLoose);
+            if (!nestInner)
+            {
+                detail = "'" + innerClass + "' could not be created at all -- is that a class?";
+                return false;
+            }
+            bool nestMoved = nestOuter.GetInventory().TakeEntityToCargo(InventoryMode.SERVER, nestInner);
+            if (!nestMoved)
+            {
+                detail = hostClass + " took '" + outerClass + "', but the MOVE of '" + innerClass + "' into ITS cargo was refused";
+                return false;
+            }
+            detail = hostClass + " took '" + outerClass + "', which took a MOVED '" + innerClass + "': both levels accepted";
+            return true;
+        }
+
+        if (op == "stash")
+        {
+            // STAND ONLY, measurement M2 (spec 2026-09-23 §7.2): put a stash
+            // in the world with a chosen owner, so two of them with different
+            // owners can be looked at from two clients. The real opening path
+            // (task C) will create these itself; this is the instrument that
+            // lets the filter be judged before that path exists.
+            string stashUid = OZS_Arg(args, "uid", "");
+            float stashStep = OZS_Arg(args, "offset", "0").ToFloat();
+            vector stashAt;
+            if (!OZS_PlayerPos(stashAt))
+            {
+                detail = "nobody is connected";
+                return false;
+            }
+            stashAt[0] = stashAt[0] + stashStep;
+            // One scope per method in Enforce: `made` is taken by the probe op below.
+            Object stashMade = GetGame().CreateObjectEx("OZ_PersonalStash", stashAt, ECE_PLACE_ON_SURFACE);
+            OZ_PersonalStash stash = OZ_PersonalStash.Cast(stashMade);
+            if (!stash)
+            {
+                detail = "OZ_PersonalStash could not be created";
+                return false;
+            }
+            if (stashUid != "")
+                stash.OZS_SetOwner(stashUid);
+            // `anchor` and `open` make this verb able to produce the state a
+            // player would: a stash with a real key, OPEN. Without them the
+            // stash is CLOSED, and a closed box refuses every attachment --
+            // which looks like a slot defect and is not one.
+            string stashAnchor = OZS_Arg(args, "anchor", "");
+            if (stashAnchor == "")
+                stashAnchor = OZS_Const.AnchorKeyAt(stashAt);
+            stash.OZS_SetAnchor(stashAnchor);
+            detail = "stash " + stash.OZS_GetId() + " at " + stashAt.ToString(false);
+            if (OZS_Arg(args, "open", "") != "")
+            {
+                string stashWhy;
+                PlayerBase stashWho = OZS_Controller.FindPlayerByUid(stash.OZS_OwnerUid());
+                bool stashOpened = false;
+                if (stashWho)
+                    stashOpened = OZS_Controller.Get().RequestOpen(stash, stashWho, stashWhy);
+                else
+                    stashOpened = OZS_Controller.Get().RequestOpenAs(stash, "probe", stash.OZS_OwnerUid(), stashWhy);
+                if (!stashOpened)
+                {
+                    detail = detail + ", but it would not open: " + stashWhy;
+                    return false;
+                }
+                detail = detail + ", opening";
+            }
+            return true;
+        }
+
+        if (op == "probe")
+        {
+            // STAND ONLY, measurement (personal stash spec 2026-09-23 M1):
+            // does an ORDINARY container accept an item in a VANILLA character
+            // slot? Reads the nearest entity of `class` -- any entity, not only
+            // a storage box -- and reports what its inventory says and whether
+            // the attachment was made. Nothing else in the mod depends on it.
+            string probeClass = OZS_Arg(args, "class", "OZ_StashSlotProbe");
+            string probeItem = OZS_Arg(args, "item", "");
+            string probeSlot = OZS_Arg(args, "slot", "Body");
+            vector probeAt;
+            if (!OZS_PlayerPos(probeAt))
+            {
+                detail = "nobody is connected";
+                return false;
+            }
+            array<Object> found = new array<Object>();
+            GetGame().GetObjectsAtPosition3D(probeAt, 30.0, found, null);
+            EntityAI host = null;
+            for (int fi = 0; fi < found.Count(); fi++)
+            {
+                EntityAI cand = EntityAI.Cast(found.Get(fi));
+                if (cand && cand.GetType() == probeClass)
+                {
+                    host = cand;
+                    break;
+                }
+            }
+            if (!host)
+            {
+                detail = "no " + probeClass + " within 30 m of the player";
+                return false;
+            }
+            int probeId = InventorySlots.GetSlotIdFromString(probeSlot);
+            if (probeId == InventorySlots.INVALID)
+            {
+                detail = "the engine does not know a slot called " + probeSlot;
+                return false;
+            }
+            detail = probeClass + ": slot " + probeSlot + " id=" + probeId.ToString();
+            if (host.GetInventory().HasInventorySlot(probeId))
+                detail += ", declared on the container YES";
+            else
+                detail += ", declared on the container NO";
+            if (probeItem == "")
+                return true;
+            EntityAI made = host.GetInventory().CreateAttachmentEx(probeItem, probeId);
+            if (made)
+                detail += "; " + made.GetType() + " ATTACHED";
+            else
+                detail += "; " + probeItem + " REFUSED";
+            return true;
+        }
+
         OZ_StorageBox target = OZS_Pick(args, detail);
         if (!target)
             return false;
@@ -289,7 +545,7 @@ modded class DZMCP_BridgeCore
             return true;
         }
 
-        detail = "unknown op '" + op + "'; known: list, spawn, status, open, close, open_all, close_all, sort, files, slot, tune, lower";
+        detail = "unknown op '" + op + "'; known: list, spawn, status, open, close, open_all, close_all, sort, files, slot, tune, lower, probe, stash, nest, chain";
         return false;
     }
 

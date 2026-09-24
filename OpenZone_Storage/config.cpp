@@ -15,7 +15,8 @@ class CfgPatches
         units[] =
         {
             "OZ_StorageBox_Small", "OZ_StorageBox_Medium", "OZ_StorageBox_Large",
-            "OZ_StorageBoxKit_Small", "OZ_StorageBoxKit_Medium", "OZ_StorageBoxKit_Large"
+            "OZ_StorageBoxKit_Small", "OZ_StorageBoxKit_Medium", "OZ_StorageBoxKit_Large",
+            "OZ_StashAnchor", "OZ_PersonalStash"
         };
         weapons[] = {};
         requiredVersion = 0.1;
@@ -24,6 +25,7 @@ class CfgPatches
             "DZ_Data",
             "DZ_Scripts",
             "DZ_Gear_Camping",
+            "DZ_Structures_Furniture",
             "JM_CF_Scripts",
             "OpenZone_Core"
         };
@@ -75,6 +77,8 @@ class CfgVehicles
     class WoodenCrate;
     class SeaChest;
     class Inventory_Base;
+    class Container_Base;
+    class StaticObj_Furniture_locker_closed_v1;
 
     // 500 cells at the vanilla width of 10, two weapon slots.
     class OZ_StorageBox_Small: WoodenCrate
@@ -154,6 +158,77 @@ class CfgVehicles
             };
         };
     };
+    // The anchor: the locker players walk up to. Vanilla model by inheritance,
+    // so not one path to a p3d lives in this config -- the same way the boxes
+    // take their look from WoodenCrate and SeaChest. Grey closed locker by the
+    // owner's choice 2026-09-23; _v2/_v3 and the blue set are one word away.
+    class OZ_StashAnchor: StaticObj_Furniture_locker_closed_v1
+    {
+        scope = 2;
+        displayName = "$STR_OZS_STASH";
+        descriptionShort = "$STR_OZS_STASH_DESC";
+    };
+
+    // The personal stash (spec 2026-09-23). One per owner, created at that
+    // player's feet on opening and deleted when the session ends, so the model
+    // is never seen -- the anchor is what players look at.
+    //
+    // The character slots are the VANILLA ones, measured 2026-09-23: the engine
+    // accepted all eight on a plain container and drew their own ghost icons,
+    // so every vanilla clothing item fits with no edit to its class and the
+    // T148506 trap never arises. The weapon slots are the box's own, reused.
+    //
+    // THE SLOTS ARE NOT DECORATION -- they are the only way clothing kept
+    // here stays usable. EntityAI.AreChildrenAccessible() (3_game/entities/
+    // entityai.c:1662) walks up the hierarchy and returns FALSE the moment any
+    // ancestor sits in CARGO, while an ATTACHMENT only costs one step of a
+    // budget of INVENTORY_MAX_REACHABLE_DEPTH_ATT = 2. So a jacket dropped into
+    // this grid can never have its own pockets filled -- that is vanilla, and a
+    // vanilla sea chest does the same -- but a jacket hung in the Body slot
+    // can. Measured on the stand 2026-09-23.
+    class OZ_PersonalStash: SeaChest
+    {
+        scope = 2;
+        displayName = "$STR_OZS_STASH";
+        descriptionShort = "$STR_OZS_STASH_DESC";
+        // SeaChest like the boxes, because the script class beside this
+        // one is OZ_StorageBox: a stash IS a box, with a pair for a key.
+        // The script side must not skip DeployableContainer_Base, which is
+        // SeaChest's own script class and the box's parent.
+        //
+        // Turned off on purpose: this one is invisible, stands under a
+        // player's feet and lives for one session.
+        carveNavmesh = 0;
+        canBeDigged = 0;
+        weight = 0;
+        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
+        class Cargo
+        {
+            itemsCargoSize[] = {10, 50};
+            openable = 0;
+            allowOwnedCargoManipulation = 1;
+        };
+        class GUIInventoryAttachmentsProps
+        {
+            class Gear
+            {
+                name = "$STR_OZS_SLOTS_GEAR";
+                description = "";
+                attachmentSlots[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband"};
+                icon = "set:dayz_inventory image:cat_common_cargo";
+                view_index = 1;
+            };
+            class Weapons
+            {
+                name = "$STR_OZS_SLOTS_WEAPONS";
+                description = "";
+                attachmentSlots[] = {"Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
+                icon = "set:dayz_inventory image:cat_common_cargo";
+                view_index = 2;
+            };
+        };
+    };
+
     // The kits a player carries and deploys into a box (OZS_Kit.c). Each has a
     // "<kit>Placing" twin: the class the hologram projects, with the box's model
     // and hologram material (Hologram reads them from the projection's class).

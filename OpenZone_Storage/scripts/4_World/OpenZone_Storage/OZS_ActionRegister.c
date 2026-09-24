@@ -10,5 +10,6 @@ modded class ActionConstructor
         super.RegisterActions(actions);
         actions.Insert(OZS_ActionOpenBox);
         actions.Insert(OZS_ActionCloseBox);
+        actions.Insert(OZS_ActionOpenStash);
     }
 }

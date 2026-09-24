@@ -27,13 +27,20 @@ class OZS_Settings : OZ_ConfigBase
     int ViewerHeartbeatSeconds;
     int ViewerTimeoutSeconds;
     float ViewerMaxDistance;
+    // The PERSONAL STASH is not a box in this one respect: it exists only
+    // while its owner is using it, so its idle clock is short and it also
+    // watches the distance. A box closes on idle alone because it stands
+    // where it was placed; a stash follows the player to the anchor and must
+    // not be left behind them. AutoCloseSeconds still applies to boxes.
+    int StashIdleSeconds;
+    float StashMaxDistance;
     bool DebugLog;
 
     private static ref OZS_Settings s_Inst;
 
     override int LatestVersion()
     {
-        return 1;
+        return 2;
     }
 
     override void LoadDefaults()
@@ -55,11 +62,27 @@ class OZS_Settings : OZ_ConfigBase
         ViewerHeartbeatSeconds = 5;
         ViewerTimeoutSeconds = 15;
         ViewerMaxDistance = 5;
+        // 60 s and 6 m: long enough to read a full kit over, short enough
+        // that a player who walked off does not leave a stash standing. Six
+        // metres is past the engine's 2.5 m reach and past the viewer
+        // distance, so neither of those fires first by accident.
+        StashIdleSeconds = 60;
+        StashMaxDistance = 6;
         DebugLog = false;
     }
 
+    // v1 -> v2 (2026-09-23): the personal stash arrived with two knobs of its
+    // own. A file written by v1 has neither, and a missing number reads as
+    // zero rather than as a default, so they are filled here -- otherwise the
+    // first Validate would clamp them and warn about numbers the admin never
+    // wrote.
     override bool Migrate(int from)
     {
+        if (from < 2)
+        {
+            StashIdleSeconds = 60;
+            StashMaxDistance = 6;
+        }
         Version = LatestVersion();
         return true;
     }
@@ -89,6 +112,18 @@ class OZS_Settings : OZ_ConfigBase
         {
             OZ_Log.Warn("storage settings: CloseDeletesPerFrame " + CloseDeletesPerFrame + " is outside 1..1000, using 50");
             CloseDeletesPerFrame = 50;
+            warnings++;
+        }
+        if (StashIdleSeconds < 10 || StashIdleSeconds > 3600)
+        {
+            OZ_Log.Warn("storage settings: StashIdleSeconds " + StashIdleSeconds + " is outside 10..3600, using 60");
+            StashIdleSeconds = 60;
+            warnings++;
+        }
+        if (StashMaxDistance < 3 || StashMaxDistance > 100)
+        {
+            OZ_Log.Warn("storage settings: StashMaxDistance " + StashMaxDistance + " is outside 3..100, using 6");
+            StashMaxDistance = 6;
             warnings++;
         }
         if (AutoCloseSeconds < 10 || AutoCloseSeconds > 86400)

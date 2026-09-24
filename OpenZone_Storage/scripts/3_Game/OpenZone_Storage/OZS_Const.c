@@ -76,6 +76,78 @@ class OZS_Const
     // "N more classes" instead of growing without limit.
     static const int UI_COUNT_LINES = 24;
 
+    // ---- the personal stash's key ----------------------------------------
+    //
+    // A box is keyed by the engine's persistent id. A STASH is keyed by a
+    // PAIR -- which anchor, and whose -- because the same player at two
+    // lockers has two stashes and one locker holds one per player. The pair
+    // is spelled as a single string, `s_<anchor>_<uid>`, so the bridge needs
+    // no schema for it: box_id is opaque text there.
+    //
+    // Separators: `_` between the three parts and `x` inside the anchor key,
+    // because a position key and a persistent id both already use `-` for
+    // their own fields and for minus signs. Nothing here can be a path.
+    static const string STASH_PREFIX = "s_";
+
+    static string StashId(string anchor, string uid)
+    {
+        return STASH_PREFIX + anchor + "_" + uid;
+    }
+
+    static bool IsStashId(string id)
+    {
+        return id.Length() > 2 && id.Substring(0, 2) == STASH_PREFIX;
+    }
+
+    // The anchor half, or "" if this is not a stash id. Splitting is by the
+    // LAST underscore: the anchor key may hold one of its own some day, the
+    // uid never will.
+    static string StashAnchorOf(string id)
+    {
+        if (!IsStashId(id))
+            return "";
+        int cut = LastUnderscore(id);
+        if (cut <= 2)
+            return "";
+        return id.Substring(2, cut - 2);
+    }
+
+    static string StashOwnerOf(string id)
+    {
+        if (!IsStashId(id))
+            return "";
+        int cut = LastUnderscore(id);
+        if (cut < 0)
+            return "";
+        return id.Substring(cut + 1, id.Length() - cut - 1);
+    }
+
+    protected static int LastUnderscore(string s)
+    {
+        int at = -1;
+        for (int i = 0; i < s.Length(); i++)
+        {
+            if (s.Substring(i, 1) == "_")
+                at = i;
+        }
+        return at;
+    }
+
+    // An anchor's half of the key, from where it stands. Whole metres: the
+    // locker does not move, and two lockers a metre apart would be one anchor
+    // to a player anyway. Negative coordinates do not occur on a DayZ map, so
+    // the key is digits and one `x`.
+    static string AnchorKeyAt(vector pos)
+    {
+        int x = Math.Round(pos[0]);
+        int z = Math.Round(pos[2]);
+        if (x < 0)
+            x = 0;
+        if (z < 0)
+            z = 0;
+        return x.ToString() + "x" + z.ToString();
+    }
+
     static string StateName(int state)
     {
         if (state == STATE_OPENING)

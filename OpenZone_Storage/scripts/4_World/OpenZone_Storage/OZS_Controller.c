@@ -356,6 +356,15 @@ class OZS_Controller
     {
         if (who == "boot")
             BootCloseDone();
+        // A stash that is closed is a stash that is over: its contents are in
+        // SQL now, so the empty invisible crate goes. A box stays where it was
+        // placed and is never removed by a close.
+        OZ_PersonalStash stash = OZ_PersonalStash.Cast(box);
+        if (stash && !reopen)
+        {
+            OZS_Stashes.Drop(stash, who);
+            return;
+        }
         if (!reopen || !box)
             return;
         string why;
@@ -412,6 +421,26 @@ class OZS_Controller
             m_Viewers.RemoveItem(v);
             OZ_Log.Dbg("storage: " + v.m_Name + " stops looking at box " + box.OZS_GetId());
         }
+        // Exit one of the four: the window is shut. For a box that only means
+        // the idle clock may now run out; for a stash it means the session is
+        // over, and waiting sixty seconds to store a kit the player has
+        // finished with would only widen the window a crash could take it in.
+        OZ_PersonalStash stash = OZ_PersonalStash.Cast(box);
+        if (stash && stash.OZS_OwnerUid() == UidOfIdentity(sender))
+        {
+            string why;
+            if (!OZS_Stashes.Close(stash, "window", why))
+                OZ_Log.Warn("storage: stash " + stash.OZS_GetId() + " (window) will not close: " + why);
+        }
+    }
+
+    // The plain SteamID64 behind an identity, or "" -- the same spelling Uid()
+    // gets off a PlayerBase.
+    static string UidOfIdentity(PlayerIdentity who)
+    {
+        if (!who)
+            return "";
+        return who.GetPlainId();
     }
 
     bool HasViewers(OZ_StorageBox box, string exceptPlayerId = "")
@@ -676,6 +705,22 @@ class OZS_Controller
                 b.OZS_SetTouchedAt(0);
                 continue;
             }
+            // Exit two of the four (design section 4): away or idle. A stash
+            // watches the distance as well as the clock, and it does not wait
+            // for the viewer list -- its only viewer is its owner, and the
+            // reason to close is that the owner has gone.
+            OZ_PersonalStash st2 = OZ_PersonalStash.Cast(b);
+            if (st2)
+            {
+                string cause;
+                if (OZS_Stashes.ShouldClose(st2, now, cause))
+                {
+                    string stashWhy;
+                    if (!OZS_Stashes.Close(st2, cause, stashWhy))
+                        OZ_Log.Warn("storage: stash " + st2.OZS_GetId() + " (" + cause + ") will not close: " + stashWhy);
+                }
+                continue;
+            }
             if (b.OZS_GetTouchedAt() <= 0)
             {
                 b.OZS_SetTouchedAt(now);
@@ -691,6 +736,10 @@ class OZS_Controller
         }
     }
 
+    // Exits three and four of the four: the player disconnected or died.
+    // Both arrive here through PlayerBase (OZS_Player.c), and OnDisconnect
+    // runs BEFORE the character is saved, which is the window the design
+    // asks for.
     void OnPlayerLeft(PlayerBase player)
     {
         if (!player)
@@ -698,6 +747,9 @@ class OZS_Controller
         string pid = PlayerId(player);
         if (pid != "")
             DropViewersOf(pid);
+        string uid = Uid(player);
+        if (uid != "")
+            OZS_Stashes.CloseAllOf(uid, "left");
     }
 
     protected OZS_CloseJob FindCloseJob(OZ_StorageBox box)
@@ -863,6 +915,12 @@ class OZS_Controller
             ClassesCheck(a.classes);
         }
         OZ_Log.Info("storage: world loaded: boxes=" + BoxCount() + " open=" + OpenCount() + " classes to check=" + classes.ToString());
+        // AFTER the boot rule, never before: a stash that survived a crash
+        // with cargo has just been queued for a boot close by ApplyBootRule,
+        // and the sweep only has to deal with the ones that came back empty
+        // or closed. Contents to SQL first, entity second -- the sweep never
+        // deletes a stash itself, it asks for a close and OnClosed drops it.
+        OZS_Stashes.Sweep();
     }
 
     // A boot close finished (or failed): once the last one has, the classes
