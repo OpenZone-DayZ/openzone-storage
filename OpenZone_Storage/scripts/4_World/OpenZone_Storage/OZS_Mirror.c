@@ -22,6 +22,12 @@ class OZS_Mirrors
 {
     protected static ref OZS_Mirrors s_Inst;
     protected ref array<ref OZS_Mirror> m_Mirrors;
+    // A box was asked for and the panel should open when it is whole.
+    protected bool m_Waiting;
+    // The anchor the last ask went through. The client is never told a box's
+    // id, so this is the only thing that pairs a proxy with the box in the
+    // world it stands for.
+    protected Object m_Asked;
 
     static OZS_Mirrors Get()
     {
@@ -33,6 +39,30 @@ class OZS_Mirrors
     void OZS_Mirrors()
     {
         m_Mirrors = new array<ref OZS_Mirror>();
+    }
+
+    void Asking(Object anchor)
+    {
+        m_Asked = anchor;
+    }
+
+    // The box in the world a proxy stands for, paired at the moment of asking.
+    Object Asked()
+    {
+        return m_Asked;
+    }
+
+    // True when this object in the world is the anchor of a proxy that is up.
+    bool StandsInFor(Object o)
+    {
+        if (!o || m_Mirrors.Count() == 0)
+            return false;
+        for (int i = 0; i < m_Mirrors.Count(); i++)
+        {
+            if (m_Mirrors.Get(i).m_Anchor == o)
+                return true;
+        }
+        return false;
     }
 
     OZS_Mirror Find(string id)
@@ -48,6 +78,16 @@ class OZS_Mirrors
     array<ref OZS_Mirror> All()
     {
         return m_Mirrors;
+    }
+
+    // The one a stream has just built. A screen asks for a box before it knows
+    // the box's id and binds to whatever arrives; only one screen is open at a
+    // time, so "the newest" is the one that was asked for.
+    OZS_Mirror Newest()
+    {
+        if (m_Mirrors.Count() == 0)
+            return null;
+        return m_Mirrors.Get(m_Mirrors.Count() - 1);
     }
 
     void Keep(OZS_Mirror m)
@@ -73,12 +113,91 @@ class OZS_Mirrors
         m_Mirrors.Clear();
     }
 
+    // The ordinary inventory, opened when the box has arrived rather than
+    // when it was asked for.
+    void ShowWhenReady()
+    {
+        m_Waiting = true;
+    }
+
+    void Update(float timeslice)
+    {
+        if (!m_Waiting)
+            return;
+        OZS_Mirror m = Newest();
+        if (!m || !m.m_Whole)
+            return;
+        m_Waiting = false;
+#ifndef NO_GUI
+        if (GetGame().GetMission())
+            GetGame().GetMission().ShowInventory();
+#endif
+    }
+
     string Status()
     {
         string s = "mirrors=" + m_Mirrors.Count();
         for (int i = 0; i < m_Mirrors.Count(); i++)
             s = s + " | " + m_Mirrors.Get(i).Status();
         return s;
+    }
+
+    // ---- "is this about a box at all?" -----------------------------------
+    //
+    // THE FIRST QUESTION OF EVERY HOOK, AND IT MUST BE CHEAP AND EXACT.
+    // The hooks sit on the player's own move methods, which run on every drag
+    // the player makes anywhere -- their pockets, their backpack, a car, some
+    // other mod's crate. None of that is ours. So:
+    //
+    //   1. no proxy open at all -> one integer test and straight to super;
+    //   2. a proxy open -> compare the HIERARCHY ROOT of each end against the
+    //      proxy ENTITIES we made ourselves, by pointer. Not by class, not by
+    //      position: an ordinary crate of the same class must never match.
+    //
+    // Everything that is not a box goes to super untouched.
+    static bool None()
+    {
+        if (!s_Inst)
+            return true;
+        return s_Inst.m_Mirrors.Count() == 0;
+    }
+
+    // The proxy this entity belongs to, or null. An item nested three
+    // containers deep inside a proxy belongs to it; an item in the player's
+    // backpack belongs to the player and answers null.
+    static OZS_Mirror Of(EntityAI e)
+    {
+        if (None() || !e)
+            return null;
+        EntityAI root = e;
+        while (root.GetHierarchyParent())
+            root = root.GetHierarchyParent();
+        array<ref OZS_Mirror> all = s_Inst.m_Mirrors;
+        for (int i = 0; i < all.Count(); i++)
+        {
+            if (all.Get(i).m_Box == root)
+                return all.Get(i);
+        }
+        return null;
+    }
+
+    // The proxy an inventory location is in: its parent's root. A location
+    // with no parent -- the ground, the hands of nobody -- is never ours.
+    static OZS_Mirror At(InventoryLocation il)
+    {
+        if (None() || !il)
+            return null;
+        return Of(il.GetParent());
+    }
+
+    // The one proxy a move touches, or null when it touches none. A move
+    // between two different proxies is not a thing: a player has one box open.
+    static OZS_Mirror Touching(InventoryLocation src, InventoryLocation dst)
+    {
+        OZS_Mirror from = At(src);
+        if (from)
+            return from;
+        return At(dst);
     }
 
     // ---- the wire, client side -------------------------------------------
@@ -122,6 +241,7 @@ class OZS_Mirrors
             // `ref` on the local: a `new` held by a plain local can be
             // collected before it reaches the array that owns it.
             ref OZS_Mirror m = new OZS_Mirror(id, cls, total, version);
+            m.m_Anchor = OZS_Mirrors.Get().Asked();
             OZS_Mirrors.Get().Keep(m);
             m.Begin();
             return true;
@@ -203,6 +323,9 @@ class OZS_Mirror
 {
     string m_Id;
     string m_Class;
+    // The box in the world this stands for. The client is never told a box's
+    // id, so the pairing is made when the player asks through it.
+    Object m_Anchor;
 
     EntityAI m_Box;
     ref array<int> m_Handles;
@@ -247,9 +370,14 @@ class OZS_Mirror
         vector at = Vector(0, 0, 0);
         if (me)
             at = me.GetPosition();
-        // Deep under the terrain: out of the vicinity panel's reach and out of
-        // anything the player can look at.
-        at[1] = at[1] - 500;
+        // BESIDE THE PLAYER, ON PURPOSE (owner, 2026-09-24). The vanilla
+        // inventory finds containers by proximity, and a client-local
+        // container standing next to the player is listed there like any
+        // other -- with its grid, its slots, its stacking and its scrolling,
+        // none of which we then have to write. The model is hidden: the player
+        // should see the box they are standing at, not a second one at their
+        // feet.
+        at[0] = at[0] + OZS_Const.PROXY_ASIDE;
         Object made = GetGame().CreateObjectEx(m_Class, at, ECE_LOCAL | ECE_NOLIFETIME);
         m_Box = EntityAI.Cast(made);
         if (!m_Box)
@@ -257,6 +385,7 @@ class OZS_Mirror
             OZ_Log.Error("storage: proxy: this client cannot create " + m_Class + " for box " + m_Id);
             return;
         }
+        m_Box.SetInvisible(true);
         OZ_StorageBox asBox = OZ_StorageBox.Cast(m_Box);
         if (asBox)
         {
@@ -414,46 +543,55 @@ class OZS_Mirror
     // its own guess; this is the word that will count.
     void Move(int handle, int into, int lt, int slot, int row, int col, int flip)
     {
-        Send(OZS_Const.OP_MOVE, handle, into, lt, slot, row, col, flip);
+        Send(OZS_Const.OP_MOVE, handle, into, 0, 0, lt, slot, row, col, flip);
     }
 
-    void Out(int handle)
+    // OUT CARRIES WHERE THE PLAYER PUT IT. The place they dropped it is the
+    // whole point of the drag: a coat dragged into a backpack must land in
+    // that backpack, not in the hands. The destination's container is one of
+    // the player's own entities, so it travels by network id; lt/slot/row/col
+    // say where inside it.
+    void Out(int handle, EntityAI into, int lt, int slot, int row, int col, int flip)
     {
-        Send(OZS_Const.OP_OUT, handle, 0, InventoryLocationType.CARGO, -1, -1, -1, 0);
+        int low = 0;
+        int high = 0;
+        if (into)
+            into.GetNetworkID(low, high);
+        Send(OZS_Const.OP_OUT, handle, 0, low, high, lt, slot, row, col, flip);
     }
 
     void Combine(int handle, int other)
     {
-        Send(OZS_Const.OP_COMBINE, handle, other, InventoryLocationType.CARGO, -1, -1, -1, 0);
+        Send(OZS_Const.OP_COMBINE, handle, other, 0, 0, InventoryLocationType.CARGO, -1, -1, -1, 0);
     }
 
     void Swap(int handle, int other)
     {
-        Send(OZS_Const.OP_SWAP, handle, other, InventoryLocationType.CARGO, -1, -1, -1, 0);
+        Send(OZS_Const.OP_SWAP, handle, other, 0, 0, InventoryLocationType.CARGO, -1, -1, -1, 0);
     }
 
     // An item of the player's own goes in. It is named by its NETWORK id,
     // because on this side it is a real announced entity.
-    void In(EntityAI mine, int lt, int slot, int row, int col, int flip)
+    void In(EntityAI mine, int into, int lt, int slot, int row, int col, int flip)
     {
         if (!mine)
             return;
         int low;
         int high;
         mine.GetNetworkID(low, high);
-        Send(OZS_Const.OP_IN, low, high, lt, slot, row, col, flip);
+        Send(OZS_Const.OP_IN, 0, into, low, high, lt, slot, row, col, flip);
     }
 
     // EVERY message of ours leaves on this client's own player. Not on the
     // object a message arrived on: a server -> client message arrives with its
     // target NULL (measured), so there is nothing there to answer to.
-    protected void Send(int op, int handle, int other, int lt, int slot, int row, int col, int flip)
+    protected void Send(int op, int handle, int other, int netLow, int netHigh, int lt, int slot, int row, int col, int flip)
     {
         Man me = GetGame().GetPlayer();
         if (!me)
             return;
         ScriptRPC rpc = new ScriptRPC();
-        OZS_Wire.WriteOp(rpc, m_Id, op, handle, other, lt, slot, row, col, flip, m_Version);
+        OZS_Wire.WriteOp(rpc, m_Id, op, handle, other, netLow, netHigh, lt, slot, row, col, flip, m_Version);
         rpc.Send(me, OZS_Const.RPC_PX_OP, true, null);
     }
 
@@ -468,14 +606,129 @@ class OZS_Mirror
     }
 
     // Ask the server to show a box. Static, because there is no mirror yet.
-    static void Ask(string id)
+    //
+    // THE ANCHOR IS NAMED BY ITS NETWORK ID, NOT THE BOX BY ITS OWN. A box id
+    // is a server-side thing -- the engine's persistent id, or a stash's pair
+    // -- and the client has never been told it. The anchor is an object both
+    // sides have, and asking through it also means a player can only ask for a
+    // box that is in front of them.
+    static void Ask(Object anchor)
     {
         Man me = GetGame().GetPlayer();
-        if (!me)
+        if (!me || !anchor)
             return;
+        OZS_Mirrors.Get().Asking(anchor);
+        int low;
+        int high;
+        anchor.GetNetworkID(low, high);
         ScriptRPC rpc = new ScriptRPC();
-        rpc.Write(id);
+        rpc.Write(low);
+        rpc.Write(high);
         rpc.Send(me, OZS_Const.RPC_PX_OPEN, true, null);
+    }
+
+    // ---- what a drag of the vanilla screen means -------------------------
+
+    // One move the player made with the ordinary inventory screen, once it is
+    // known to touch this proxy. Three cases, and they are not symmetrical:
+    //
+    //   inside the box   the proxy moves AT ONCE and the server is asked to
+    //                    agree -- this is the responsive case, and the one
+    //                    §5 is about;
+    //   out of the box   nothing is done here. The real item is not in this
+    //                    proxy, it is on the server; it appears in the
+    //                    player's hands when the server has moved and
+    //                    announced it. Guessing would mean showing a copy.
+    //   into the box     likewise: the item is the player's real, announced
+    //                    entity, and the server unannounces it. A local guess
+    //                    would be a second one.
+    bool Drag(InventoryLocation src, InventoryLocation dst)
+    {
+        EntityAI item = src.GetItem();
+        if (!item)
+            return false;
+        bool fromMe = OZS_Mirrors.Of(item) == this;
+        bool toMe = OZS_Mirrors.At(dst) == this;
+        if (fromMe && toMe)
+            return Inside(item, dst);
+        if (fromMe)
+            return TakeOut(item, dst);
+        if (toMe)
+            return PutIn(item, dst);
+        return false;
+    }
+
+    protected bool Inside(EntityAI item, InventoryLocation dst)
+    {
+        int handle = HandleOf(item);
+        if (handle == 0)
+            return false;
+        int into = 0;
+        if (dst.GetParent() != m_Box)
+            into = HandleOf(dst.GetParent());
+        int flip = 0;
+        if (dst.GetFlip())
+            flip = 1;
+        // The picture first, the word from the server after. The proxy may be
+        // wrong here and the server will say so (§5).
+        OZS_Row want = new OZS_Row();
+        want.Set(handle, into, dst.GetType(), dst.GetSlot(), dst.GetRow(), dst.GetCol(), flip, item.GetType());
+        Place(item, want);
+        Move(handle, into, dst.GetType(), dst.GetSlot(), dst.GetRow(), dst.GetCol(), flip);
+        return true;
+    }
+
+    // THE PLACE THE PLAYER DROPPED IT TRAVELS WITH THE OPERATION. `dst` is
+    // already exactly what the vanilla screen computed -- the backpack they
+    // aimed at, the vest pocket, the cell, the hands. Throwing it away and
+    // letting the server find "somewhere" is how an item ends up in the hands
+    // when the player put it into a backpack.
+    protected bool TakeOut(EntityAI item, InventoryLocation dst)
+    {
+        int handle = HandleOf(item);
+        if (handle == 0)
+            return false;
+        int flip = 0;
+        if (dst.GetFlip())
+            flip = 1;
+        Out(handle, dst.GetParent(), dst.GetType(), dst.GetSlot(), dst.GetRow(), dst.GetCol(), flip);
+        return true;
+    }
+
+    protected bool PutIn(EntityAI item, InventoryLocation dst)
+    {
+        int into = 0;
+        if (dst.GetParent() != m_Box)
+            into = HandleOf(dst.GetParent());
+        int flip = 0;
+        if (dst.GetFlip())
+            flip = 1;
+        In(item, into, dst.GetType(), dst.GetSlot(), dst.GetRow(), dst.GetCol(), flip);
+        return true;
+    }
+
+    // Two items changing places, both inside this proxy.
+    bool DragSwap(EntityAI a, EntityAI b)
+    {
+        int ha = HandleOf(a);
+        int hb = HandleOf(b);
+        if (ha == 0 || hb == 0)
+            return false;
+        Swap(ha, hb);
+        return true;
+    }
+
+    // Two stacks becoming one, both inside this proxy. Never instant: the
+    // client's own CombineItemsClient names items by network id and a proxy's
+    // items have none, so the engine on the server does it and tells us.
+    bool DragCombine(EntityAI into, EntityAI from)
+    {
+        int hi = HandleOf(into);
+        int hf = HandleOf(from);
+        if (hi == 0 || hf == 0)
+            return false;
+        Combine(hi, hf);
+        return true;
     }
 
     void Refused(int handle, int version, string why)

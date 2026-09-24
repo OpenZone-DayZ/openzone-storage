@@ -569,19 +569,19 @@ modded class DZMCP_BridgeCore
             }
             if (pxDo == "move")
             {
-                pxS.Operate(pxWho, OZS_Const.OP_MOVE, pxHandle, pxInto, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                pxS.Operate(pxWho, OZS_Const.OP_MOVE, pxHandle, pxInto, 0, 0, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
                 detail = "move sent -> " + pxS.Status();
                 return true;
             }
             if (pxDo == "out")
             {
-                pxS.Operate(pxWho, OZS_Const.OP_OUT, pxHandle, 0, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                pxS.Operate(pxWho, OZS_Const.OP_OUT, pxHandle, 0, 0, 0, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
                 detail = "out sent -> " + pxS.Status();
                 return true;
             }
             if (pxDo == "combine")
             {
-                pxS.Operate(pxWho, OZS_Const.OP_COMBINE, pxHandle, OZS_Arg(args, "other", "2").ToInt(), pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                pxS.Operate(pxWho, OZS_Const.OP_COMBINE, pxHandle, OZS_Arg(args, "other", "2").ToInt(), 0, 0, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
                 detail = "combine sent -> " + pxS.Status();
                 return true;
             }
@@ -601,7 +601,7 @@ modded class DZMCP_BridgeCore
                 int pxLow;
                 int pxHigh;
                 pxMade.GetNetworkID(pxLow, pxHigh);
-                pxS.Operate(pxWho, OZS_Const.OP_IN, pxLow, pxHigh, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                pxS.Operate(pxWho, OZS_Const.OP_IN, 0, pxInto, pxLow, pxHigh, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
                 detail = "in sent for " + pxMade.GetType() + " netid " + pxMade.GetNetworkIDString() + " -> " + pxS.Status();
                 return true;
             }

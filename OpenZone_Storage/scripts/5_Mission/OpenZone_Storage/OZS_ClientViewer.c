@@ -107,7 +107,10 @@ modded class MissionGameplay
     {
         super.OnUpdate(timeslice);
         if (GetGame() && GetGame().IsClient())
+        {
             OZS_ClientViewer.Get().Update(timeslice);
+            OZS_Mirrors.Get().Update(timeslice);
+        }
     }
 }
 #endif

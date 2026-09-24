@@ -16,23 +16,44 @@ modded class VicinityItemManager
 {
     override bool ExcludeFromContainer_Phase1(Object actor_in_radius)
     {
-        if (OZS_NotMyStash(actor_in_radius))
+        if (OZS_Hide(actor_in_radius))
             return true;
         return super.ExcludeFromContainer_Phase1(actor_in_radius);
     }
 
     override bool ExcludeFromContainer_Phase2(Object object_in_radius)
     {
-        if (OZS_NotMyStash(object_in_radius))
+        if (OZS_Hide(object_in_radius))
             return true;
         return super.ExcludeFromContainer_Phase2(object_in_radius);
     }
 
     override bool ExcludeFromContainer_Phase3(Object object_in_cone)
     {
-        if (OZS_NotMyStash(object_in_cone))
+        if (OZS_Hide(object_in_cone))
             return true;
         return super.ExcludeFromContainer_Phase3(object_in_cone);
+    }
+
+    // Two reasons to keep a box out of the panel, and nothing else is touched.
+    protected bool OZS_Hide(Object o)
+    {
+        if (OZS_NotMyStash(o))
+            return true;
+        return OZS_StandInFor(o);
+    }
+
+    // THE PLACED BOX STEPS ASIDE FOR ITS OWN PROXY (design 2026-09-24 §11).
+    // While a player has a box open, the panel shows the proxy -- a container
+    // of the same class with the same name. The box they are standing at would
+    // appear beside it, empty, and the player would have no way to tell which
+    // is which. So the anchor is hidden for exactly as long as its proxy is
+    // there, and a box nobody has opened is listed as it always was.
+    protected bool OZS_StandInFor(Object o)
+    {
+        if (OZS_Mirrors.None())
+            return false;
+        return OZS_Mirrors.Get().StandsInFor(o);
     }
 
     // True only for a stash that belongs to someone else. Anything that is not

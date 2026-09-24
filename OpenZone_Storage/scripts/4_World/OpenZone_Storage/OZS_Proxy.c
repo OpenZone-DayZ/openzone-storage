@@ -131,21 +131,25 @@ class OZS_Proxies
             return false;
         if (type == OZS_Const.RPC_PX_OPEN)
         {
-            string wantId;
-            if (!ctx.Read(wantId))
+            int low;
+            int high;
+            if (!ctx.Read(low) || !ctx.Read(high))
                 return true;
-            // The client names the box; the class and the place are the
-            // server's to decide. A client that could name the class could
-            // ask for a grid the record does not fit.
-            OZ_StorageBox real = OZS_Controller.Get().FindById(wantId);
+            // THE CLIENT NAMES THE ANCHOR, THE SERVER NAMES THE BOX. A box id
+            // is the engine's persistent id or a stash's pair; the client has
+            // never been told either, and should not be able to name one it
+            // cannot see. Everything about the session -- the id, the class,
+            // the place -- is decided here.
+            OZ_StorageBox real = OZ_StorageBox.Cast(GetGame().GetObjectByNetworkId(low, high));
+            string uid = OZS_Controller.UidOfIdentity(sender);
             if (!real)
             {
-                OZ_Log.Warn("storage: proxy: " + OZS_Controller.UidOfIdentity(sender) + " asked for " + wantId + ", which is not a box in this world");
+                OZ_Log.Warn("storage: proxy: " + uid + " asked for an anchor that is not a box");
                 return true;
             }
             string why;
-            if (!OZS_Proxies.Get().Open(wantId, real.GetType(), real.GetPosition(), sender, why))
-                OZ_Log.Warn("storage: proxy: " + OZS_Controller.UidOfIdentity(sender) + " cannot open " + wantId + ": " + why);
+            if (!OZS_Proxies.Get().Open(real.OZS_GetId(), real.GetType(), real.GetPosition(), sender, why))
+                OZ_Log.Warn("storage: proxy: " + uid + " cannot open " + real.OZS_GetId() + ": " + why);
             return true;
         }
         if (type == OZS_Const.RPC_PX_SHUT)
@@ -162,18 +166,20 @@ class OZS_Proxies
             int op;
             int handle;
             int other;
+            int netLow;
+            int netHigh;
             int lt;
             int slot;
             int row;
             int col;
             int flip;
             int version;
-            if (!OZS_Wire.ReadOp(ctx, opId, op, handle, other, lt, slot, row, col, flip, version))
+            if (!OZS_Wire.ReadOp(ctx, opId, op, handle, other, netLow, netHigh, lt, slot, row, col, flip, version))
                 return true;
             OZS_Session s = OZS_Proxies.Get().Find(opId);
             if (!s)
                 return true;
-            s.Operate(sender, op, handle, other, lt, slot, row, col, flip, version);
+            s.Operate(sender, op, handle, other, netLow, netHigh, lt, slot, row, col, flip, version);
             return true;
         }
         return false;
@@ -492,7 +498,7 @@ class OZS_Session
 
     // Stage C and later fill this in; the wire and the refusal path exist now
     // so a client can be told "no" from the first day.
-    void Operate(PlayerIdentity who, int op, int handle, int other, int lt, int slot, int row, int col, int flip, int version)
+    void Operate(PlayerIdentity who, int op, int handle, int other, int netLow, int netHigh, int lt, int slot, int row, int col, int flip, int version)
     {
         OZS_Watcher w = WatcherOf(who);
         if (!w)
@@ -510,7 +516,7 @@ class OZS_Session
             w.Restart();
             return;
         }
-        OZS_Ops.Run(this, w, op, handle, other, lt, slot, row, col, flip);
+        OZS_Ops.Run(this, w, op, handle, other, netLow, netHigh, lt, slot, row, col, flip);
     }
 
     string Status()

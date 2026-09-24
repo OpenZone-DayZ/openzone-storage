@@ -18,7 +18,7 @@
 //      invisible and eats the economy.
 class OZS_Ops
 {
-    static void Run(OZS_Session s, OZS_Watcher w, int op, int handle, int other, int lt, int slot, int row, int col, int flip)
+    static void Run(OZS_Session s, OZS_Watcher w, int op, int handle, int other, int netLow, int netHigh, int lt, int slot, int row, int col, int flip)
     {
         if (op == OZS_Const.OP_MOVE)
         {
@@ -37,16 +37,15 @@ class OZS_Ops
         }
         if (op == OZS_Const.OP_OUT)
         {
-            OZS_Boundary.Out(s, w, handle, lt, slot, row, col, flip);
+            OZS_Boundary.Out(s, w, handle, netLow, netHigh, lt, slot, row, col, flip);
             return;
         }
         if (op == OZS_Const.OP_IN)
         {
             // Coming IN, the item is the player's own and announced, so it is
-            // named by its network id -- the two halves ride in the handle and
-            // the other-handle fields. The one place in this design where a
-            // network id is the right name for something.
-            OZS_Boundary.In(s, w, handle, other, lt, slot, row, col, flip);
+            // named by its NETWORK id; `other` is the container inside the box
+            // it is going into, 0 being the box itself.
+            OZS_Boundary.In(s, w, netLow, netHigh, other, lt, slot, row, col, flip);
             return;
         }
         w.No(handle, "unknown operation " + op.ToString(), s.m_Version);

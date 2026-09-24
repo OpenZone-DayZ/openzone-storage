@@ -102,15 +102,18 @@ class OZ_ProbeClientControl
             DayZGame.s_OZ_Trace = line.IndexOf("rpc on") == 0;
             Note("=== rpc trace " + DayZGame.s_OZ_Trace.ToString());
         }
-        else if (line.IndexOf("pxopen ") == 0)
+        else if (line.IndexOf("pxopen") == 0)
         {
-            // The CLIENT asks for a box, which is what a screen does. The
-            // stand's own `proxy do=open` asks from the server side; this is
-            // the other half of the same wire.
-            string wantId = line.Substring(7, line.Length() - 7);
-            wantId.TrimInPlace();
-            OZS_Mirror.Ask(wantId);
-            Note("=== asked for " + wantId);
+            // The CLIENT asks for a box, which is what a screen does: through
+            // the ANCHOR in front of the player, because a box id belongs to
+            // the server and this side is never told it.
+            PxAsk();
+        }
+        else if (line.IndexOf("screen") == 0)
+        {
+            // The whole thing as a player does it: the box's own screen over
+            // the nearest anchor.
+            PxScreen(line);
         }
         else if (line.IndexOf("pxshut ") == 0)
         {
@@ -120,6 +123,21 @@ class OZ_ProbeClientControl
                 shutting.Shut();
                 Note("=== shut " + shutting.m_Id);
             }
+        }
+        else if (line.IndexOf("drag") == 0)
+        {
+            // THE VANILLA SCREEN'S OWN CALL, made by hand. Every drag of the
+            // inventory ends in one of the player's Predictive* methods; this
+            // makes the same call with the same arguments, so it goes through
+            // exactly the hooks a mouse would.
+            //
+            //   drag <row> <col>   the first item in the box to that cell
+            //   drag out           the first item in the box to the hands
+            //   drag pocket        the first item in the box into a POCKET --
+            //                      the case the owner reported: it must land
+            //                      where it was dropped, not in the hands
+            //   drag in            what is in the hands into the box
+            PxDrag(line);
         }
         else if (line.IndexOf("pxmove ") == 0)
         {
@@ -532,6 +550,155 @@ class OZ_ProbeClientControl
         // the client compiles too, and it only reads.
         string done = OZ_ProbeState.Tree(me.GetPosition(), radius, SCAN_FILE);
         Note("=== " + line + " -> " + done);
+    }
+
+    // The nearest box in front of the player, which is what a screen is opened
+    // on. Anything else would need a box id, and this side does not have one.
+    protected OZ_StorageBox PxAnchor(string want = "")
+    {
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        if (!me)
+            return null;
+        array<Object> around = new array<Object>();
+        GetGame().GetObjectsAtPosition(me.GetPosition(), 12, around, null);
+        OZ_StorageBox best = null;
+        float nearest = 1000;
+        for (int i = 0; i < around.Count(); i++)
+        {
+            OZ_StorageBox b = OZ_StorageBox.Cast(around.Get(i));
+            if (!b)
+                continue;
+            // Several boxes stand on one spot on the stand; a class picks one.
+            if (want != "" && b.GetType() != want)
+                continue;
+            float d = vector.Distance(b.GetPosition(), me.GetPosition());
+            if (d < nearest)
+            {
+                nearest = d;
+                best = b;
+            }
+        }
+        return best;
+    }
+
+    protected void PxAsk()
+    {
+        OZ_StorageBox anchor = PxAnchor();
+        if (!anchor)
+        {
+            Note("=== pxopen: no box within 12 m");
+            return;
+        }
+        OZS_Mirror.Ask(anchor);
+        Note("=== asked through " + anchor.GetType() + " netid " + anchor.GetNetworkIDString());
+    }
+
+    protected void PxScreen(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        string want = "";
+        if (parts.Count() > 1 && parts.Get(1).IndexOf("OZ_") == 0)
+            want = parts.Get(1);
+        OZ_StorageBox anchor = PxAnchor(want);
+        if (!anchor)
+        {
+            Note("=== screen: no box within 12 m");
+            return;
+        }
+        // What the action does: ask for the box, then let the ordinary
+        // inventory open once it has arrived.
+        OZS_Mirror.Ask(anchor);
+        OZS_Mirrors.Get().ShowWhenReady();
+        Note("=== asked through " + anchor.GetType() + ", the panel opens when it is whole");
+    }
+
+    protected void PxDrag(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        OZS_Mirror m = OZS_Mirrors.Get().Newest();
+        if (!me || !m || !m.m_Box)
+        {
+            Note("drag: no player or no box open");
+            return;
+        }
+        string what = "";
+        if (parts.Count() > 1)
+            what = parts.Get(1);
+
+        if (what == "in")
+        {
+            EntityAI held = me.GetHumanInventory().GetEntityInHands();
+            if (!held)
+            {
+                Note("drag in: the hands are empty");
+                return;
+            }
+            InventoryLocation inSrc = new InventoryLocation();
+            held.GetInventory().GetCurrentInventoryLocation(inSrc);
+            InventoryLocation inDst = new InventoryLocation();
+            if (!m.m_Box.GetInventory().FindFreeLocationFor(held, FindInventoryLocationType.CARGO, inDst))
+            {
+                Note("drag in: no free cell in the box");
+                return;
+            }
+            bool inOk = me.PredictiveTakeToDst(inSrc, inDst);
+            Note("drag in: " + held.GetType() + " -> the box, PredictiveTakeToDst said " + inOk.ToString());
+            return;
+        }
+
+        array<EntityAI> roots = new array<EntityAI>();
+        m.Roots(roots);
+        if (roots.Count() == 0)
+        {
+            Note("drag: the box is empty");
+            return;
+        }
+        EntityAI first = roots.Get(0);
+        InventoryLocation src = new InventoryLocation();
+        first.GetInventory().GetCurrentInventoryLocation(src);
+
+        if (what == "out")
+        {
+            InventoryLocation hands = new InventoryLocation();
+            hands.SetHands(me, first);
+            bool outOk = me.PredictiveTakeToDst(src, hands);
+            Note("drag out: " + first.GetType() + " #" + m.HandleOf(first).ToString() + " -> hands, PredictiveTakeToDst said " + outOk.ToString());
+            return;
+        }
+
+        if (what == "pocket")
+        {
+            // A real place in the player's own inventory, chosen the way the
+            // screen chooses one: the engine finds a free spot in something
+            // they are wearing.
+            InventoryLocation mine = new InventoryLocation();
+            if (!me.GetInventory().FindFreeLocationFor(first, FindInventoryLocationType.CARGO, mine))
+            {
+                Note("drag pocket: nowhere in the player's own inventory");
+                return;
+            }
+            string where = "nothing";
+            if (mine.GetParent())
+                where = mine.GetParent().GetType();
+            bool pocketOk = me.PredictiveTakeToDst(src, mine);
+            Note("drag pocket: " + first.GetType() + " #" + m.HandleOf(first).ToString() + " -> " + where + " at " + mine.GetRow().ToString() + "," + mine.GetCol().ToString() + ", PredictiveTakeToDst said " + pocketOk.ToString());
+            return;
+        }
+
+        int row = 4;
+        int col = 6;
+        if (parts.Count() > 2)
+        {
+            row = parts.Get(1).ToInt();
+            col = parts.Get(2).ToInt();
+        }
+        InventoryLocation dst = new InventoryLocation();
+        dst.SetCargo(m.m_Box, first, 0, row, col, false);
+        bool ok = me.PredictiveTakeToDst(src, dst);
+        Note("drag: " + first.GetType() + " #" + m.HandleOf(first).ToString() + " to " + row.ToString() + "," + col.ToString() + ", PredictiveTakeToDst said " + ok.ToString());
     }
 
     // A move the way the screen will make it: the proxy is moved at once with

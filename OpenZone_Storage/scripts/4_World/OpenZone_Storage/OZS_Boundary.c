@@ -33,12 +33,13 @@ class OZS_Boundary
 {
     // ---- box -> player ---------------------------------------------------
 
-    // The item named by `handle` goes to the player who asked. Where it lands
-    // is the player's business: hands if they are free, otherwise the first
-    // place their inventory offers. A screen that wants a particular cell can
-    // say so later; refusing for want of a cell would be the proxy deciding
-    // last, which it may not do (§5).
-    static void Out(OZS_Session s, OZS_Watcher w, int handle, int lt, int slot, int row, int col, int flip)
+    // The item named by `handle` goes WHERE THE PLAYER PUT IT. The client sends
+    // the destination its screen computed -- the backpack, the vest pocket, the
+    // hands, the cell -- and this honours it. Only when the destination cannot
+    // be used does it fall back to "anywhere it fits": an item that lands in
+    // the hands when the player dropped it into a backpack is a bug, not a
+    // convenience (owner, 2026-09-24).
+    static void Out(OZS_Session s, OZS_Watcher w, int handle, int netLow, int netHigh, int lt, int slot, int row, int col, int flip)
     {
         EntityAI e = OZS_Authority.ByHandle(s.m_Auth, handle);
         if (!e)
@@ -53,7 +54,7 @@ class OZS_Boundary
             return;
         }
         InventoryLocation dst = new InventoryLocation();
-        if (!Somewhere(player, e, dst))
+        if (!Asked(player, e, netLow, netHigh, lt, slot, row, col, flip, dst) && !Somewhere(player, e, dst))
         {
             w.No(handle, "#STR_OZS_NO_ROOM", s.m_Version);
             return;
@@ -98,7 +99,7 @@ class OZS_Boundary
     // An item of the player's goes into the box. The client names it by its
     // NETWORK id, because on their side it is a real announced entity; that is
     // the one place in this design where a network id is the right name.
-    static void In(OZS_Session s, OZS_Watcher w, int netLow, int netHigh, int lt, int slot, int row, int col, int flip)
+    static void In(OZS_Session s, OZS_Watcher w, int netLow, int netHigh, int into, int lt, int slot, int row, int col, int flip)
     {
         PlayerBase player = PlayerBase.Cast(w.Player());
         if (!player)
@@ -124,13 +125,24 @@ class OZS_Boundary
             w.No(0, "an item cannot swallow the box", s.m_Version);
             return;
         }
-        EntityAI into = s.m_Auth;
+        // Into the box itself, or into a container that is in the box: the
+        // player may have dropped it onto a backpack that lives inside.
+        EntityAI holder = s.m_Auth;
+        if (into != 0)
+        {
+            holder = OZS_Authority.ByHandle(s.m_Auth, into);
+            if (!holder)
+            {
+                w.No(0, "no such container in the box", s.m_Version);
+                return;
+            }
+        }
         InventoryLocation dst = new InventoryLocation();
         if (lt == InventoryLocationType.ATTACHMENT)
-            dst.SetAttachment(into, e, slot);
-        else if (row >= 0 && OZS_Ops.Fits(into, lt, slot, row, col))
-            dst.SetCargo(into, e, 0, row, col, flip == 1);
-        else if (!into.GetInventory().FindFirstFreeLocationForNewEntity(e.GetType(), FindInventoryLocationType.CARGO, dst))
+            dst.SetAttachment(holder, e, slot);
+        else if (row >= 0 && OZS_Ops.Fits(holder, lt, slot, row, col))
+            dst.SetCargo(holder, e, 0, row, col, flip == 1);
+        else if (!holder.GetInventory().FindFirstFreeLocationForNewEntity(e.GetType(), FindInventoryLocationType.CARGO, dst))
         {
             w.No(0, "#STR_OZS_FULL", s.m_Version);
             return;
@@ -159,6 +171,39 @@ class OZS_Boundary
         s.Touch();
         s.TellAdded(e);
         OZS_Audit.Log("in", s.m_Id, w.m_Uid, w.Name(), e.GetType(), 0, -1, -1, "", "put into the box");
+    }
+
+    // The destination the player's own screen chose, if it can be used.
+    //
+    // THE CONTAINER MUST BE THE PLAYER'S OWN. It arrives as a network id from
+    // the client, so it could be anything in the world: another player's vest,
+    // a car five hundred metres away, the box itself. Only the player's own
+    // hierarchy is accepted, and the engine is asked whether the place will
+    // take the item -- a false here simply means the fallback runs.
+    static bool Asked(PlayerBase player, EntityAI e, int netLow, int netHigh, int lt, int slot, int row, int col, int flip, out InventoryLocation dst)
+    {
+        if (lt == InventoryLocationType.HANDS)
+        {
+            if (player.GetHumanInventory().GetEntityInHands())
+                return false;
+            dst.SetHands(player, e);
+            return player.GetInventory().LocationCanAddEntity(dst);
+        }
+        if (netLow == 0 && netHigh == 0)
+            return false;
+        EntityAI into = EntityAI.Cast(GetGame().GetObjectByNetworkId(netLow, netHigh));
+        if (!into)
+            return false;
+        // Their own, and not something already inside the box.
+        if (into != player && into.GetHierarchyRootPlayer() != player)
+            return false;
+        if (lt == InventoryLocationType.ATTACHMENT)
+            dst.SetAttachment(into, e, slot);
+        else if (row >= 0 && col >= 0)
+            dst.SetCargo(into, e, 0, row, col, flip == 1);
+        else
+            return false;
+        return player.GetInventory().LocationCanAddEntity(dst);
     }
 
     // Hands if they are free, otherwise anywhere the player's own inventory

@@ -84,14 +84,30 @@ class OZS_Wire
         return true;
     }
 
-    // An operation, client -> server. `version` is the version of the box the
+    // An operation, client -> server.
+    //
+    // FOUR NAMES AND A PLACE. Two of the names are HANDLES, which is how items
+    // inside a box are named, and two are the halves of a NETWORK ID, which is
+    // how anything outside it is named -- the player's own backpack, the item
+    // in their hands. Which fields carry what depends on the operation:
+    //
+    //   MOVE     handle = the item,  other = the container inside the box (0 = the box)
+    //   OUT      handle = the item,  net   = WHERE IN THE PLAYER'S INVENTORY it goes
+    //   IN       net    = the item,  other = the container inside the box (0 = the box)
+    //   COMBINE  handle, other = the two stacks
+    //   SWAP     handle, other = the two items
+    //
+    // `lt`, `slot`, `row`, `col`, `flip` are the place inside whichever
+    // container the operation names. `version` is the version of the box the
     // client believed in; the server refuses a stale one and resends (§8.2).
-    static void WriteOp(ParamsWriteContext ctx, string id, int op, int handle, int other, int lt, int slot, int row, int col, int flip, int version)
+    static void WriteOp(ParamsWriteContext ctx, string id, int op, int handle, int other, int netLow, int netHigh, int lt, int slot, int row, int col, int flip, int version)
     {
         ctx.Write(id);
         ctx.Write(op);
         ctx.Write(handle);
         ctx.Write(other);
+        ctx.Write(netLow);
+        ctx.Write(netHigh);
         ctx.Write(lt);
         ctx.Write(slot);
         ctx.Write(row);
@@ -100,12 +116,14 @@ class OZS_Wire
         ctx.Write(version);
     }
 
-    static bool ReadOp(ParamsReadContext ctx, out string id, out int op, out int handle, out int other, out int lt, out int slot, out int row, out int col, out int flip, out int version)
+    static bool ReadOp(ParamsReadContext ctx, out string id, out int op, out int handle, out int other, out int netLow, out int netHigh, out int lt, out int slot, out int row, out int col, out int flip, out int version)
     {
         if (!ctx.Read(id)) return false;
         if (!ctx.Read(op)) return false;
         if (!ctx.Read(handle)) return false;
         if (!ctx.Read(other)) return false;
+        if (!ctx.Read(netLow)) return false;
+        if (!ctx.Read(netHigh)) return false;
         if (!ctx.Read(lt)) return false;
         if (!ctx.Read(slot)) return false;
         if (!ctx.Read(row)) return false;

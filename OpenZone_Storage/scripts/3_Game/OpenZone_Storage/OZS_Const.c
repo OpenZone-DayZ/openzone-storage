@@ -82,6 +82,11 @@ class OZS_Const
 
     // What an operation is. MOVE stays inside the box; OUT and IN cross the
     // boundary; COMBINE and SWAP are the engine's own, asked of the authority.
+    // How far beside the player a proxy stands. Close enough for the vanilla
+    // inventory's vicinity list to find it, far enough not to sit inside the
+    // player's own collision.
+    static const float PROXY_ASIDE = 0.7;
+
     static const int OP_MOVE    = 1;
     static const int OP_OUT     = 2;
     static const int OP_IN      = 3;

@@ -496,6 +496,9 @@ class OZ_StorageBox : DeployableContainer_Base
         super.SetActions();
         AddAction(OZS_ActionOpenBox);
         AddAction(OZS_ActionCloseBox);
+        // The new scheme's verb, alongside the old ones while both work
+        // (design 2026-09-24 §11: the boxes move over after the stash does).
+        AddAction(OZS_ActionShowBox);
     }
 }
 
