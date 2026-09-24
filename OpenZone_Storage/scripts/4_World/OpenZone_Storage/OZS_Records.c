@@ -25,14 +25,29 @@ class OZS_Move
     int col;
     bool flip;
     int children;
+    // Where this item belongs: an ATTACHMENT SLOT or a cargo cell. It used to
+    // be missing, and everything with contents was moved as cargo: a jacket
+    // with full pockets came back out of its Body slot and was left standing
+    // wherever the restore had built it (measured 2026-09-23 on the personal
+    // stash, where every garment is a slot).
+    //
+    // toSlot IS A SEPARATE FLAG AND NOT `slot >= 0`: A SLOT ID CAN BE
+    // NEGATIVE. PlateCarrierPouches on a PlateCarrierVest sits in slot
+    // -230399667, and a sign test sent it down the cargo path and left it on
+    // the ground -- while a jacket in Body (5119774) went home fine. Measured
+    // 2026-09-23; do not fold this back into one field.
+    bool toSlot;
+    int slot;
     // true for the move into a networked parent (the box or a networked
     // item): that is the move which publishes the tree.
     bool publish;
 
-    void OZS_Move(EntityAI i, EntityAI p, int r, int c, bool f, int n, bool pub)
+    void OZS_Move(EntityAI i, EntityAI p, int r, int c, bool f, int n, bool pub, bool inSlot = false, int sl = -1)
     {
         item = i;
         parent = p;
+        toSlot = inSlot;
+        slot = sl;
         row = r;
         col = c;
         flip = f;
@@ -399,7 +414,8 @@ class OZS_Records
                 into = nodes.Get(nm.parent).made;
                 intoLocal = nodes.Get(nm.parent).isLocal;
             }
-            moves.Insert(new OZS_Move(nm.made, into, nm.row, nm.col, nm.flip == 1, nm.cargoKids, !intoLocal));
+            bool intoSlot = nm.lt == InventoryLocationType.ATTACHMENT;
+            moves.Insert(new OZS_Move(nm.made, into, nm.row, nm.col, nm.flip == 1, nm.cargoKids, !intoLocal, intoSlot, nm.slot));
         }
         created = real;
         s_Created = s_Created + real;
@@ -530,21 +546,34 @@ class OZS_Records
                 InventoryLocation src = new InventoryLocation();
                 m.item.GetInventory().GetCurrentInventoryLocation(src);
                 InventoryLocation dst = new InventoryLocation();
-                if (m.row >= 0)
+                if (m.toSlot)
+                {
+                    dst.SetAttachment(m.parent, m.item, m.slot);
+                    placed = m.parent.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
+                    if (!placed)
+                        placed = m.parent.GetInventory().TakeEntityAsAttachmentEx(InventoryMode.LOCAL, m.item, m.slot);
+                }
+                if (!placed && !m.toSlot && m.row >= 0)
                 {
                     dst.SetCargo(m.parent, m.item, 0, m.row, m.col, m.flip);
                     placed = m.parent.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
                 }
-                if (!placed && m.row >= 0)
+                if (!placed && !m.toSlot && m.row >= 0)
                     placed = m.parent.GetInventory().TakeEntityToCargoEx(InventoryMode.LOCAL, m.item, 0, m.row, m.col);
-                if (!placed)
+                // A slotted item must NOT fall back into cargo: it would look
+                // restored and be in the wrong place, and the next close would
+                // write that wrong place down as the truth.
+                if (!placed && !m.toSlot)
                     placed = m.parent.GetInventory().TakeEntityToCargo(InventoryMode.LOCAL, m.item);
             }
             if (!placed)
             {
                 failed++;
                 s_Missed++;
-                OZ_Log.Warn("storage: " + m.item.GetType() + " with " + m.children.ToString() + " items could not be moved into " + into + " at " + m.row.ToString() + "," + m.col.ToString() + "; it stays where it was built");
+                string spot = "cell " + m.row.ToString() + "," + m.col.ToString();
+                if (m.toSlot)
+                    spot = "slot " + m.slot.ToString();
+                OZ_Log.Warn("storage: " + m.item.GetType() + " with " + m.children.ToString() + " items could not be moved into " + into + " at " + spot + "; it stays where it was built");
             }
             if (m.publish || !placed)
                 GetGame().RemoteObjectTreeCreate(m.item);
