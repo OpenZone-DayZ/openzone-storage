@@ -494,10 +494,16 @@ class OZ_StorageBox : DeployableContainer_Base
     override void SetActions()
     {
         super.SetActions();
-        AddAction(OZS_ActionOpenBox);
-        AddAction(OZS_ActionCloseBox);
-        // The new scheme's verb, alongside the old ones while both work
-        // (design 2026-09-24 §11: the boxes move over after the stash does).
+        // ONE LOGIC ON A BOX, NOT TWO (owner, 2026-09-24). The old verbs --
+        // Open, which materialised the contents into this very entity, and
+        // Close, which captured them back -- are gone from the menu. They
+        // cannot share a box with the new scheme: an Open would fill the
+        // placed box from SQL while an authority holds the same items, and
+        // the same loot would exist twice in the world.
+        //
+        // The machinery behind them stays: the personal stash still uses it,
+        // and so do the admin commands and the boot reconciliation. It is
+        // only the player's verbs on a placed box that are down to one.
         AddAction(OZS_ActionShowBox);
     }
 }

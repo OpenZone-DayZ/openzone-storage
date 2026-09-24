@@ -231,6 +231,15 @@ class OZS_Controller
             why = "#STR_OZS_OPENING";
             return false;
         }
+        // The other half of the rule in OZS_Proxies.Open: a box somebody is
+        // looking at through a proxy must not also be materialised here, or
+        // the same items would be in the world twice. An authority is exempt
+        // -- it IS the proxy's box, and this is how it gets filled.
+        if (!box.OZS_IsAuthority() && OZS_Proxies.Get().Find(box.OZS_GetId()))
+        {
+            why = "#STR_OZS_BUSY";
+            return false;
+        }
         if (!Ready())
         {
             why = "#STR_OZ_ERR_NO_BRIDGE";

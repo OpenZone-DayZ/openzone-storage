@@ -64,6 +64,16 @@ class OZS_Proxies
             why = "an open needs an id, a class and a player";
             return false;
         }
+        // THE TWO SCHEMES MUST NOT MEET ON ONE BOX. If the placed box is
+        // materialised in the world by the old open, its items are already
+        // out; filling an authority from SQL as well would put the same loot
+        // in the world twice.
+        OZ_StorageBox placed = OZS_Controller.Get().FindById(id);
+        if (placed && placed.OZS_GetState() != OZS_Const.STATE_CLOSED)
+        {
+            why = "the box is open the old way (" + OZS_Const.StateName(placed.OZS_GetState()) + "); close it first";
+            return false;
+        }
         OZS_Session s = Find(id);
         if (!s)
         {
