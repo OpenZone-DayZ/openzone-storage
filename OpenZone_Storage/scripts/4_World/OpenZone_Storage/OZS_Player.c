@@ -154,23 +154,17 @@ modded class PlayerBase
         super.PredictiveTakeEntityToHands(item);
     }
 
-    // Out of the box straight onto the ground. The same problem and the same
-    // answer: the item has to leave the box through the server first, so it
-    // comes to the player and the drop is theirs to make afterwards.
+    // OUT OF THE BOX STRAIGHT ONTO THE GROUND, in one operation. It used to
+    // come to the hands instead, which is not what the player asked for
+    // (owner, 2026-09-24). The server does the whole thing: the item leaves
+    // the box, lands at the player's feet and is announced there.
     override bool PredictiveDropEntity(notnull EntityAI item)
     {
         if (!OZS_Mirrors.None())
         {
             OZS_Mirror m = OZS_Mirrors.Of(item);
             if (m)
-            {
-                InventoryLocation src = new InventoryLocation();
-                if (!item.GetInventory().GetCurrentInventoryLocation(src))
-                    return false;
-                InventoryLocation hands = new InventoryLocation();
-                hands.SetHands(this, item);
-                return m.Drag(src, hands);
-            }
+                return m.DropOut(item);
         }
         return super.PredictiveDropEntity(item);
     }

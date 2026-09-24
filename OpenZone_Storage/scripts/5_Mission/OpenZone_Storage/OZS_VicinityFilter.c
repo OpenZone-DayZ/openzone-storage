@@ -43,17 +43,30 @@ modded class VicinityItemManager
         return OZS_StandInFor(o);
     }
 
-    // THE PLACED BOX STEPS ASIDE FOR ITS OWN PROXY (design 2026-09-24 §11).
-    // While a player has a box open, the panel shows the proxy -- a container
-    // of the same class with the same name. The box they are standing at would
-    // appear beside it, empty, and the player would have no way to tell which
-    // is which. So the anchor is hidden for exactly as long as its proxy is
-    // there, and a box nobody has opened is listed as it always was.
+    // A PLACED BOX IS AN ANCHOR, NOT A CONTAINER, AND DOES NOT ANNOUNCE
+    // ITSELF BY PROXIMITY (design 2026-09-24 §11; owner, 2026-09-24: "у ящика
+    // все еще есть проксимити").
+    //
+    // In this scheme the placed box never holds anything: the contents live in
+    // an authority nobody is told about, and the player is shown a proxy. Left
+    // in the vicinity list the box would appear next to its own proxy, same
+    // class, same name, empty -- and the player would have no way to tell
+    // which is which. It is a place with a button now, and the button is the
+    // only way in.
+    //
+    // The exception is a box materialised THE OLD WAY -- by an admin command,
+    // or by the boot reconciliation. Then it really does hold its items and
+    // hiding it would hide them.
     protected bool OZS_StandInFor(Object o)
     {
-        if (OZS_Mirrors.None())
+        OZ_StorageBox box = OZ_StorageBox.Cast(o);
+        if (!box)
             return false;
-        return OZS_Mirrors.Get().StandsInFor(o);
+        // A personal stash is not an anchor: it is the container, and the
+        // rule above it decides whether this player may see it.
+        if (OZ_PersonalStash.Cast(box))
+            return false;
+        return box.OZS_GetState() == OZS_Const.STATE_CLOSED;
     }
 
     // True only for a stash that belongs to someone else. Anything that is not

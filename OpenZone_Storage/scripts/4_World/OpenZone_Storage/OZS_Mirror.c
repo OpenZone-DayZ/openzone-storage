@@ -52,19 +52,6 @@ class OZS_Mirrors
         return m_Asked;
     }
 
-    // True when this object in the world is the anchor of a proxy that is up.
-    bool StandsInFor(Object o)
-    {
-        if (!o || m_Mirrors.Count() == 0)
-            return false;
-        for (int i = 0; i < m_Mirrors.Count(); i++)
-        {
-            if (m_Mirrors.Get(i).m_Anchor == o)
-                return true;
-        }
-        return false;
-    }
-
     OZS_Mirror Find(string id)
     {
         for (int i = 0; i < m_Mirrors.Count(); i++)
@@ -726,6 +713,19 @@ class OZS_Mirror
         else if (!target.GetInventory().FindFreeLocationFor(item, FindInventoryLocationType.ANY, dst))
             return false;
         return Drag(src, dst);
+    }
+
+    // Out of the box and onto the ground, in one operation. The destination is
+    // named by its TYPE alone -- the server puts it at the player's feet,
+    // because a ground position computed on a client is one more thing that
+    // can be wrong by the time it arrives.
+    bool DropOut(EntityAI item)
+    {
+        int handle = HandleOf(item);
+        if (handle == 0)
+            return false;
+        Out(handle, null, InventoryLocationType.GROUND, -1, -1, -1, 0);
+        return true;
     }
 
     // Two items changing places, both inside this proxy.

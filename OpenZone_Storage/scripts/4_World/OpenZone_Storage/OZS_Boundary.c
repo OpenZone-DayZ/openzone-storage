@@ -113,9 +113,12 @@ class OZS_Boundary
             w.No(0, "no such item", s.m_Version);
             return;
         }
-        // It must be the player's own: an item on the ground, in somebody
-        // else's hands or in another container is not theirs to put away.
-        if (e.GetHierarchyRootPlayer() != player)
+        // THEIRS TO PUT AWAY: carried by them, or lying loose within reach.
+        // An item on the ground in front of the player is as much theirs to
+        // pick up as one in their pocket (owner, 2026-09-24); what is not is
+        // something in somebody else's hands, or in a container across the
+        // map that a crafted message could name.
+        if (!Reachable(player, e))
         {
             w.No(0, "that is not yours to put away", s.m_Version);
             return;
@@ -182,6 +185,10 @@ class OZS_Boundary
     // take the item -- a false here simply means the fallback runs.
     static bool Asked(PlayerBase player, EntityAI e, int netLow, int netHigh, int lt, int slot, int row, int col, int flip, out InventoryLocation dst)
     {
+        // ONTO THE GROUND. Named by its type alone: the position is the
+        // server's to compute, at the player's own feet.
+        if (lt == InventoryLocationType.GROUND)
+            return GameInventory.SetGroundPosByOwner(player, e, dst);
         if (lt == InventoryLocationType.HANDS)
         {
             if (player.GetHumanInventory().GetEntityInHands())
@@ -204,6 +211,18 @@ class OZS_Boundary
         else
             return false;
         return player.GetInventory().LocationCanAddEntity(dst);
+    }
+
+    // Carried by this player, or loose on the ground close enough to reach.
+    // The distance is the engine's own action reach, so what the box accepts
+    // is what the player could have picked up by hand.
+    static bool Reachable(PlayerBase player, EntityAI e)
+    {
+        if (e.GetHierarchyRootPlayer() == player)
+            return true;
+        if (e.GetHierarchyParent())
+            return false;
+        return vector.Distance(e.GetPosition(), player.GetPosition()) <= UAMaxDistances.DEFAULT;
     }
 
     // Hands if they are free, otherwise anywhere the player's own inventory
