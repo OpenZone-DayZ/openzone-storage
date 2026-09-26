@@ -19,11 +19,17 @@ the last of them closes the screen, walks off, leaves or dies -- nothing about i
 timer. The inventory screen carries a **search bar** that shades
 every item whose name does not contain the text and keeps a container lit if anything
 inside it matches, however deep; a **Sort** button that lays the open box out by name; and
-a **Count** button beside it that lists what the open box holds, total and by class.
+a **Count** button beside it that lists what the open box holds, total and by class. Two
+stacks either side of the box's edge merge the way vanilla's do (drag one onto the other,
+from a pocket or off the ground); a loose item dropped on an item in the box changes places
+with it; and **Alt+click** moves an item from the box into the inventory, or from the
+inventory (the hands included) into the box.
 
 ### The personal stash
 
-An admin places a **locker** (`OZ_StashAnchor`). A player presses F on it and is shown a
+An admin places a **locker** (`OZ_StashAnchor`) -- a placed item like a box, saved with the
+world and renewed to 45 days of lifetime on every boot, wearing the vanilla locker model.
+A player presses F on it and is shown a
 record of their own, keyed by which locker and whose -- the same player at two lockers has
 two stashes, and one locker holds one per player. It carries the character's own slots
 (headgear, mask, eyewear, body, vest, back, hips, legs, feet, gloves, armband, shoulder,
@@ -36,8 +42,7 @@ nowhere else, and the pairing of locker and player is made on the server from wh
 the message, so another player at the same locker cannot name it. What the player does
 with it is written to the database turn by turn, like a box.
 
-Still to come: placing anchors from a JSON file (today an admin spawns them), and the
-ten-at-once concurrency run.
+Still to come: the ten-at-once concurrency run.
 
 Three boxes -- `OZ_StorageBox_Small` (250 cells, 2 weapon slots, wooden crate model),
 `OZ_StorageBox_Medium` (500 cells, 4 slots, sea chest) and `OZ_StorageBox_Large`

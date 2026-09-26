@@ -256,8 +256,14 @@ class OZS_Boundary
             w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
             return;
         }
+        // LYING LOOSE IS A PLACE TOO (owner, 2026-09-26: "a swap between the
+        // ground and the box"). A ground location has no parent to name, so
+        // step 3 names the type alone and `Asked` puts the box's item at the
+        // player's feet -- not on the exact spot the other one lay, which the
+        // player has just picked up from anyway.
         EntityAI host = here.GetParent();
-        if (!host)
+        bool loose = here.GetType() == InventoryLocationType.GROUND;
+        if (!host && !loose)
         {
             w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
             return;
@@ -320,7 +326,8 @@ class OZS_Boundary
         // 2026-09-25).
         int low = 0;
         int high = 0;
-        host.GetNetworkID(low, high);
+        if (host)
+            host.GetNetworkID(low, high);
         int hereFlip = 0;
         if (here.GetFlip())
             hereFlip = 1;
@@ -470,6 +477,214 @@ class OZS_Boundary
         // arrives with it (review 2026-09-26, C1).
         s.TellTree(e, w.m_Uid);
         OZS_Audit.Log("in", s.m_Id, w.m_Uid, w.Name(), e.GetType(), 0, -1, -1, "", "put into the box");
+    }
+
+    // ---- two stacks, one each side of the boundary -----------------------
+    //
+    // "One round on the ground or in the inventory, the same round in the
+    // box" (owner, 2026-09-26). The vanilla screen offers to combine the two
+    // and calls CombineItemsClient, which names both BY ENTITY and so cannot
+    // reach a proxy's item; the client asks here instead (OZS_Stacking).
+    //
+    // NO ENTITY CROSSES. Each stack stays where it is and only what it holds
+    // moves -- rounds, or quantity -- the way vanilla's own combine works.
+    // Which makes the order of the record the same question as for a move,
+    // with the same answer (section 7):
+    //
+    //   . IN  -- the contents leave a saved place for the authority: SQL LAST.
+    //   . OUT -- the contents leave the record for a saved place: SQL FIRST,
+    //            and with WaitForRecord on the player's stack is credited only
+    //            once the bridge has answered (OZS_Credit).
+
+    // The player's stack -- or one lying at their feet -- is poured into a
+    // stack in the box. The engine's own combine does it, on the two real
+    // entities: the taker is the authority's and nobody is told about it,
+    // the giver is the player's and the engine syncs what it loses.
+    static void StackIn(OZS_Session s, OZS_Watcher w, int handle, int netLow, int netHigh)
+    {
+        ItemBase taker = ItemBase.Cast(OZS_Authority.ByHandle(s.m_Auth, handle));
+        if (!taker)
+        {
+            w.No(handle, "no such item", s.m_Version);
+            return;
+        }
+        PlayerBase player = PlayerBase.Cast(w.Player());
+        if (!player)
+        {
+            w.No(handle, "you are not here", s.m_Version);
+            return;
+        }
+        ItemBase giver = ItemBase.Cast(GetGame().GetObjectByNetworkId(netLow, netHigh));
+        if (!giver)
+        {
+            w.No(handle, "no such item", s.m_Version);
+            return;
+        }
+        if (!Reachable(player, giver))
+        {
+            w.No(handle, "that is not yours to put away", s.m_Version);
+            return;
+        }
+        if (!taker.CanBeCombined(giver, false))
+        {
+            w.No(handle, "#STR_OZS_NO_STACK", s.m_Version);
+            return;
+        }
+        float had = OZS_Ops.Contents(taker);
+        taker.CombineItems(giver, true);
+        float moved = OZS_Ops.Contents(taker) - had;
+        if (moved <= 0)
+        {
+            OZ_Log.Dbg("storage: proxy: box " + s.m_Id + ": nothing of " + giver.GetType() + " would go into #" + handle.ToString());
+            return;
+        }
+        // AN EMPTIED GIVER IS REMOVED HERE. The engine deletes a quantity
+        // stack by its config (varQuantityDestroyOnMin) and leaves a pile of
+        // no rounds lying where it was -- inside the box that was the
+        // artefact of 2026-09-25, and in a pocket it is the same thing.
+        if (OZS_Ops.Contents(giver) <= 0 && !giver.IsSetForDeletion())
+            GetGame().ObjectDelete(giver);
+        s.Touch();
+        // SQL LAST (section 7), as for anything coming in.
+        OZS_Commit.Quantity(s, taker);
+        s.TellQuantity(taker, w.m_Uid);
+        OZS_Audit.Log("stack_in", s.m_Id, w.m_Uid, w.Name(), giver.GetType(), moved, -1, -1, "", "stacked into the box");
+    }
+
+    // A stack in the box is poured into the player's stack -- or one lying at
+    // their feet. Two phases, like a take-out: what moves leaves the box's
+    // stack and the record is told; the player's stack receives it in the
+    // same frame, or once the bridge has answered (OZS_Credit).
+    static void StackOut(OZS_Session s, OZS_Watcher w, int handle, int netLow, int netHigh)
+    {
+        ItemBase giver = ItemBase.Cast(OZS_Authority.ByHandle(s.m_Auth, handle));
+        if (!giver)
+        {
+            w.No(handle, "no such item", s.m_Version);
+            return;
+        }
+        PlayerBase player = PlayerBase.Cast(w.Player());
+        if (!player)
+        {
+            w.No(handle, "you are not here", s.m_Version);
+            return;
+        }
+        ItemBase taker = ItemBase.Cast(GetGame().GetObjectByNetworkId(netLow, netHigh));
+        if (!taker)
+        {
+            w.No(handle, "no such item", s.m_Version);
+            return;
+        }
+        if (!Reachable(player, taker))
+        {
+            w.No(handle, "that is not yours to fill", s.m_Version);
+            return;
+        }
+        if (!taker.CanBeCombined(giver, false))
+        {
+            w.No(handle, "#STR_OZS_NO_STACK", s.m_Version);
+            return;
+        }
+        // Taken before anything moves, as in Out: the letter may have to say
+        // which root to drop.
+        int wasRoot = OZS_Commit.RootOf(s, giver);
+        bool wasItself = OZS_Commit.TopOf(s, giver) == giver;
+        string wasType = giver.GetType();
+        if (wasRoot < 0)
+        {
+            w.No(handle, "this item is not in the record", s.m_Version);
+            return;
+        }
+        // THE RECORD MUST BE ABLE TO TAKE A TURN BEFORE ANYTHING IS TAKEN. A
+        // take-out asks this of `Left` after the fact and hands nothing over
+        // when no letter went; here the contents would already be out of the
+        // giver by then, so the question comes first. (`Ready` ends the
+        // session when the bridge is down, and then there is nothing to do.)
+        if (!OZS_Commit.Ready(s))
+            return;
+        OZS_Credit c = OZS_Credit.Take(w.m_Uid, handle, giver, taker, wasItself);
+        if (!c)
+        {
+            OZ_Log.Dbg("storage: proxy: box " + s.m_Id + ": nothing of #" + handle.ToString() + " would go into " + taker.GetType());
+            return;
+        }
+        c.m_Gone = OZS_Ops.Contents(giver) <= 0;
+        // 1. SQL FIRST (section 7): the record lets go of what the giver no
+        //    longer holds. The giver itself stays in the box until the credit
+        //    is given -- at nothing, if it gave everything -- see OZS_Credit.
+        if (c.m_Gone)
+            OZS_Commit.Left(s, wasRoot, wasItself, wasType);
+        else
+            OZS_Commit.Quantity(s, giver);
+        s.Touch();
+        // 2. AND, IF THE SERVER IS SET TO, WAIT FOR THE ANSWER -- see Out for
+        //    why. No turn to wait on means nothing was written, so nothing
+        //    may be given: what was taken goes back.
+        if (OZS_Settings.Get().WaitForRecord)
+        {
+            if (!s.HoldCredit(c))
+                c.Restore();
+            return;
+        }
+        Credited(s, c);
+    }
+
+    // The second half of an outbound stacking: the player's stack receives
+    // what the box's gave. In the same frame as the letter, or a round trip
+    // later -- and the two must be the same code, as for Handover.
+    static void Credited(OZS_Session s, OZS_Credit c)
+    {
+        OZS_Watcher w = s.WatcherOfUid(c.m_Uid);
+        string by = "";
+        string name = "";
+        if (w)
+        {
+            by = w.m_Uid;
+            name = w.Name();
+        }
+        // The receiver is the player's real entity; if the player has gone in
+        // the time the wire took, so has it, and the record has already let
+        // these contents go. They are put back into the giver and written
+        // back in -- the same repair a hand-over with nowhere to go makes.
+        bool nobody = !c.m_Taker;
+        if (!nobody)
+            nobody = c.m_Taker.IsSetForDeletion();
+        if (nobody)
+        {
+            if (c.m_Giver)
+            {
+                OZ_Log.Warn("storage: proxy: box " + s.m_Id + ": there was nobody to credit " + c.Amount().ToString() + " of " + c.m_Type + " to after the record took the turn; it is written back into the box");
+                c.Restore();
+                if (c.m_Gone && c.m_WasItself)
+                    OZS_Commit.Added(s, c.m_Giver);
+                else
+                    OZS_Commit.Quantity(s, c.m_Giver);
+            }
+            return;
+        }
+        c.Give();
+        // An emptied giver leaves now, after Give has read it (OnCombine).
+        if (c.m_Gone && c.m_Giver && !c.m_Giver.IsSetForDeletion())
+        {
+            OZS_Watchdog.Expect(c.m_Giver);
+            GetGame().ObjectDelete(c.m_Giver);
+        }
+        if (c.m_Gone)
+            s.TellGone(c.m_Handle, by);
+        else
+            s.TellQuantity(c.m_Giver, by);
+        OZS_Audit.Log("stack_out", s.m_Id, c.m_Uid, name, c.m_Type, c.Amount(), -1, -1, "", "stacked out of the box");
+    }
+
+    // The turn was refused: nothing was written, so nothing may be given. The
+    // contents go back into the giver, which is still in the box and still
+    // in the record, and the player is told.
+    static void Uncredited(OZS_Session s, OZS_Credit c)
+    {
+        c.Restore();
+        OZS_Watcher w = s.WatcherOfUid(c.m_Uid);
+        if (w)
+            w.No(c.m_Handle, "#STR_OZS_NOT_WRITTEN", s.m_Version);
     }
 
     // The destination the player's own screen chose, if it can be used.

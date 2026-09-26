@@ -433,3 +433,139 @@ before the take-out's hand-over (record first), so at every instant exactly
 one item is unsaved and none is doubled. Verified: four swaps in a row, each
 one letter `rewrite 1 drop 1 add 1`, no refusal, the item in the hands after
 each.
+
+### The evening of 2026-09-26: three gestures the owner asked for
+
+"What else does not work: swapping between the ground and the box; stacking
+from the inventory or the ground into the box and back (one round on the
+ground or in the inventory, the same round in the box); and Alt+click to move
+an item from the box into the inventory and back."
+
+| gesture | what was wrong | what was done | verified on the stand |
+|---|---|---|---|
+| ground <-> box swap | the screen DOES offer the swap for a loose item (`GameInventory.CanSwapEntitiesEx` answers true for a ground item and an item in the proxy -- measured); it was `Across` that refused: a ground location has no parent, and step 3 named the parent by network id | `Across` takes a loose item: step 3 goes out with the GROUND type alone and the box's item lands at the player's feet. On the client, a drop vanilla finds nothing for (`Icon.PerformCombination` with NONE) is routed as an `Across` too, as a fallback | an apple off the ground onto ammo pile #4: `move #4 to 0,2`, `taking in Apple, loose on the ground -> 0,3`, the pile out at the feet; one letter `rewrite 1 drop 1 add 1` |
+| stacking across the boundary | `CombineItemsClient` was refused on purpose ("a move of a part of a stack is a split") | two operations, one per direction, because the safe order of the record is opposite for each (section 7), as for IN and OUT. No entity crosses: only the contents move, as vanilla's own combine moves them. `OP_STACK_IN` -- the engine's `CombineItems` on the two real entities (the taker is the authority's, the giver the player's, the engine syncs what it loses), SQL last, an emptied giver deleted. `OP_STACK_OUT` -- a two-phase credit (`OZS_Credit`), the hand-over of a take-out for contents: they leave the box's stack, the letter goes (rewrite or drop), the player's stack is credited in the same frame or -- with `WaitForRecord` -- when the bridge has answered; a refused turn restores the giver, which stands in the box until then, at nothing if it gave everything | rags 2 -> box (3 -> 5, the player's stack gone); ammo 20 into a 10/20 pile (10 moved, 10 stayed); out: rag 5 -> the player's 2 (4 moved), ammo 20 -> 10/20 (10 moved), nails 70 onto 10 (the box's stack gone, letter `drop 1`); the same with a pile lying on the ground, both ways; a full receiver refused with `#STR_OZS_NO_STACK` reaching the screen; with `WaitForRecord` and 300 ms of ping: `drop 1` posted while the giver still stood at nothing, the credit given after the reply, no disagreement between box and record, `errors_total 0`; the bridge's history shows `stack_in`/`stack_out` with the amounts, and the closing write (4 roots: apple, rag 3, rag 3, nails 80) equals the box |
+| Alt+click | there is no such gesture on a keyboard: `UAUIFastTransferItem`/`ToVicinity` are bound on consoles only (bin.pbo: ps4X, x1X), and the PC's one modifier click, Ctrl+LMB = drop, is written into the five click handlers | the same way: `OZS_QuickMove` at the top of `Icon.MouseClick`, `PlayerContainer.MouseClick`, `ContainerWithCargoAndAttachments.MouseClick2`, `AttachmentCategoriesRow.MouseClick`, `HandsContainer.MouseClick2`; Alt read with `KeyState(KeyCode.KC_LMENU/RMENU)` (`DayZGame` keeps Alt in a private field). A box item -> `TakeInto` (the client proposes a CARGO place, then ANY, else the server decides); the player's own, hands included -> `PutInto` (a cell or a weapon slot the proxy sees, else the authority's choice; never the ground). `PredictiveTakeEntityToInventory`/`ToTargetInventory` hooked as well | by the probe's `alt 1` / `altin Nail` / `altin Rag` (from the hands): op 2 to the hoodie's 1,2, op 3 to 0,0, the rag from the hands to 0,2, all in the box's history. THE MOUSE CLICK ITSELF CANNOT BE PRESSED FROM THE STAND (no mouse tool): Alt+LMB live is the owner's to try |
+
+Also on the way: `OZ_StorageBox.OZS_CountEntities` now skips entities set for
+deletion, as `OZS_Records.CountTree` already did -- the emptied giver of a
+held credit is deleted in the very frame the bridge's answer is judged. And
+the compiler's "Formula too complex": one `Note(...)` with fourteen `+`
+terms in the probe; split into statements.
+
+Stand commands added to the client probe for these: `alt <handle>`,
+`altin <cls>`, `stackin/stackout <cls>`, `gstackin/gstackout <cls>`,
+`gswap <cls> <handle>` (the last one also prints what vanilla's own tests
+say about the pair).
+
+Not committed, not pushed. Not re-checked on screen in Ukrainian: the one
+new string, `STR_OZS_NO_STACK`.
+
+Later the same evening, after the owner confirmed Alt+LMB works in the game:
+a combine between two different open boxes is refused explicitly in
+`OZS_Stacking` (it would have named a stack by a network id it does not
+have); four dead stringtable keys removed (`STR_OZS_CLOSE`, `STR_OZS_SORTING`,
+`STR_OZS_EMPTY`, `STR_OZS_WAITING` -- the old scheme's close and sort, a
+duplicate of `COUNT_EMPTY`, a waiting line nothing showed), and the fifth
+unused one, `STR_OZS_OUTSIDE`, now carries the out-of-grid refusal of
+`OZS_Ops.Move` instead of plain words nobody saw. 44 keys, all referenced.
+
+### Found by the owner's matryoshka in the stash: roots and nesting
+
+The owner hung a hoodie in the stash's Body slot and put rounds into its
+pockets. Five ERRORs in the log, all one defect in the record's bookkeeping
+of ROOTS -- what stands directly in the box -- when a move crosses into or
+out of a container that is itself in the box:
+
+- `In` with a host (`into` != 0) committed `Added -> Add(top)`: the hoodie,
+  already a root, was written AGAIN with the round inside -- the record held
+  two hoodies for one turn (`2 roots / 3 entities` against the box's `1 / 2`).
+- `Move` of a root into the hoodie's cargo committed `Rewrite(oldPosition)`:
+  the round, by then inside the hoodie, was serialised as a root once more.
+  The "pushed 1 item out of the box" alarm beside it compared ROOT counts,
+  which a nesting move lowers by one -- a false alarm.
+- `Move` of a nested item out to the grid added it (correctly) while logging
+  it as an anomaly.
+
+Every time the count check caught the disagreement and repaired it with an
+absolute rewrite, so nothing was lost or doubled in the end -- but between
+the bad letter and the repair the record held a duplicate root, and a server
+dying in that window would have materialised it on the next open.
+
+Fix: one rule, `OZS_Commit.Settle`, fed with a snapshot taken before the
+move (`OZS_Was`: root position, was-it-the-root-itself, class):
+root->root rewrite; root->nested DROP the old root and rewrite the host;
+nested->root rewrite the old host and ADD; nested->nested rewrite both.
+`Added` rewrites the host when the item arrived inside a root the record has.
+`Move` counts the whole tree for the pushed-out check. `Swap` takes both
+snapshots before anything moves and `MovedPair` settles each with its own.
+
+Verified on the stand (17:00, after the owner's word): in the owner's own
+stash, a round `In` into the hoodie hung in the Body slot -- `rewrite 1 drop
+0 add 0, the order now has 1 root(s), the box 1`; nails in as a root -- `add
+1`; nails moved into the hoodie -- `move #5 Nail to 2,4 of Hoodie_Blue`,
+`rewrite 1 drop 1 add 0`, no "pushed out"; back to the grid -- `rewrite 1
+drop 0 add 1`; a root-for-root swap -- `rewrite 2`; the record 3 roots / 6
+entities equal to the box; `errors_total 0` for the whole run. A container
+lying in the box's CARGO cannot be filled at all, and that is vanilla:
+`Container_Base.CanReceiveItemIntoCargo` refuses while
+`AreChildrenAccessible()` is false, so the bandage aimed at a bag on the
+grid was refused with `#STR_OZS_FULL` -- only a container hung in a slot
+takes things, which is the stash's whole point.
+
+One blink remains on the client: its LOCAL move of the nails into the
+hoodie's pockets "said true" and left the item nowhere, so the mirror
+asked for the stash again (5 rows). Correct, one restream; the follow-up is
+to recreate the item locally at its new place instead of asking for the
+whole box.
+
+### The lag question: the absolute write is a job again
+
+Asked for other sources of server lag, the honest list was: (1) the absolute
+letter -- every session's closing write, every repair, the sort's letter --
+serialised every root of the box in ONE frame: ~0.2 ms an entity (measured
+2026-09-16 on the old, paced close), so ~200 ms for a full Large box, the
+same shape of stall as the obfuscated storage mod's synchronous loads on the
+live server; (2) the sort planner, one frame, unmeasured on a big box;
+(3) the snapshot at open/restream, all rows built at once (~6 ms per 1000)
+and then streamed 160 rows a frame; (4) `TellTree` of a big container, one
+RPC per node per watcher; (5) the per-turn file written synchronously on the
+main thread -- small, but an antivirus on the profile folder would stall
+every turn. Not sources: the fill (5 ms a frame, shared by every box),
+events (once a second), restreams (once a second at most), the leash, placed
+boxes, the RPC and item hooks; `DebugLog` ships off.
+
+Done, at the owner's word ("of course bring it back"): `OZS_WholeJob`. The
+absolute letter's file is written root by root on the fill's own budget
+(`OpenFrameBudgetMs`), the writer keeping its file open between frames; the
+session takes no turn while it runs (operations queue behind it as behind a
+letter in flight), does not end (`IsDone`), and refuses a new watcher with
+`#STR_OZS_OPENING` while its closing write runs; the letter is posted when
+the file is whole (`OZS_Letter.PostWritten`), a closing one ends the session
+then (`FinishEnd`). Sessions stay listed until they have ended; the mission's
+end finishes a running write at once (`FinishWholeNow`). A job that fails
+removes its file and fails the session as a synchronous write did. Verified on the stand: a 104-root box closing -- `written in 5 frame(s),
+23.0 ms of work` (the budget's 5 ms a frame; ~0.22 ms a root, as
+estimated); its sort -- `written in 5 frame(s), 24.0 ms`, then the refill of
+104 in 656 frames; the 3-root stash -- 1 frame, 2 ms; at the server's stop
+with a session still open, `EndAll` finished the write at once -- `written
+in 1 frame(s), 25.0 ms`. Every letter landed (versions `session` 104/104,
+status closed), no `disagree`.
+
+### The anchor as an item, verified
+
+Spawned at the runway: stands upright as the grey locker, has a network id
+(the client asked through it, `netid 019452`), health 1 000 000, and the
+owner's stash opened under it by the position key with the hoodie and its
+rounds. It survived a server stop and start: `OZ_StashAnchor` at the same
+spot after the boot, the box beside it counted by the boot exchange.
+
+Found on the way, a stand-sharing hazard rather than a mod defect: while
+this stand was down the owner ran the radio stand on the same mission
+without the storage mod loaded, and its world save dropped every entity of
+a class it did not know -- all three placed boxes were gone at the next
+boot. Their records are intact in SQL (the bridge lists them closed); a box
+placed again gets a new persistent id, so an admin `restore`/`move` is the
+way back to a lost box's roots. A stash is keyed by position and needs
+nothing: the locker placed again on the same metre found the kit.
+

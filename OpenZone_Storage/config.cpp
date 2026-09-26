@@ -158,15 +158,44 @@ class CfgVehicles
             };
         };
     };
-    // The anchor: the locker players walk up to. Vanilla model by inheritance,
-    // so not one path to a p3d lives in this config -- the same way the boxes
-    // take their look from WoodenCrate and SeaChest. Grey closed locker by the
-    // owner's choice 2026-09-23; _v2/_v3 and the blue set are one word away.
-    class OZ_StashAnchor: StaticObj_Furniture_locker_closed_v1
+    // The anchor: the locker players walk up to.
+    //
+    // A PLACED THING, NOT A PIECE OF THE MAP (owner, 2026-09-26 evening: "give
+    // it a model that does not vanish by lifetime"). It used to BE the vanilla
+    // static locker, StaticObj_Furniture_locker_closed_v1 -- a House, and a
+    // House made by script is never saved: the world save holds items, not
+    // buildings, so every restart lost the anchor and with it the way to every
+    // stash keyed at that spot. It is an item now, exactly like a placed box:
+    // saved with the world, its lifetime renewed to 45 days on every boot
+    // (OZ_StashAnchor.EEOnAfterLoad), and it wears the same grey locker by the
+    // model's path, because the model lives in CfgVehicles only under a House
+    // class this can no longer inherit. _v2/_v3 and the blue set are one word
+    // away in that path.
+    //
+    // Heavy, huge and hitpoint-rich on purpose: nothing carries it, nothing
+    // pockets it, and a magazine emptied into it changes nothing.
+    class OZ_StashAnchor: Inventory_Base
     {
         scope = 2;
         displayName = "$STR_OZS_STASH";
         descriptionShort = "$STR_OZS_STASH_DESC";
+        model = "\DZ\structures\Furniture\Cases\locker\locker_closed_v1.p3d";
+        weight = 60000;
+        itemSize[] = {10, 10};
+        physLayer = "item_large";
+        carveNavmesh = 1;
+        canBeDigged = 0;
+        rotationFlags = 2;
+        class DamageSystem
+        {
+            class GlobalHealth
+            {
+                class Health
+                {
+                    hitpoints = 1000000;
+                };
+            };
+        };
     };
 
     // The personal stash (spec 2026-09-23). One per owner, created at that

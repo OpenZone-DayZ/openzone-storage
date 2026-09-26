@@ -1,20 +1,74 @@
 // The thing players walk up to: a locker that holds nothing itself and only
 // carries the verb. Design: docs/specs/2026-09-23-storage-personal-stash-design.md §2.
 //
-// It is a House (BuildingSuper is a typedef of House, 4_world/entities/game/
-// super/building.c:93), so it is never in anyone's vicinity panel and never
-// takes damage: Building.IsInventoryVisible() already returns false
-// (3_game/entities/building.c:264), and the config parent
-// StaticObj_Furniture_locker_closed_v1 descends from HouseNoDestruct. Neither
-// needs an override here -- both come with the base.
+// A PLACED ITEM SINCE 2026-09-26 (owner: "give it a model that does not
+// vanish by lifetime"). It was the vanilla static locker itself before -- a
+// House -- and a House made by script is never saved: the world save holds
+// items, not buildings, so every restart lost the anchor, and with it the
+// way to every stash keyed at that spot. Now it is an item, exactly as a
+// placed box is: saved with the world, its lifetime renewed to 45 days on
+// every boot, wearing the locker's model by its path (config.cpp).
 //
-// A building keeps its OWN action map instead of the player's: BuildingBase
-// builds one per type in InitializeActions() and hands it out through
-// GetActions(). SetActions() below is the only place a verb can be attached
-// to it -- registering the action in ActionConstructor is necessary but not
-// sufficient.
-class OZ_StashAnchor : BuildingSuper
+// What the House gave for free is given back by hand below: it is in
+// nobody's vicinity panel (IsInventoryVisible), nobody can pick it up or
+// pocket it, and its health is a million. The key of a stash under it is
+// still where it STANDS (OZS_AnchorKey), so an anchor placed again on the
+// same whole metre after being lost finds every stash again.
+class OZ_StashAnchor : ItemBase
 {
+    override void EEInit()
+    {
+        super.EEInit();
+        if (!GetGame() || !GetGame().IsServer())
+            return;
+        SetTakeable(false);
+        // Every boot renews the lifetime, so the anchor outlives the central
+        // economy's cleanup without an entry in types.xml -- as a box does.
+        SetLifetime(OZS_Const.BOX_LIFETIME);
+    }
+
+    // Set again after the load, where it is the last word: the engine
+    // restores the saved lifetime AFTER EEInit and would overwrite the
+    // renewal above (measured on the boxes, 2026-09-25).
+    override void EEOnAfterLoad()
+    {
+        super.EEOnAfterLoad();
+        if (GetGame() && GetGame().IsServer())
+            SetLifetime(OZS_Const.BOX_LIFETIME);
+    }
+
+    // Not a thing anybody's inventory screen lists, holds, carries or wears.
+    // The action still finds it: it aims by the cursor, not by the panel.
+    override bool IsInventoryVisible()
+    {
+        return false;
+    }
+
+    override bool IsTakeable()
+    {
+        return false;
+    }
+
+    override bool CanPutInCargo(EntityAI parent)
+    {
+        return false;
+    }
+
+    override bool CanPutIntoHands(EntityAI parent)
+    {
+        return false;
+    }
+
+    override bool CanPutAsAttachment(EntityAI parent)
+    {
+        return false;
+    }
+
+    override bool CanDisplayCargo()
+    {
+        return false;
+    }
+
     override void SetActions()
     {
         super.SetActions();
@@ -24,11 +78,8 @@ class OZ_StashAnchor : BuildingSuper
     // HALF OF EVERY STASH KEY AT THIS LOCKER. It has to be the same string
     // after a restart, or every player's kit would land under a new key and
     // look lost, so it is derived from where the anchor STANDS rather than
-    // from an engine id: anchors are placed by an admin and do not move,
-    // while a script-created building gets a fresh identity every boot.
-    //
-    // When the JSON placement of section 2 lands, an anchor will be able to
-    // carry a name from its entry and this becomes the fallback.
+    // from an engine id -- and it survives the anchor itself: one placed
+    // again on the same whole metre answers to the same stashes.
     string OZS_AnchorKey()
     {
         return OZS_Const.AnchorKeyAt(GetPosition());

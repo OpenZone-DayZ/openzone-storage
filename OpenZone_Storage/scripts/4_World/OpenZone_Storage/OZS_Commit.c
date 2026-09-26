@@ -65,69 +65,30 @@ class OZS_Commit
 
     // ---- what the operations call ----------------------------------------
 
-    // An item moved inside the box. `wasRoot` is the position it belonged to
-    // before the move; pass -2 when the move cannot have changed it.
-    static void Moved(OZS_Session s, EntityAI e, int wasRoot = -2)
-    {
-        if (!Ready(s))
-            return;
-        EntityAI top = TopOf(s, e);
-        if (!top)
-        {
-            string gone = "nothing";
-            if (e)
-                gone = e.GetType();
-            OZ_Log.Error("storage: proxy: box " + s.m_Id + ": " + gone + " moved but is no longer in the box; nothing is written");
-            return;
-        }
-        int now = s.m_Auth.OZS_RootPosition(top);
-        OZS_Letter letter = s.Letter();
-        if (wasRoot >= 0 && wasRoot != now)
-            letter.Rewrite(wasRoot);
-        if (now >= 0)
-        {
-            letter.Rewrite(now);
-        }
-        else
-        {
-            // A MOVE THAT ADDS A ROOT IS ALMOST ALWAYS A DUPLICATE. It means
-            // the item's top-level parent is not in the box's record order --
-            // and if the record already has it under another position, this
-            // writes a second copy of it. Loud, with everything needed to see
-            // which item and which box.
-            string what = "nothing";
-            if (top)
-                what = top.GetType();
-            OZ_Log.Error("storage: proxy: box " + s.m_Id + ": " + what + " moved but is not in the record's order (" + s.m_Auth.OZS_RootOrder().Count().ToString() + " root(s) known); it is being ADDED, which duplicates it if the record already had it");
-            letter.Add(top);
-        }
-        letter.Post();
-    }
-
-    static void Quantity(OZS_Session s, EntityAI e)
-    {
-        Moved(s, e, -2);
-    }
-
-    // TWO ITEMS MOVED IN ONE TURN, ONE LETTER. A swap used to post one letter
-    // per item, and the core's client posts every call at once, so the two
-    // were concurrent requests the bridge applied in arrival order -- each
-    // numbered against a different picture of the record (review 2026-09-26,
-    // B5). Neither item changes its root in a swap inside the box, so both
-    // are rewrites of where they stand now.
-    static void MovedPair(OZS_Session s, EntityAI a, EntityAI b)
-    {
-        if (!Ready(s))
-            return;
-        OZS_Letter letter = s.Letter();
-        Standing(s, letter, a);
-        Standing(s, letter, b);
-        letter.Post();
-    }
-
-    // The root `e` stands in now, into the letter as a rewrite -- or, loudly,
-    // as an addition when the order does not know it (see Moved).
-    protected static void Standing(OZS_Session s, OZS_Letter letter, EntityAI e)
+    // WHERE ONE ENTITY STANDS IN THE RECORD AFTER A MOVE, into the letter.
+    //
+    // A record has ROOTS -- what stands directly in the box -- and everything
+    // else is inside one of them. A move can change which root an item
+    // belongs to, or whether it is a root at all, and the letter has to say
+    // the right one of four things (measured against the owner 2026-09-26,
+    // in a stash whose hoodie hung in the Body slot):
+    //
+    //   root -> root       (cell to cell)                 rewrite it
+    //   root -> nested     (into a container in the box)  DROP its old root,
+    //                                                     rewrite the host
+    //   nested -> root     (out of a container)           rewrite the old
+    //                                                     host, ADD it
+    //   nested -> nested   (host to host)                 rewrite both hosts
+    //
+    // The second case used to REWRITE the old position -- serialising, as a
+    // root, an item that was by then inside another root -- and the third
+    // logged an error for the addition it rightly made. Both left the record
+    // with one root more than the box, which the count check repaired with
+    // an absolute rewrite; between the letter and the repair the record held
+    // a duplicate. `was` is taken BEFORE the move (OZS_Was), or null when the
+    // move cannot have changed the item's root (a quantity change, a
+    // combine), in which case only the root it stands in now is rewritten.
+    protected static void Settle(OZS_Session s, OZS_Letter letter, EntityAI e, OZS_Was was)
     {
         EntityAI top = TopOf(s, e);
         if (!top)
@@ -139,13 +100,94 @@ class OZS_Commit
             return;
         }
         int now = s.m_Auth.OZS_RootPosition(top);
+        bool isItself = top == e;
+        if (was && was.m_Itself && !isItself)
+        {
+            // root -> nested: the root it was is gone from the record.
+            letter.Drop(was.m_Root, was.m_Type);
+            if (now >= 0)
+            {
+                letter.Rewrite(now);
+                return;
+            }
+            Unknown(s, letter, top);
+            return;
+        }
+        if (was && !was.m_Itself && isItself)
+        {
+            // nested -> root: the host lost it, and it is a root of its own
+            // now -- new to the order, so an addition, on purpose.
+            if (was.m_Root >= 0)
+                letter.Rewrite(was.m_Root);
+            if (now >= 0)
+                letter.Rewrite(now);
+            else
+                letter.Add(e);
+            return;
+        }
+        // root -> root, nested -> nested, or a change that moved nothing.
+        if (was && was.m_Root >= 0 && was.m_Root != now)
+            letter.Rewrite(was.m_Root);
         if (now >= 0)
         {
             letter.Rewrite(now);
             return;
         }
-        OZ_Log.Error("storage: proxy: box " + s.m_Id + ": " + top.GetType() + " moved but is not in the record's order (" + s.m_Auth.OZS_RootOrder().Count().ToString() + " root(s) known); it is being ADDED, which duplicates it if the record already had it");
+        Unknown(s, letter, top);
+    }
+
+    // A ROOT THE ORDER DOES NOT KNOW IS ALMOST ALWAYS A DUPLICATE ABOUT TO
+    // HAPPEN: the record may already hold it under another position, and an
+    // addition writes a second copy. Loud, with everything needed to see
+    // which item and which box; the count check that follows the turn puts
+    // the record straight if it was.
+    protected static void Unknown(OZS_Session s, OZS_Letter letter, EntityAI top)
+    {
+        string what = "nothing";
+        if (top)
+            what = top.GetType();
+        OZ_Log.Error("storage: proxy: box " + s.m_Id + ": " + what + " is not in the record's order (" + s.m_Auth.OZS_RootOrder().Count().ToString() + " root(s) known); it is being ADDED, which duplicates it if the record already had it");
         letter.Add(top);
+    }
+
+    // An item moved inside the box; `was` is where it stood before (null when
+    // the move cannot have changed its root).
+    static void Moved(OZS_Session s, EntityAI e, OZS_Was was = null)
+    {
+        if (!Ready(s))
+            return;
+        OZS_Letter letter = s.Letter();
+        Settle(s, letter, e, was);
+        letter.Post();
+    }
+
+    static void Quantity(OZS_Session s, EntityAI e)
+    {
+        Moved(s, e, null);
+    }
+
+    // TWO ITEMS MOVED IN ONE TURN, ONE LETTER. A swap used to post one letter
+    // per item, and the core's client posts every call at once, so the two
+    // were concurrent requests the bridge applied in arrival order -- each
+    // numbered against a different picture of the record (review 2026-09-26,
+    // B5). Each is settled by the rule above with its own snapshot from
+    // before the swap: a root swapped into a bag inside the box is dropped
+    // and the bag rewritten, the item that came out is added.
+    static void MovedPair(OZS_Session s, EntityAI a, OZS_Was wasA, EntityAI b, OZS_Was wasB)
+    {
+        if (!Ready(s))
+            return;
+        OZS_Letter letter = s.Letter();
+        Settle(s, letter, a, wasA);
+        Settle(s, letter, b, wasB);
+        letter.Post();
+    }
+
+    // The root `e` stands in now, into the letter -- for an item whose root
+    // a turn cannot have changed.
+    protected static void Standing(OZS_Session s, OZS_Letter letter, EntityAI e)
+    {
+        Settle(s, letter, e, null);
     }
 
     // TWO STACKS BECAME ONE, IN ONE LETTER: the emptied stack's root dropped
@@ -170,7 +212,12 @@ class OZS_Commit
         letter.Post();
     }
 
-    // A whole item arrived from outside the box.
+    // A whole item arrived from outside the box. Standing in the box it is a
+    // new root; dropped into a container that is IN the box -- a bag on the
+    // grid, a hoodie hung in a stash's slot -- it is part of a root the record
+    // already has, and that root is rewritten. Adding the container again
+    // was how a round put into the hoodie wrote the hoodie twice (owner,
+    // 2026-09-26).
     static void Added(OZS_Session s, EntityAI e)
     {
         if (!Ready(s))
@@ -185,7 +232,15 @@ class OZS_Commit
             return;
         }
         OZS_Letter letter = s.Letter();
-        letter.Add(top);
+        int host = -1;
+        if (top != e)
+            host = s.m_Auth.OZS_RootPosition(top);
+        if (host >= 0)
+            letter.Rewrite(host);
+        else if (top != e)
+            Unknown(s, letter, top);
+        else
+            letter.Add(top);
         letter.Post();
     }
 
@@ -394,13 +449,46 @@ class OZS_Letter
         m_Col.Insert(col);
     }
 
-    // The absolute form: the adds collected are not additions, they are the
-    // whole record. An EMPTY one is still a statement -- "the box holds
-    // nothing" -- so unlike Post it does not return early on having nothing
-    // to say.
+    // What the job reads: the roots to write, and the cell each is to stand
+    // in (-1 for "where it is now"; only a sort ever names one).
+    int Count()
+    {
+        return m_Add.Count();
+    }
+
+    EntityAI At(int i)
+    {
+        if (i < 0 || i >= m_Add.Count())
+            return null;
+        return m_Add.Get(i);
+    }
+
+    int RowAt(int i)
+    {
+        if (i < 0 || i >= m_Row.Count())
+            return -1;
+        return m_Row.Get(i);
+    }
+
+    int ColAt(int i)
+    {
+        if (i < 0 || i >= m_Col.Count())
+            return -1;
+        return m_Col.Get(i);
+    }
+
+    // THE ABSOLUTE FORM IS A JOB, NOT A CALL. The adds collected are not
+    // additions, they are the whole record -- every root the box holds -- and
+    // serialising a thousand entities in one frame is ~200 ms of it
+    // (measured 2026-09-16 on the old close: ~0.2 ms an entity). The old
+    // scheme paced its close and the proxy's closing letter did not; it does
+    // now, on the fill's own budget (owner, 2026-09-26: "of course bring it
+    // back"). The session owns the job and posts the letter when the file is
+    // whole -- see OZS_WholeJob and OZS_Session.BeginWhole. An EMPTY one is
+    // still a statement, "the box holds nothing", and is posted like any.
     bool PostWhole(string why, bool closing = false)
     {
-        return Send(true, why, closing);
+        return m_S.BeginWhole(this, why, closing);
     }
 
     void Post()
@@ -411,7 +499,7 @@ class OZS_Letter
             return;
         if (m_Rewrite.Count() == 0 && m_Drop.Count() == 0 && m_Add.Count() == 0)
             return;
-        Send(false, "", false);
+        Send();
     }
 
     // The class at a position of the order, or "" when there is nothing there
@@ -424,9 +512,11 @@ class OZS_Letter
         return order.Get(pos).GetType();
     }
 
-    protected bool Send(bool whole, string note, bool closing)
+    // A RELATIVE LETTER: the roots that changed, went or arrived, in one
+    // frame -- one root, two at most, so the frame is cheap.
+    protected bool Send()
     {
-        if (!whole && m_Rewrite.Count() == 0 && m_Drop.Count() == 0 && m_Add.Count() == 0)
+        if (m_Rewrite.Count() == 0 && m_Drop.Count() == 0 && m_Add.Count() == 0)
             return false;
         array<EntityAI> order = m_S.m_Auth.OZS_RootOrder();
         // The blobs, in the order the bridge reads them: first the rewrites,
@@ -502,38 +592,53 @@ class OZS_Letter
             letter.expect.Insert(m_DropName.Get(ed));
         letter.adds = m_Add.Count();
         letter.entities = entities;
-        if (whole)
-            letter.replace = 1;
-        if (whole && closing)
-            letter.close = 1;
 
-        if (whole)
+        // The record's order follows the letter on this side too, and the
+        // bridge renumbers its rows the same way. Drops are applied from
+        // the back so the earlier positions keep their meaning while we go.
+        for (int dd = m_Drop.Count() - 1; dd >= 0; dd--)
         {
-            // THE ORDER BECOMES THE LETTER, not the other way round. The whole
-            // point of the absolute form is that the positions we had are the
-            // ones in doubt, so they are thrown away and rebuilt from what the
-            // box actually holds -- in exactly the order the bridge is about
-            // to store.
-            order.Clear();
-            for (int w = 0; w < blobs.Count(); w++)
-                order.Insert(blobs.Get(w));
-            OZ_Log.Info("storage: proxy: box " + m_S.m_Id + ": the record is being set to what the box holds -- " + blobs.Count().ToString() + " root(s), " + entities.ToString() + " entity(ies) (" + note + ")");
+            int gone = m_Drop.Get(dd);
+            if (gone >= 0 && gone < order.Count())
+                order.RemoveOrdered(gone);
         }
-        else
-        {
-            // The record's order follows the letter on this side too, and the
-            // bridge renumbers its rows the same way. Drops are applied from
-            // the back so the earlier positions keep their meaning while we go.
-            for (int dd = m_Drop.Count() - 1; dd >= 0; dd--)
-            {
-                int gone = m_Drop.Get(dd);
-                if (gone >= 0 && gone < order.Count())
-                    order.RemoveOrdered(gone);
-            }
-            for (int aa = 0; aa < m_Add.Count(); aa++)
-                order.Insert(m_Add.Get(aa));
-            OZ_Log.Dbg("storage: proxy: turn for " + m_S.m_Id + ": rewrite " + letter.rewrite.Count().ToString() + " drop " + letter.drop.Count().ToString() + " add " + letter.adds.ToString() + ", the order now has " + order.Count().ToString() + " root(s), the box " + m_S.m_Auth.OZS_CountEntities().ToString());
-        }
+        for (int aa = 0; aa < m_Add.Count(); aa++)
+            order.Insert(m_Add.Get(aa));
+        OZ_Log.Dbg("storage: proxy: turn for " + m_S.m_Id + ": rewrite " + letter.rewrite.Count().ToString() + " drop " + letter.drop.Count().ToString() + " add " + letter.adds.ToString() + ", the order now has " + order.Count().ToString() + " root(s), the box " + m_S.m_Auth.OZS_CountEntities().ToString());
+        return Dispatch(letter, false);
+    }
+
+    // THE ABSOLUTE LETTER, ONCE ITS FILE IS WHOLE (OZS_WholeJob). THE ORDER
+    // BECOMES THE LETTER, not the other way round: the whole point of the
+    // absolute form is that the positions this side had are the ones in
+    // doubt, so they are thrown away and rebuilt from what was written -- in
+    // exactly the order the bridge is about to store.
+    bool PostWritten(string file, array<EntityAI> blobs, int entities, bool closing, string note, int frames, float workMs)
+    {
+        OZS_OpLetter letter = new OZS_OpLetter();
+        letter.id = m_S.m_Id;
+        letter.file = file;
+        letter.rewrite = new array<int>();
+        letter.drop = new array<int>();
+        letter.expect = new array<string>();
+        letter.adds = blobs.Count();
+        letter.entities = entities;
+        letter.replace = 1;
+        if (closing)
+            letter.close = 1;
+        array<EntityAI> order = m_S.m_Auth.OZS_RootOrder();
+        order.Clear();
+        for (int w = 0; w < blobs.Count(); w++)
+            order.Insert(blobs.Get(w));
+        OZ_Log.Info("storage: proxy: box " + m_S.m_Id + ": the record is set to what the box holds -- " + blobs.Count().ToString() + " root(s), " + entities.ToString() + " entity(ies) (" + note + "), written in " + frames.ToString() + " frame(s), " + workMs.ToString() + " ms of work");
+        return Dispatch(letter, true);
+    }
+
+    // The JSON and the flight. A repair is not repaired again: the reply
+    // knows whether the letter it answers was the absolute form, and if THAT
+    // is refused there is nothing left to try (OZS_OpReply).
+    protected bool Dispatch(OZS_OpLetter letter, bool whole)
+    {
         string json;
         string err;
         if (!JsonFileLoader<OZS_OpLetter>.MakeData(letter, json, err, false))
@@ -543,11 +648,125 @@ class OZS_Letter
             return false;
         }
         m_S.OnCommitSent();
-        // A REPAIR IS NOT REPAIRED AGAIN. The reply knows whether the letter
-        // it answers was the absolute form: if THAT is refused there is
-        // nothing left to try, and the session ends rather than looping.
         OZS_Bridge.Post(OZS_Const.ROUTE_OP, json, new OZS_OpReply(m_S, whole));
         return true;
+    }
+}
+
+// THE ABSOLUTE LETTER'S FILE, WRITTEN OVER AS MANY FRAMES AS IT NEEDS.
+//
+// Every root the box holds goes into one file, root by root, until the
+// frame's budget is spent -- the same OpenFrameBudgetMs the fill runs on,
+// so a session's end costs a frame what its start did. The writer keeps
+// its file open between frames (OZS_StoreWriter is a FileSerializer), and
+// nothing may change the box under it: the session takes no turn while a
+// job runs (OZS_Session.OperateAs queues behind it as behind a letter in
+// flight), and a session that is ending has no watchers left to ask for
+// one. When the file is whole the session posts the letter (OZS_Letter.
+// PostWritten) and, for a closing write, ends.
+class OZS_WholeJob
+{
+    OZS_Session m_S;
+    ref OZS_Letter m_Letter;
+    string m_Note;
+    bool m_Closing;
+    ref OZS_StoreWriter m_Writer;
+    ref array<EntityAI> m_Blobs;
+    int m_Next;
+    int m_Entities;
+    int m_Frames;
+    float m_WorkMs;
+    bool m_Failed;
+    string m_Why;
+
+    void OZS_WholeJob(OZS_Session s, OZS_Letter letter, string note, bool closing)
+    {
+        m_S = s;
+        m_Letter = letter;
+        m_Note = note;
+        m_Closing = closing;
+        m_Blobs = new array<EntityAI>();
+        m_Next = 0;
+        m_Entities = 0;
+        m_Frames = 0;
+        m_WorkMs = 0;
+        m_Failed = false;
+        m_Why = "";
+    }
+
+    // Counts what there is and opens the file. False, with the reason in
+    // m_Why, when the file cannot be opened; an empty box opens nothing and
+    // is whole at once.
+    bool Begin()
+    {
+        for (int i = 0; i < m_Letter.Count(); i++)
+        {
+            EntityAI e = m_Letter.At(i);
+            if (e)
+                m_Blobs.Insert(e);
+        }
+        for (int c = 0; c < m_Blobs.Count(); c++)
+            m_Entities = m_Entities + OZS_Records.CountTree(m_Blobs.Get(c));
+        if (m_Blobs.Count() == 0)
+            return true;
+        m_Writer = new OZS_StoreWriter();
+        string why;
+        if (!m_Writer.OpenOp(m_S.m_Auth, m_Blobs.Count(), m_Entities, OZS_Commit.NextSerial(), why))
+        {
+            m_Writer = null;
+            m_Failed = true;
+            m_Why = why;
+            return false;
+        }
+        return true;
+    }
+
+    // Writes roots until the budget is spent. True when the file is whole
+    // -- or when the job has failed, which m_Failed says.
+    bool Step(float budgetSec)
+    {
+        float frameStart = GetGame().GetTickTime();
+        float now = frameStart;
+        while (m_Writer && m_Next < m_Blobs.Count())
+        {
+            // The cell each root is to stand in travels by the letter's own
+            // index, which m_Blobs keeps (Add never inserts a null).
+            m_Writer.WriteRoot(m_Blobs.Get(m_Next), m_Letter.RowAt(m_Next), m_Letter.ColAt(m_Next));
+            m_Next++;
+            now = GetGame().GetTickTime();
+            if (now - frameStart >= budgetSec)
+                break;
+        }
+        m_Frames++;
+        m_WorkMs = m_WorkMs + (now - frameStart) * 1000;
+        if (m_Writer && m_Next < m_Blobs.Count())
+            return false;
+        if (m_Writer)
+        {
+            string why;
+            if (!m_Writer.Finish(why))
+            {
+                m_Failed = true;
+                m_Why = why;
+            }
+        }
+        return true;
+    }
+
+    string FileName()
+    {
+        if (!m_Writer)
+            return "";
+        return m_Writer.Name();
+    }
+
+    // The file is ours until the bridge is told about it; a job that will
+    // not finish removes it.
+    void Abort()
+    {
+        if (m_Writer)
+            m_Writer.Abort();
+        m_Writer = null;
     }
 }
 
@@ -654,3 +873,28 @@ class OZS_OpReply : OZ_BridgeReply
         m_S.Fail("a turn never reached the bridge");
     }
 }
+
+// WHERE AN ENTITY STOOD IN THE RECORD BEFORE A MOVE, taken while it still
+// stood there: the position of its root, whether it WAS that root itself or
+// something inside it, and its class for the name a drop carries. Afterwards
+// the entity belongs somewhere else and none of this can be read back off
+// it (see OZS_Commit.RootOf). Settle reads it to say which of the four
+// things a move did to the record.
+class OZS_Was
+{
+    EntityAI m_E;
+    int m_Root;
+    bool m_Itself;
+    string m_Type;
+
+    void OZS_Was(OZS_Session s, EntityAI e)
+    {
+        m_E = e;
+        m_Root = OZS_Commit.RootOf(s, e);
+        m_Itself = OZS_Commit.TopOf(s, e) == e;
+        m_Type = "";
+        if (e)
+            m_Type = e.GetType();
+    }
+}
+

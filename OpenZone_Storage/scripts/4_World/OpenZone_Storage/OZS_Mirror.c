@@ -314,6 +314,66 @@ class OZS_Mirrors
     //
     // (The other direction is fine: client -> server keeps the target, which
     // is why the asking half still rides on the player.)
+    // ---- the quick gesture and the ground swap ---------------------------
+
+    // ALT HELD, read off the keyboard itself: DayZGame keeps Alt in a private
+    // field with no getter, and the fast-transfer inputs vanilla defines are
+    // bound on consoles only (bin.pbo: ps4X / x1X, nothing for a keyboard).
+    static bool AltHeld()
+    {
+        return KeyState(KeyCode.KC_LMENU) != 0 || KeyState(KeyCode.KC_RMENU) != 0;
+    }
+
+    // ALT + CLICK ON AN ITEM: out of the box into the player's inventory, or
+    // the player's own into the open box (owner, 2026-09-26). Anything else
+    // under the cursor -- the ground, somebody else's crate -- is not this
+    // gesture and answers false, so the click goes on to vanilla.
+    static bool QuickMove(EntityAI item)
+    {
+        if (None() || !item)
+            return false;
+        PlayerBase player = PlayerBase.Cast(GetGame().GetPlayer());
+        if (!player)
+            return false;
+        OZS_Mirror m = Of(item);
+        if (m)
+        {
+            s_Via = "AltClick";
+            return m.TakeInto(item, player, FindInventoryLocationType.CARGO);
+        }
+        if (item.GetHierarchyRootPlayer() != player)
+            return false;
+        if (!item.GetInventory().CanRemoveEntity() || !player.CanManipulateInventory())
+            return false;
+        m = s_Inst.First();
+        if (!m || !m.m_Whole)
+            return false;
+        s_Via = "AltClick";
+        return m.PutInto(item);
+    }
+
+    // A LOOSE ITEM DROPPED ON AN ITEM IN THE BOX, when the screen found
+    // nothing to do with the pair: its own swap test (CanSwapEntitiesEx)
+    // does not pass a ground item. The exchange the drop means is asked for
+    // as what it is -- an Across -- and the server decides (owner,
+    // 2026-09-26: "a swap between the ground and the box").
+    static bool GroundSwap(EntityAI selected, EntityAI target)
+    {
+        if (None() || !selected || !target)
+            return false;
+        if (selected.GetHierarchyParent() || Of(selected))
+            return false;
+        OZS_Mirror m = Of(target);
+        if (!m)
+            return false;
+        int handle = m.HandleOf(target);
+        if (handle == 0)
+            return false;
+        s_Via = "GroundSwap";
+        m.Across(selected, handle);
+        return true;
+    }
+
     static void Listen()
     {
         if (!GetGame() || !GetGame().IsClient())
@@ -1024,6 +1084,33 @@ class OZS_Mirror
         Send(OZS_Const.OP_IN, 0, into, low, high, lt, slot, row, col, flip);
     }
 
+    // TWO STACKS, ONE EACH SIDE (owner, 2026-09-26). The one in the box by
+    // handle, the player's -- or the one at their feet -- by network id.
+    // Nothing is drawn ahead of the answer: what changes is a count, and the
+    // server tells the box's stack's count by a change and the player's own
+    // is told by the engine.
+    void StackIn(EntityAI giver, EntityAI taker)
+    {
+        int handle = HandleOf(taker);
+        if (handle == 0 || !giver)
+            return;
+        int low;
+        int high;
+        giver.GetNetworkID(low, high);
+        Send(OZS_Const.OP_STACK_IN, handle, 0, low, high, InventoryLocationType.CARGO, -1, -1, -1, 0);
+    }
+
+    void StackOut(EntityAI giver, EntityAI taker)
+    {
+        int handle = HandleOf(giver);
+        if (handle == 0 || !taker)
+            return;
+        int low;
+        int high;
+        taker.GetNetworkID(low, high);
+        Send(OZS_Const.OP_STACK_OUT, handle, 0, low, high, InventoryLocationType.CARGO, -1, -1, -1, 0);
+    }
+
     // EVERY message of ours leaves on this client's own player. Not on the
     // object a message arrived on: a server -> client message arrives with its
     // target NULL (measured), so there is nothing there to answer to.
@@ -1231,6 +1318,51 @@ class OZS_Mirror
         else if (!target.GetInventory().FindFreeLocationFor(item, FindInventoryLocationType.ANY, dst))
             return false;
         return Drag(src, dst);
+    }
+
+    // OUT OF THE BOX TO WHEREVER IT FITS ON THE PLAYER: the quick gesture
+    // (Alt+click, and vanilla's PredictiveTakeEntityToInventory). This side
+    // proposes a place the way vanilla's own call would -- the kind the
+    // caller asked for first, then any -- and the server checks it as it
+    // checks every named destination. No place this side can see is still
+    // asked, with none named, so the answer is the server's word (a refusal
+    // the player can read, or the hands) rather than silence.
+    bool TakeInto(EntityAI item, EntityAI target, FindInventoryLocationType flags)
+    {
+        if (!item || !target)
+            return false;
+        int handle = HandleOf(item);
+        if (handle == 0)
+            return false;
+        InventoryLocation src = new InventoryLocation();
+        if (!item.GetInventory().GetCurrentInventoryLocation(src))
+            return false;
+        InventoryLocation dst = new InventoryLocation();
+        if (target.GetInventory().FindFreeLocationFor(item, flags, dst))
+            return Drag(src, dst);
+        if (target.GetInventory().FindFreeLocationFor(item, FindInventoryLocationType.ANY, dst))
+            return Drag(src, dst);
+        Out(handle, target, InventoryLocationType.CARGO, -1, -1, -1, 0);
+        return true;
+    }
+
+    // INTO THE BOX, WHEREVER IT FITS: the other half of the quick gesture.
+    // The proxy proposes a place -- a cell, or a weapon slot for a rifle --
+    // and the server checks it; a proxy that sees no room sends the item
+    // anyway with no cell named, and the authority finds one or says the box
+    // is full. Never the ground: with a box open the gesture means the box.
+    bool PutInto(EntityAI item)
+    {
+        if (!item || !m_Box)
+            return false;
+        InventoryLocation src = new InventoryLocation();
+        if (!item.GetInventory().GetCurrentInventoryLocation(src))
+            return false;
+        InventoryLocation dst = new InventoryLocation();
+        if (m_Box.GetInventory().FindFreeLocationFor(item, FindInventoryLocationType.ANY, dst))
+            return Drag(src, dst);
+        In(item, 0, InventoryLocationType.CARGO, -1, -1, -1, 0);
+        return true;
     }
 
     // Out of the box and onto the ground, in one operation. The destination is

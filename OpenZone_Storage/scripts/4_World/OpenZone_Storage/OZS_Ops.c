@@ -67,6 +67,18 @@ class OZS_Ops
             OZS_Boundary.In(s, w, netLow, netHigh, other, lt, slot, row, col, flip);
             return;
         }
+        if (op == OZS_Const.OP_STACK_IN)
+        {
+            // The stack in the box by handle, the player's by network id;
+            // nothing else travels, both are read here.
+            OZS_Boundary.StackIn(s, w, handle, netLow, netHigh);
+            return;
+        }
+        if (op == OZS_Const.OP_STACK_OUT)
+        {
+            OZS_Boundary.StackOut(s, w, handle, netLow, netHigh);
+            return;
+        }
         w.No(handle, "unknown operation " + op.ToString(), s.m_Version);
     }
 
@@ -113,7 +125,9 @@ class OZS_Ops
             if (lt == InventoryLocationType.ATTACHMENT)
                 asked = "slot " + slot.ToString();
             OZ_Log.Dbg("storage: proxy: #" + handle.ToString() + " " + e.GetType() + " was sent to " + asked + ", which is not a place in this box");
-            w.No(handle, "that is not a place in this box", s.m_Version);
+            // As a key, so the player reads it: the screen proposed a cell
+            // the grid does not have, and a refusal in words reaches nobody.
+            w.No(handle, "#STR_OZS_OUTSIDE", s.m_Version);
             return;
         }
         // An item cannot be put inside itself, at any depth.
@@ -186,13 +200,18 @@ class OZS_Ops
         // per drag, and the count on either side of the move: an item that
         // leaves the box without anybody deleting it shows up here as a drop
         // of one, beside the drag that caused it.
-        int held = s.m_Auth.OZS_CountEntities();
+        // EVERY ENTITY, THE NESTED ONES TOO. Counting roots cried wolf: a
+        // move into a container standing in the box turns a root into a
+        // nested item, the root count falls by one, and "pushed out" was
+        // reported for a round put into a hoodie (owner, 2026-09-26). The
+        // tree count does not change on any move that stays in the box.
+        int held = OZS_Records.CountTree(s.m_Auth) - 1;
         string where = row.ToString() + "," + col.ToString();
         OZ_Log.Dbg("storage: proxy: move #" + handle.ToString() + " " + e.GetType() + " to " + where + " of " + parent.GetType() + "; the box holds " + held.ToString());
-        // Which root it belonged to BEFORE the move: a move into or out of a
-        // container inside the box changes two records, and afterwards the old
-        // one is no longer reachable from the entity.
-        int wasRoot = OZS_Commit.RootOf(s, e);
+        // Where it stood in the record BEFORE the move: a move into or out of
+        // a container inside the box changes which root it belongs to, and
+        // afterwards the old one is no longer reachable from the entity.
+        OZS_Was was = new OZS_Was(s, e);
         InventoryLocation src = new InventoryLocation();
         e.GetInventory().GetCurrentInventoryLocation(src);
         InventoryLocation dst = new InventoryLocation();
@@ -213,11 +232,11 @@ class OZS_Ops
         // DID THE MOVE COST THE BOX AN ITEM? A move must not change how many
         // things are in the box. When it does, something was pushed out of the
         // container by the move itself, and the player sees it disappear.
-        int after = s.m_Auth.OZS_CountEntities();
+        int after = OZS_Records.CountTree(s.m_Auth) - 1;
         if (after < held)
             OZ_Log.Error("storage: proxy: box " + s.m_Id + ": moving " + e.GetType() + " to " + where + " pushed " + (held - after).ToString() + " item(s) out of the box (" + held.ToString() + " -> " + after.ToString() + ")");
         s.Touch();
-        OZS_Commit.Moved(s, e, wasRoot);
+        OZS_Commit.Moved(s, e, was);
         // Where it ACTUALLY went, not where it was asked to go: the row is
         // read back off the entity.
         s.TellMoved(e, w.m_Uid);
@@ -639,6 +658,11 @@ class OZS_Ops
             w.No(handle, "no such pair", s.m_Version);
             return;
         }
+        // Where each stood in the record, before either moves: a swap between
+        // the grid and a bag standing on it changes which of the two is a
+        // root (OZS_Commit.Settle).
+        OZS_Was wasA = new OZS_Was(s, a);
+        OZS_Was wasB = new OZS_Was(s, b);
         InventoryLocation srcA = new InventoryLocation();
         InventoryLocation srcB = new InventoryLocation();
         if (!a.GetInventory().GetCurrentInventoryLocation(srcA) || !b.GetInventory().GetCurrentInventoryLocation(srcB))
@@ -985,7 +1009,7 @@ class OZS_Ops
                 w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
                 return;
             }
-            Swapped(s, w, first, second);
+            Swapped(s, w, first, second, wasA, wasB);
             return;
         }
 
@@ -1029,7 +1053,7 @@ class OZS_Ops
             w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
             return;
         }
-        Swapped(s, w, sitter, mover);
+        Swapped(s, w, sitter, mover, wasA, wasB);
     }
 
     // THE BOX AS A MAP OF CELLS, with the two items that are leaving counted
@@ -1499,11 +1523,19 @@ class OZS_Ops
     // to stand on them. When the two went into each other's places there IS
     // no order that works, and the proxy rebuilds itself -- one blink, and
     // correct.
-    protected static void Swapped(OZS_Session s, OZS_Watcher w, EntityAI first, EntityAI second)
+    protected static void Swapped(OZS_Session s, OZS_Watcher w, EntityAI first, EntityAI second, OZS_Was wasA, OZS_Was wasB)
     {
         s.Touch();
+        // Each mover with its own snapshot, whichever of the two went first.
+        OZS_Was wasFirst = wasA;
+        OZS_Was wasSecond = wasB;
+        if (wasB.m_E == first)
+        {
+            wasFirst = wasB;
+            wasSecond = wasA;
+        }
         // One letter for the pair (review 2026-09-26, B5).
-        OZS_Commit.MovedPair(s, first, second);
+        OZS_Commit.MovedPair(s, first, wasFirst, second, wasSecond);
         s.TellMoved(first, w.m_Uid);
         s.TellMoved(second, w.m_Uid);
     }

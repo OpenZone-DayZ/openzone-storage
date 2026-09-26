@@ -24,6 +24,19 @@
 //     scan <r> [n]    -- list every item THIS CLIENT has lying loose within r
 //                        metres of the player: the server's own list of the
 //                        same spot tells which of them are ghosts
+//     stashopen [n]   -- the personal stash's screen over the nearest locker,
+//                        the way F does it (the client asks through the anchor)
+//     alt <handle> [n]  -- Alt+click by hand: the box item with that handle
+//                          into the player's inventory (OZS_Mirrors.QuickMove)
+//     altin <cls> [n]   -- Alt+click the other way: the player's own <cls>
+//                          (hands first) into the open box
+//     stackin <cls> [n]   -- the player's <cls> stack dropped onto the box's
+//                            <cls> stack: the screen's own CombineItemsClient
+//     stackout <cls> [n]  -- the box's <cls> stack onto the player's
+//     gstackin <cls> [n]  -- a loose <cls> stack at the player's feet onto
+//                            the box's; gstackout the other way round
+//     gswap <cls> <handle> [n] -- a loose <cls> dropped onto the box item with
+//                          that handle, routed as the screen would route it
 #ifndef NO_GUI
 class OZ_ProbeClientControl
 {
@@ -97,6 +110,11 @@ class OZ_ProbeClientControl
         {
             ClientTree(line);
         }
+        else if (line.IndexOf("stashopen") == 0)
+        {
+            // The stash's screen over the nearest locker, as F does.
+            StashOpen();
+        }
         else if (line.IndexOf("stash") == 0)
         {
             Stash(line);
@@ -135,6 +153,22 @@ class OZ_ProbeClientControl
                 shutting.Shut();
                 Note("=== shut " + shutting.m_Id);
             }
+        }
+        else if (line.IndexOf("alt ") == 0 || line.IndexOf("altin ") == 0)
+        {
+            // ALT+CLICK BY HAND (2026-09-26): the call the click handlers
+            // make, without the mouse.
+            QuickMove(line);
+        }
+        else if (line.IndexOf("stackin ") == 0 || line.IndexOf("stackout ") == 0 || line.IndexOf("gstackin ") == 0 || line.IndexOf("gstackout ") == 0)
+        {
+            // Two stacks either side of the boundary, through the screen's
+            // own combine call (2026-09-26).
+            Stack(line);
+        }
+        else if (line.IndexOf("gswap ") == 0)
+        {
+            GroundSwap(line);
         }
         else if (line.IndexOf("swap") == 0)
         {
@@ -599,6 +633,40 @@ class OZ_ProbeClientControl
         return best;
     }
 
+    protected void StashOpen()
+    {
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        if (!me)
+        {
+            Note("=== stashopen: no player");
+            return;
+        }
+        array<Object> around = new array<Object>();
+        GetGame().GetObjectsAtPosition(me.GetPosition(), 12, around, null);
+        OZ_StashAnchor best = null;
+        float nearest = 1000;
+        for (int i = 0; i < around.Count(); i++)
+        {
+            OZ_StashAnchor a = OZ_StashAnchor.Cast(around.Get(i));
+            if (!a)
+                continue;
+            float d = vector.Distance(a.GetPosition(), me.GetPosition());
+            if (d < nearest)
+            {
+                nearest = d;
+                best = a;
+            }
+        }
+        if (!best)
+        {
+            Note("=== stashopen: no locker within 12 m");
+            return;
+        }
+        OZS_Mirror.Ask(best);
+        OZS_Mirrors.Get().ShowWhenReady();
+        Note("=== stashopen: asked through " + best.GetType() + " netid " + best.GetNetworkIDString() + ", the panel opens when it is whole");
+    }
+
     protected void PxAsk()
     {
         OZ_StorageBox anchor = PxAnchor();
@@ -823,6 +891,166 @@ class OZ_ProbeClientControl
                 Note("  #" + m.HandleOf(e).ToString() + " " + e.GetType() + " at " + where + " tree " + OZS_Records.CountTree(e).ToString() + " netid " + e.GetNetworkIDString());
             }
         }
+    }
+
+    // ---- the gestures of 2026-09-26, by hand ------------------------------
+
+    // The player's own item of that class: the hands first, then anything
+    // worn or carried.
+    protected EntityAI Mine(PlayerBase me, string cls)
+    {
+        EntityAI held = me.GetHumanInventory().GetEntityInHands();
+        if (held && held.IsKindOf(cls))
+            return held;
+        array<EntityAI> all = new array<EntityAI>();
+        me.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, all);
+        for (int i = 0; i < all.Count(); i++)
+        {
+            EntityAI e = all.Get(i);
+            if (e && e != me && e.IsKindOf(cls))
+                return e;
+        }
+        return null;
+    }
+
+    // The first root of that class in the open box.
+    protected EntityAI InBox(OZS_Mirror m, string cls)
+    {
+        array<EntityAI> roots = new array<EntityAI>();
+        m.Roots(roots);
+        for (int i = 0; i < roots.Count(); i++)
+        {
+            if (roots.Get(i) && roots.Get(i).IsKindOf(cls))
+                return roots.Get(i);
+        }
+        return null;
+    }
+
+    protected void QuickMove(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        OZS_Mirror m = OZS_Mirrors.Get().Newest();
+        if (!me || !m || parts.Count() < 2)
+        {
+            Note("=== " + line + ": no player, no box open, or nothing named");
+            return;
+        }
+        EntityAI item = null;
+        if (parts.Get(0) == "alt")
+            item = m.ByHandle(parts.Get(1).ToInt());
+        else
+            item = Mine(me, parts.Get(1));
+        if (!item)
+        {
+            Note("=== " + line + ": no such item");
+            return;
+        }
+        string where = "loose";
+        if (item.GetHierarchyParent())
+            where = "in " + item.GetHierarchyParent().GetType();
+        bool ok = OZS_Mirrors.QuickMove(item);
+        string moved = "=== " + line + ": " + item.GetType() + " (" + where + ")";
+        moved = moved + " -> QuickMove said " + ok.ToString() + " via " + OZS_Mirrors.s_Via;
+        Note(moved);
+    }
+
+    protected void Stack(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        OZS_Mirror m = OZS_Mirrors.Get().Newest();
+        if (!me || !m || parts.Count() < 2)
+        {
+            Note("=== " + line + ": no player, no box open, or nothing named");
+            return;
+        }
+        string verb = parts.Get(0);
+        string cls = parts.Get(1);
+        EntityAI inside = InBox(m, cls);
+        if (!inside)
+        {
+            Note("=== " + line + ": no " + cls + " in the box");
+            return;
+        }
+        EntityAI outside = null;
+        if (verb == "stackin" || verb == "stackout")
+            outside = Mine(me, cls);
+        else
+            outside = NearestLoose(me.GetPosition(), cls);
+        if (!outside)
+        {
+            Note("=== " + line + ": no " + cls + " of the player's, or loose within 4 m");
+            return;
+        }
+        ItemBase taker;
+        ItemBase giver;
+        if (verb == "stackin" || verb == "gstackin")
+        {
+            taker = ItemBase.Cast(inside);
+            giver = ItemBase.Cast(outside);
+        }
+        else
+        {
+            taker = ItemBase.Cast(outside);
+            giver = ItemBase.Cast(inside);
+        }
+        if (!taker || !giver)
+        {
+            Note("=== " + line + ": not items");
+            return;
+        }
+        bool can = taker.CanBeCombined(giver);
+        string before = "taker " + OZS_Ops.Contents(taker).ToString() + " giver " + OZS_Ops.Contents(giver).ToString();
+        // THE SCREEN'S OWN CALL: the receiver's CombineItemsClient with the
+        // dropped stack, exactly as icon.c:531 makes it.
+        taker.CombineItemsClient(giver);
+        string stacked = "=== " + line + ": " + before + ", CanBeCombined " + can.ToString();
+        stacked = stacked + ", CombineItemsClient sent via " + OZS_Mirrors.s_Via;
+        Note(stacked);
+    }
+
+    protected void GroundSwap(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        OZS_Mirror m = OZS_Mirrors.Get().Newest();
+        if (!me || !m || parts.Count() < 3)
+        {
+            Note("=== " + line + ": gswap <cls> <handle>");
+            return;
+        }
+        EntityAI loose = NearestLoose(me.GetPosition(), parts.Get(1));
+        EntityAI target = m.ByHandle(parts.Get(2).ToInt());
+        if (!loose || !target)
+        {
+            Note("=== " + line + ": no loose " + parts.Get(1) + " within 4 m, or no such handle");
+            return;
+        }
+        // WHAT THE SCREEN'S OWN TESTS SAY ABOUT THE PAIR, for the record:
+        // whether vanilla would have offered the swap at all, and what its
+        // drop handler would choose. Then the same routing the handler makes.
+        InventoryLocation dst = new InventoryLocation();
+        bool can = GameInventory.CanSwapEntitiesEx(loose, target);
+        bool force = GameInventory.CanForceSwapEntitiesEx(loose, null, target, dst);
+        int tested = InventoryCombinationFlags.COMBINE_QUANTITY2 | InventoryCombinationFlags.ADD_AS_CARGO | InventoryCombinationFlags.ADD_AS_ATTACHMENT | InventoryCombinationFlags.SWAP | InventoryCombinationFlags.FSWAP | InventoryCombinationFlags.SWAP_MAGAZINE;
+        int flag = ItemManager.GetChosenCombinationFlag(loose, target, tested, dst);
+        bool sent = false;
+        if (flag == InventoryCombinationFlags.NONE)
+            sent = OZS_Mirrors.GroundSwap(loose, target);
+        else if (flag == InventoryCombinationFlags.SWAP)
+            sent = me.PredictiveSwapEntities(target, loose);
+        else if (flag == InventoryCombinationFlags.FSWAP)
+            sent = me.PredictiveForceSwapEntities(loose, target, dst);
+        // In pieces: one expression of this length is "Formula too complex"
+        // to the compiler (measured 2026-09-26).
+        string told = "=== " + line + ": " + loose.GetType() + " (loose) onto #" + parts.Get(2) + " " + target.GetType();
+        told = told + ": CanSwapEntitiesEx " + can.ToString() + ", CanForceSwapEntitiesEx " + force.ToString();
+        told = told + ", chosen flag " + flag.ToString() + " -> sent " + sent.ToString() + " via " + OZS_Mirrors.s_Via;
+        Note(told);
     }
 
     protected void Note(string text)

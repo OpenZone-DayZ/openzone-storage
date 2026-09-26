@@ -122,6 +122,16 @@ class OZS_Const
     // again into the world -- which cannot work on a proxy: the placed box is
     // never open, so the sort's first test refused every press.
     static const int OP_SORT    = 8;
+    // TWO STACKS, ONE EACH SIDE OF THE BOUNDARY (owner, 2026-09-26: "one
+    // round on the ground or in the inventory, the same round in the box").
+    // Not a move: the entity stays where it is on both sides and only the
+    // CONTENTS cross -- rounds, or quantity. IN pours the player's stack into
+    // the box's (named by handle; the giver by network id) and OUT pours the
+    // box's into the player's. The two are their own operations because the
+    // safe order of the record is opposite for each, exactly as for OP_IN
+    // and OP_OUT (design section 7): see OZS_Boundary.StackIn and StackOut.
+    static const int OP_STACK_IN  = 9;
+    static const int OP_STACK_OUT = 10;
     static const int SPLIT_HALF = 0;
     static const int SPLIT_MAX  = 1;
 

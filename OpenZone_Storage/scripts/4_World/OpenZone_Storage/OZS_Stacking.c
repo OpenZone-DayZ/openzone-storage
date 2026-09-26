@@ -63,11 +63,30 @@ modded class ItemBase
                 mine.DragCombine(this, entity2);
                 return;
             }
-            if (mine || theirs)
+            // ONE STACK IN THE BOX AND ONE OUTSIDE (owner, 2026-09-26: a
+            // round in the pocket, the same round in the box). Refused until
+            // then as "a move of a part of a stack". It is not a move of
+            // either entity: the CONTENTS cross, the way vanilla's own
+            // combine moves them, and the boundary keeps section 7's order
+            // for each direction (OZS_Boundary.StackIn / StackOut). `this`
+            // is the stack that receives and `entity2` the one dropped onto
+            // it, as vanilla has it.
+            //
+            // TWO DIFFERENT BOXES IS NOT THIS EITHER (as for the swap in
+            // OZS_Player.CrossBoundarySwap): the stack named by network id
+            // would have none, and the server would answer "no such item".
+            if (mine && theirs)
+                return;
+            if (mine)
             {
-                // One stack in the box and one outside. Crossing the boundary
-                // is a move, and a move of a part of a stack is a split; both
-                // are their own operations and neither is this one.
+                OZS_Mirrors.s_Via = "CombineItemsClient";
+                mine.StackIn(entity2, this);
+                return;
+            }
+            if (theirs)
+            {
+                OZS_Mirrors.s_Via = "CombineItemsClient";
+                theirs.StackOut(entity2, this);
                 return;
             }
         }

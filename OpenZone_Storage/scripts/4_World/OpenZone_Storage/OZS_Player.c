@@ -210,6 +210,38 @@ modded class PlayerBase
         return super.PredictiveTakeEntityAsAttachmentEx(item, slot);
     }
 
+    // "INTO MY INVENTORY, WHEREVER IT FITS" -- the screen's quick take
+    // (cargocontainer.c:829, attachments.c:279) and what Alt+click on a box
+    // item asks (owner, 2026-09-26). Vanilla's PREDICTIVE call would look
+    // for the place itself and fail on a local container; the proxy proposes
+    // one the same way and the server checks it. See OZS_Mirror.TakeInto.
+    override bool PredictiveTakeEntityToInventory(FindInventoryLocationType flags, notnull EntityAI item)
+    {
+        if (!OZS_Mirrors.None())
+        {
+            OZS_Mirror m = OZS_Mirrors.Of(item);
+            if (m)
+            {
+                OZS_Mirrors.s_Via = "ToInventory";
+                return m.TakeInto(item, this, flags);
+            }
+        }
+        return super.PredictiveTakeEntityToInventory(flags, item);
+    }
+
+    override bool PredictiveTakeEntityToTargetInventory(notnull EntityAI target, FindInventoryLocationType flags, notnull EntityAI item)
+    {
+        OZS_Mirror m = OZS_Box(target, item);
+        if (m)
+        {
+            OZS_Mirrors.s_Via = "ToTargetInventory";
+            if (OZS_Mirrors.Of(item) == m)
+                return m.TakeInto(item, target, flags);
+            return m.DragTo(item, target, InventoryLocationType.CARGO, -1, -1, -1);
+        }
+        return super.PredictiveTakeEntityToTargetInventory(target, flags, item);
+    }
+
     // The proxy either end of this move belongs to, or null when neither does.
     // One integer test away from null when no box is open.
     protected OZS_Mirror OZS_Box(EntityAI target, EntityAI item)

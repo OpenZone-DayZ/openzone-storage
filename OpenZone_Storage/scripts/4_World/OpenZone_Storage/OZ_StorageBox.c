@@ -375,10 +375,29 @@ class OZ_StorageBox : DeployableContainer_Base
         GameInventory inv = GetInventory();
         if (!inv)
             return 0;
-        n = inv.AttachmentCount();
+        // NOT WHAT IS ON ITS WAY OUT. An item deleted this frame stands in
+        // the cargo until the frame ends, and the record this count is held
+        // against has already let it go -- a stack emptied into the player's
+        // is deleted in the same frame as the bridge's answer is judged
+        // (OZS_Boundary.Credited). OZS_Records.CountTree skips the same.
+        int ac = inv.AttachmentCount();
+        for (int a = 0; a < ac; a++)
+        {
+            EntityAI att = inv.GetAttachmentFromIndex(a);
+            if (att && !att.IsSetForDeletion())
+                n++;
+        }
         CargoBase cargo = inv.GetCargo();
         if (cargo)
-            n = n + cargo.GetItemCount();
+        {
+            int cc = cargo.GetItemCount();
+            for (int c = 0; c < cc; c++)
+            {
+                EntityAI it = cargo.GetItem(c);
+                if (it && !it.IsSetForDeletion())
+                    n++;
+            }
+        }
         return n;
     }
 

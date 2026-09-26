@@ -120,10 +120,11 @@ class OZS_Proxies
             OZS_Session s = m_Sessions.Get(i);
             s.OnFrame(timeslice);
             if (s.IsDone())
-            {
                 s.End();
+            // Listed until it HAS ended: the closing write is a job of
+            // several frames (OZS_WholeJob), and End returns while it runs.
+            if (s.m_Ended)
                 m_Sessions.RemoveOrdered(i);
-            }
         }
     }
 
@@ -132,7 +133,14 @@ class OZS_Proxies
     void EndAll()
     {
         for (int i = m_Sessions.Count() - 1; i >= 0; i--)
-            m_Sessions.Get(i).End();
+        {
+            OZS_Session s = m_Sessions.Get(i);
+            s.End();
+            // No frames are coming: a closing write still running finishes
+            // here, whole, the way it did before it was paced. The mission
+            // is stopping, and one long frame costs nobody anything now.
+            s.FinishWholeNow();
+        }
         m_Sessions.Clear();
     }
 
@@ -386,6 +394,14 @@ class OZS_Session
 
     bool Join(PlayerIdentity who, out string why)
     {
+        // A SESSION ON ITS WAY OUT TAKES NOBODY: its closing write is running
+        // (OZS_WholeJob) and the box will be gone in a moment. The player is
+        // told to try again; a moment later a fresh session answers.
+        if (m_Ended || m_Wrote)
+        {
+            why = "#STR_OZS_OPENING";
+            return false;
+        }
         OZS_Watcher w = WatcherOf(who);
         if (w)
         {
@@ -498,6 +514,10 @@ class OZS_Session
     {
         if (m_Ended)
             return;
+        // The absolute letter being written, a budget's worth per frame.
+        TickWhole(OZS_Settings.Get().OpenFrameBudgetMs * 0.001);
+        if (m_Ended)
+            return;
         // The stand's fake ping: operations whose delay has passed run now,
         // in the order they came.
         while (m_Delayed.Count() > 0 && m_Delayed.Get(0).m_Due <= GetGame().GetTickTime())
@@ -547,7 +567,7 @@ class OZS_Session
             return true;
         if (m_Watchers.Count() > 0)
             return false;
-        if (m_Flying > 0)
+        if (m_Flying > 0 || m_Whole)
             return false;
         return m_Empty >= OZS_Settings.Get().ProxyIdleSeconds;
     }
@@ -570,10 +590,12 @@ class OZS_Session
     {
         if (m_Ended)
             return;
-        // WAIT FOR THE WIRE. A closing write while a turn is still in flight
-        // is two writers on one record; the queue exists so there is never
-        // more than one, and this is the last place that has to respect it.
-        if (m_Auth && m_Flying > 0)
+        // WAIT FOR THE WIRE, AND FOR A WRITE ALREADY RUNNING. A closing write
+        // while a turn is still in flight is two writers on one record; the
+        // queue exists so there is never more than one, and this is the last
+        // place that has to respect it. A repair's job running now posts,
+        // is answered, and the answer brings us back here (OnCommitted).
+        if (m_Auth && (m_Flying > 0 || m_Whole))
         {
             m_Closing = true;
             return;
@@ -595,20 +617,35 @@ class OZS_Session
             m_Wrote = true;
             OZ_Log.Warn("storage: proxy: box " + m_Id + " never finished opening; the record is left exactly as it was");
         }
-        // The closing write carries the `close` itself (see OZS_OpLetter.close),
-        // so the box is shut in the same step as its roots are written; only
-        // a session with nothing to write says `closed` on its own below.
-        bool shutByLetter = false;
+        // THE CLOSING WRITE IS A JOB (OZS_WholeJob). It carries the `close`
+        // itself (OZS_OpLetter.close), so the box is shut in the same step as
+        // its roots are written; it runs over the frames it needs, and the
+        // session ends when it has been posted -- FinishEnd, from TickWhole.
+        // Only a session with nothing to write ends here and says `closed`
+        // on its own.
         if (m_Auth && !m_Wrote)
         {
             m_Wrote = true;
-            shutByLetter = OZS_Commit.Whole(this, "the session is ending", true);
-            if (!shutByLetter)
-            {
-                OZ_Log.Error("storage: proxy: box " + m_Id + " could not be written on the way out; what it held is below");
+            if (OZS_Commit.Whole(this, "the session is ending", true))
+                return;
+            // Starting it failed the session on the way (Ready, or the file):
+            // Fail has ended it already, and there is nothing left to say.
+            if (m_Ended)
+                return;
+            OZ_Log.Error("storage: proxy: box " + m_Id + " could not be written on the way out; what it held is below");
+            if (m_Auth)
                 OZ_Log.Error("storage: proxy: " + OZS_Ops.Grid(m_Auth));
-            }
         }
+        FinishEnd(false);
+    }
+
+    // The end itself: the screens are told, the authority is let go and --
+    // when no closing letter carried the `close` -- the bridge is told the
+    // box is shut.
+    void FinishEnd(bool shutByLetter)
+    {
+        if (m_Ended)
+            return;
         m_Ended = true;
         // NOBODY IS LEFT HOLDING A BOX THAT NO LONGER EXISTS. A proxy is a
         // real container in the client's own memory, and until this message
@@ -638,10 +675,6 @@ class OZS_Session
         // (measured 2026-09-26: the bridge said open, the mod said CLOSED, and
         // the status had to be fixed by hand before a rollback would run).
         //
-        // The status is not bookkeeping for its own sake: it is what keeps an
-        // admin from writing into a record a live session is about to
-        // overwrite.
-        //
         // NOT WHEN THE CLOSING WRITE WENT OUT: that letter closes the box
         // itself, in one transaction with the roots. A separate `closed` was
         // a concurrent request that could land first, and an admin's write in
@@ -656,6 +689,76 @@ class OZS_Session
         string err;
         if (JsonFileLoader<OZS_IdLetter>.MakeData(shut, json, err, false))
             OZS_Bridge.Post(OZS_Const.ROUTE_CLOSED, json, new OZS_AckReply("the proxy session ended"));
+    }
+
+    // ---- the absolute letter, as a job -----------------------------------
+
+    // The file of an absolute letter being written, a budget's worth per
+    // frame; see OZS_WholeJob. While it runs the box must not change, so
+    // operations queue behind it (OperateAs) and the session does not end
+    // (IsDone).
+    ref OZS_WholeJob m_Whole;
+
+    // Starts one. True when it is running -- the letter is on its way, as
+    // far as every caller is concerned -- false when it could not even
+    // begin, in which case the session has failed on the way.
+    bool BeginWhole(OZS_Letter letter, string why, bool closing)
+    {
+        if (!m_Auth)
+            return false;
+        if (m_Whole)
+        {
+            OZ_Log.Warn("storage: proxy: box " + m_Id + ": a whole write is already running; another is not started (" + why + ")");
+            return false;
+        }
+        OZS_WholeJob job = new OZS_WholeJob(this, letter, why, closing);
+        if (!job.Begin())
+        {
+            OZ_Log.Error("storage: proxy: a turn of box " + m_Id + " cannot be written: " + job.m_Why);
+            Fail("the turn could not be written");
+            return false;
+        }
+        m_Whole = job;
+        OZ_Log.Info("storage: proxy: box " + m_Id + ": the record is being set to what the box holds -- " + job.m_Blobs.Count().ToString() + " root(s), " + job.m_Entities.ToString() + " entity(ies) (" + why + "); writing over the frames it needs");
+        return true;
+    }
+
+    protected void TickWhole(float budgetSec)
+    {
+        if (!m_Whole)
+            return;
+        if (!m_Whole.Step(budgetSec))
+            return;
+        OZS_WholeJob done = m_Whole;
+        m_Whole = null;
+        if (done.m_Failed)
+        {
+            OZ_Log.Error("storage: proxy: a turn of box " + m_Id + " was written short: " + done.m_Why);
+            done.Abort();
+            if (done.m_Closing && m_Auth)
+            {
+                OZ_Log.Error("storage: proxy: box " + m_Id + " could not be written on the way out; what it held is below");
+                OZ_Log.Error("storage: proxy: " + OZS_Ops.Grid(m_Auth));
+            }
+            Fail("the turn could not be written");
+            return;
+        }
+        if (!done.m_Letter.PostWritten(done.FileName(), done.m_Blobs, done.m_Entities, done.m_Closing, done.m_Note, done.m_Frames, done.m_WorkMs))
+            return;
+        if (done.m_Closing)
+            FinishEnd(true);
+    }
+
+    // The whole write at once, for the one moment no frame is coming: the
+    // mission's end.
+    void FinishWholeNow()
+    {
+        int guard = 0;
+        while (m_Whole && !m_Ended && guard < 100000)
+        {
+            TickWhole(3600.0);
+            guard++;
+        }
     }
 
     // ---- what the watchers are told --------------------------------------
@@ -963,6 +1066,33 @@ class OZS_Session
         OZS_Boundary.Handover(this, w, h.m_Item, dst, h.m_Handle);
     }
 
+    // ---- a credit waiting for the record ---------------------------------
+
+    // Set by OZS_Boundary.StackOut when WaitForRecord is on: what a stack in
+    // the box gave is out of it and its letter is on the wire, and the
+    // player's stack receives it only if that letter lands. One at a time,
+    // for the same reason as the hand-over above.
+    ref OZS_Credit m_Credit;
+
+    bool HoldCredit(OZS_Credit c)
+    {
+        if (m_Ended)
+            return false;
+        if (m_Flying <= 0 && !m_Batch)
+            return false;
+        m_Credit = c;
+        return true;
+    }
+
+    protected void ReleaseCredit()
+    {
+        if (!m_Credit)
+            return;
+        OZS_Credit c = m_Credit;
+        m_Credit = null;
+        OZS_Boundary.Credited(this, c);
+    }
+
     protected void WireTook()
     {
         if (m_SentAt <= 0)
@@ -1004,6 +1134,13 @@ class OZS_Session
                 back.No(m_Handover.m_Handle, "#STR_OZS_NOT_WRITTEN", m_Version);
             m_Handover = null;
         }
+        // AND WHAT A STACK GAVE GOES BACK INTO IT, for the same reason: the
+        // giver is still in the box and the record still counts it whole.
+        if (m_Credit)
+        {
+            OZS_Boundary.Uncredited(this, m_Credit);
+            m_Credit = null;
+        }
         m_Flying--;
         if (m_Flying < 0)
             m_Flying = 0;
@@ -1024,7 +1161,10 @@ class OZS_Session
         // (review 2026-09-26, B1). Before the comparison below either way,
         // which judges the box against a record that has let this item go.
         if (m_Flying == 0)
+        {
             ReleaseHandover();
+            ReleaseCredit();
+        }
         // A sort's letter has landed: the record is sorted, so the authority
         // can be rebuilt from it. Before the comparison below, which would
         // otherwise judge a box that is about to be emptied on purpose.
@@ -1136,6 +1276,16 @@ class OZS_Session
         // letting it go with the authority loses nothing: the next open builds
         // it again, exactly once.
         m_Handover = null;
+        // Likewise a credit: what it holds is still in the record, and goes
+        // with the authority.
+        m_Credit = null;
+        // And a whole write half done: its file is removed, the record stays
+        // at the last turn the bridge took.
+        if (m_Whole)
+        {
+            m_Whole.Abort();
+            m_Whole = null;
+        }
         // NO CLOSING WRITE ON THE WAY OUT OF A FAILURE. Whoever called Fail
         // has already decided the record cannot be put straight -- the repair
         // was tried and refused, or the bridge is gone. Trying again from here
@@ -1208,7 +1358,7 @@ class OZS_Session
         // So an operation that arrives while a turn is on the wire waits, and
         // runs when the bridge has answered. Waiting is not buffering: see
         // OZS_Waiting.
-        if (m_Flying > 0)
+        if (m_Flying > 0 || m_Whole)
         {
             // A QUEUE WITH A CEILING. Past it the client is told to start
             // again rather than the server growing a backlog it will have to
@@ -1232,7 +1382,7 @@ class OZS_Session
     // one of its letters in flight at once, which is the thing being avoided.
     void NextWaiting()
     {
-        if (m_Ended || m_Flying > 0)
+        if (m_Ended || m_Flying > 0 || m_Whole)
             return;
         while (m_Waiting.Count() > 0)
         {
