@@ -112,11 +112,11 @@ bridge sets `ADMIN_URL`. See openzone-bridge's own README.
 - [Community Framework](https://steamcommunity.com/sharedfiles/filedetails/?id=1559212036)
 - [OpenZone Core](https://steamcommunity.com/sharedfiles/filedetails/?id=3798432022)
 - **On the server, as a separate process (not a PBO):**
-  [openzone-bridge](https://github.com/OpenZone-DayZ/openzone-bridge) **0.5.0 or newer**,
+  [openzone-bridge](https://github.com/OpenZone-DayZ/openzone-bridge) **0.6.0 or newer**,
   reachable and configured with `STORAGE_XCHG_DIR` pointed at this server's
   `profiles/OpenZone/Storage/xchg` (this repo's `$profile:OpenZone/Storage/xchg`).
-  An older bridge does not know the personal stash's key and turns every stash away with
-  `bad box id`; the boxes themselves keep working.
+  An older bridge has no route for a session's turns: a box opens and its session
+  ends at the first drag, with "no link to the bridge" on the screen.
 
 ## Build and run
 
