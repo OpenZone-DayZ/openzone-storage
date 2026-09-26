@@ -44,8 +44,8 @@ modded class VicinityItemManager
     }
 
     // A PLACED BOX IS AN ANCHOR, NOT A CONTAINER, AND DOES NOT ANNOUNCE
-    // ITSELF BY PROXIMITY (design 2026-09-24 §11; owner, 2026-09-24: "у ящика
-    // все еще есть проксимити").
+    // ITSELF BY PROXIMITY (design 2026-09-24 §11; owner, 2026-09-24: "the box
+    // still has its proximity").
     //
     // In this scheme the placed box never holds anything: the contents live in
     // an authority nobody is told about, and the player is shown a proxy. Left

@@ -35,14 +35,12 @@ class OZ_StashAnchor : BuildingSuper
     }
 }
 
-// Opening a stash at this anchor. The stash itself is created at the PLAYER's
-// feet rather than at the anchor: two people at one locker then get one each,
-// under themselves, and both privacy and concurrency fall out of the geometry
-// instead of out of a trick.
-//
-// All the verb does is ask OZS_Stashes, which finds or creates the container
-// and hands it to the controller's ordinary open job -- the same job that
-// fills a storage box from SQL, because a stash is a box with a pair for a key.
+// Opening a stash at this anchor. Nothing is created in the world: the client
+// asks for the anchor it is looking at, the server pairs it with the asker
+// and streams that one player's record to their proxy (OZS_Proxy,
+// RPC_PX_OPEN). Two people at one locker get two sessions, and neither can
+// name the other's -- the pairing is made on the server from who sent the
+// message, which is where the privacy comes from.
 class OZS_ActionOpenStash : ActionInteractBase
 {
     void OZS_ActionOpenStash()
@@ -75,30 +73,27 @@ class OZS_ActionOpenStash : ActionInteractBase
         return false;
     }
 
+    // NOTHING HAPPENS ON THE SERVER FROM THE ACTION ANY MORE.
+    //
+    // The stash used to be a real container spawned under the player's feet,
+    // and this is where it was made. With the proxy it is a session like a
+    // box's: the client asks for it by the anchor it is looking at, and the
+    // server pairs that anchor with the asker (OZS_Proxy, RPC_PX_OPEN). The
+    // pairing has to happen there rather than here, because that is the one
+    // place that knows who sent the message.
     override void OnExecuteServer(ActionData action_data)
     {
-        PlayerBase player = action_data.m_Player;
-        OZ_StashAnchor anchor = OZ_StashAnchor.Cast(action_data.m_Target.GetObject());
-        if (!player || !anchor)
-            return;
-        string why;
-        if (!OZS_Stashes.Open(player, anchor, why))
-            OZS_Controller.Notify(player, why);
     }
 
-    // The player's own inventory window, the ordinary one. Half a second late
-    // on purpose: the stash is made on the server and has to reach this client
-    // before the vicinity panel can list it. The panel then fills in front of
-    // the player while the open job works, the way a box does.
+    // ASK FOR IT, AND OPEN THE SCREEN WHEN IT HAS ARRIVED.
+    //
+    // The same two lines a storage box uses. The half-second wait this used to
+    // need is gone with the container it was waiting for: nothing has to reach
+    // the client through the world any more, and `ShowWhenReady` opens the
+    // panel on the stream rather than on a timer.
     override void OnExecuteClient(ActionData action_data)
     {
-        if (GetGame() && GetGame().GetCallQueue(CALL_CATEGORY_GAMEPLAY))
-            GetGame().GetCallQueue(CALL_CATEGORY_GAMEPLAY).CallLater(OZS_ShowInventory, 500, false);
-    }
-
-    void OZS_ShowInventory()
-    {
-        if (GetGame() && GetGame().GetMission())
-            GetGame().GetMission().ShowInventory();
+        OZS_Mirror.Ask(action_data.m_Target.GetObject());
+        OZS_Mirrors.Get().ShowWhenReady();
     }
 }

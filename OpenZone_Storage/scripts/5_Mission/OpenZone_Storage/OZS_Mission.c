@@ -47,6 +47,7 @@ modded class MissionServer
             // per turn (design 2026-09-24 §7, §9).
             OZS_Proxies.Get().EndAll();
             OZS_Proxies.Reset();
+            OZS_Authority.Reset();
             OZS_Controller.Get().CloseAll();
             OZS_Controller.Reset();
         }

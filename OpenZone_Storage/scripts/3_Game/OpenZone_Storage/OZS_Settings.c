@@ -4,51 +4,56 @@
 // Validate clamps and warns rather than refusing the file.
 class OZS_Settings : OZ_ConfigBase
 {
-    // OPENING: how much of one server frame the materialisation may take, and
-    // how many entities per second may appear -- the second limit protects
-    // the clients next to the box (measured 2026-09-16: 250/s never stalled
-    // a client, one 5000-burst did).
+    // FILLING: how much of one server frame the materialisation of a box's
+    // contents into its authority may take, and how many entities per second
+    // may appear -- the second limit protects the clients next to the box
+    // (measured 2026-09-16: 250/s never stalled a client, one 5000-burst
+    // did).
     int OpenFrameBudgetMs;
     int OpenItemsPerSecond;
-    // CLOSING: how much of one frame the capture may take (0.17 ms per
-    // entity measured), and entities deleted per frame after the files are
-    // written.
-    int CloseFrameBudgetMs;
-    int CloseDeletesPerFrame;
-    // Auto-close: an open box closes after this many seconds of IDLE time.
-    // The clock restarts on the opening and on every item that goes in, out
-    // or across the box (owner 2026-09-17); distance and player events do not
-    // enter into it. When somebody is still looking at the box, the close
-    // waits for them to stop.
-    int AutoCloseSeconds;
-    // Viewers: the client heartbeat while its inventory screen shows the box,
-    // the silence after which a viewer is dropped, and the distance beyond
-    // which a viewer is dropped regardless (twice the engine's 2.5 m reach).
-    int ViewerHeartbeatSeconds;
-    int ViewerTimeoutSeconds;
-    float ViewerMaxDistance;
-    // The PERSONAL STASH is not a box in this one respect: it exists only
-    // while its owner is using it, so its idle clock is short and it also
-    // watches the distance. A box closes on idle alone because it stands
-    // where it was placed; a stash follows the player to the anchor and must
-    // not be left behind them. AutoCloseSeconds still applies to boxes.
-    int StashIdleSeconds;
-    float StashMaxDistance;
+    // FAKE PING, STAND ONLY. Milliseconds added to every operation on its
+    // way in -- the whole round trip, on one side, because the player only
+    // ever sees the moment the answer arrives. The stand and the client
+    // share a machine, so without this the box is judged at a latency no
+    // player will ever have. 0 is off, which is what a real server runs.
+    //
+    // It used to hold the OUTBOUND message back instead, and a built
+    // ScriptRPC does not survive the frame it was made in: the box stopped
+    // opening (measured 2026-09-25). An operation is a handful of numbers
+    // and keeps as long as it likes (OZS_Session.OperateAs).
+    int FakePingMs;
+    // HOLD THE ITEM UNTIL THE RECORD HAS TAKEN THE TURN. Off by default, which
+    // is the design's own choice (§7): the item is handed over in the same
+    // frame and the letter is only on its way, so a session that fails
+    // afterwards leaves the item with the player AND in the record. On, the
+    // hand-out waits for the bridge's answer -- nothing can be duplicated, and
+    // the price is one round trip per take-out (measured ~100 ms, and the wire
+    // figure in a session's status line says what it is on this server).
+    bool WaitForRecord;
     // The PROXY (design 2026-09-24). A box's contents go to one player as
     // chunked RPCs; these say how big a chunk is and how many chunks may
     // leave in one frame. ProxyIdleSeconds is how long an authoritative
     // container waits after the last watcher left -- this is about memory,
-    // not about hiding loot, so it can be far shorter than AutoCloseSeconds.
+    // not about hiding loot, so it is short.
     int ProxyRowsPerMessage;
     int ProxyMessagesPerFrame;
     int ProxyIdleSeconds;
     bool DebugLog;
 
+    // WHAT WENT ON 2026-09-26, with the old scheme: CloseFrameBudgetMs and
+    // CloseDeletesPerFrame paced a close job that captured a placed box's
+    // cargo into SQL; AutoCloseSeconds closed such a box when nobody touched
+    // it; StashIdleSeconds and StashMaxDistance did the same for a physical
+    // stash. Under the proxy the placed box never holds anything, a session
+    // ends when its last watcher leaves (ProxyIdleSeconds), and the leash
+    // that keeps a player near the box is OZS_Const.SESSION_LEASH. A file
+    // that still carries those names is read without them.
+
     private static ref OZS_Settings s_Inst;
 
     override int LatestVersion()
     {
-        return 3;
+        return 6;
     }
 
     override void LoadDefaults()
@@ -64,18 +69,6 @@ class OZS_Settings : OZ_ConfigBase
         // under 15 ms. 250/s was twice as slow for nothing; 1000/s cut it to
         // 1.5 s but produced one 54 ms server step.
         OpenItemsPerSecond = 500;
-        CloseFrameBudgetMs = 5;
-        CloseDeletesPerFrame = 50;
-        AutoCloseSeconds = 120;
-        ViewerHeartbeatSeconds = 5;
-        ViewerTimeoutSeconds = 15;
-        ViewerMaxDistance = 5;
-        // 60 s and 6 m: long enough to read a full kit over, short enough
-        // that a player who walked off does not leave a stash standing. Six
-        // metres is past the engine's 2.5 m reach and past the viewer
-        // distance, so neither of those fires first by accident.
-        StashIdleSeconds = 60;
-        StashMaxDistance = 6;
         // 40 rows per message and 4 messages a frame: the size is measured
         // (see docs/measurements/2026-09-24), the pace is 160 items a frame,
         // which puts a thousand-item box on a client inside a second without
@@ -84,26 +77,31 @@ class OZS_Settings : OZ_ConfigBase
         ProxyMessagesPerFrame = 4;
         ProxyIdleSeconds = 20;
         DebugLog = false;
+        FakePingMs = 0;
+        WaitForRecord = false;
     }
 
-    // v1 -> v2 (2026-09-23): the personal stash arrived with two knobs of its
-    // own. A file written by v1 has neither, and a missing number reads as
-    // zero rather than as a default, so they are filled here -- otherwise the
-    // first Validate would clamp them and warn about numbers the admin never
-    // wrote.
+    // A missing number reads as zero rather than as a default, so a field a
+    // version did not know is filled here -- otherwise the first Validate
+    // would clamp it and warn about a number the admin never wrote.
     override bool Migrate(int from)
     {
-        if (from < 2)
-        {
-            StashIdleSeconds = 60;
-            StashMaxDistance = 6;
-        }
         if (from < 3)
         {
             ProxyRowsPerMessage = 40;
             ProxyMessagesPerFrame = 4;
             ProxyIdleSeconds = 20;
         }
+        if (from < 4)
+        {
+            FakePingMs = 0;
+            WaitForRecord = false;
+        }
+        // v4 -> v5 (2026-09-26): the three Viewer* knobs went with the
+        // client's vicinity scan. v5 -> v6 (2026-09-26): the five knobs of
+        // the old scheme went with it (see the note above). Nothing to fill
+        // in either time; a file written earlier still carries the names,
+        // and they sit there until the next save rewrites it without them.
         Version = LatestVersion();
         return true;
     }
@@ -123,54 +121,14 @@ class OZS_Settings : OZ_ConfigBase
             OpenItemsPerSecond = 500;
             warnings++;
         }
-        if (CloseFrameBudgetMs < 1 || CloseFrameBudgetMs > 100)
+        if (FakePingMs < 0 || FakePingMs > 2000)
         {
-            OZ_Log.Warn("storage settings: CloseFrameBudgetMs " + CloseFrameBudgetMs + " is outside 1..100, using 5");
-            CloseFrameBudgetMs = 5;
+            OZ_Log.Warn("storage settings: FakePingMs " + FakePingMs + " is outside 0..2000, using 0");
+            FakePingMs = 0;
             warnings++;
         }
-        if (CloseDeletesPerFrame < 1 || CloseDeletesPerFrame > 1000)
-        {
-            OZ_Log.Warn("storage settings: CloseDeletesPerFrame " + CloseDeletesPerFrame + " is outside 1..1000, using 50");
-            CloseDeletesPerFrame = 50;
-            warnings++;
-        }
-        if (StashIdleSeconds < 10 || StashIdleSeconds > 3600)
-        {
-            OZ_Log.Warn("storage settings: StashIdleSeconds " + StashIdleSeconds + " is outside 10..3600, using 60");
-            StashIdleSeconds = 60;
-            warnings++;
-        }
-        if (StashMaxDistance < 3 || StashMaxDistance > 100)
-        {
-            OZ_Log.Warn("storage settings: StashMaxDistance " + StashMaxDistance + " is outside 3..100, using 6");
-            StashMaxDistance = 6;
-            warnings++;
-        }
-        if (AutoCloseSeconds < 10 || AutoCloseSeconds > 86400)
-        {
-            OZ_Log.Warn("storage settings: AutoCloseSeconds " + AutoCloseSeconds + " is outside 10..86400, using 120");
-            AutoCloseSeconds = 120;
-            warnings++;
-        }
-        if (ViewerHeartbeatSeconds < 1 || ViewerHeartbeatSeconds > 60)
-        {
-            OZ_Log.Warn("storage settings: ViewerHeartbeatSeconds " + ViewerHeartbeatSeconds + " is outside 1..60, using 5");
-            ViewerHeartbeatSeconds = 5;
-            warnings++;
-        }
-        if (ViewerTimeoutSeconds < ViewerHeartbeatSeconds * 2 || ViewerTimeoutSeconds > 300)
-        {
-            OZ_Log.Warn("storage settings: ViewerTimeoutSeconds " + ViewerTimeoutSeconds + " must be at least twice the heartbeat and at most 300, using " + (ViewerHeartbeatSeconds * 3));
-            ViewerTimeoutSeconds = ViewerHeartbeatSeconds * 3;
-            warnings++;
-        }
-        if (ViewerMaxDistance < 3 || ViewerMaxDistance > 50)
-        {
-            OZ_Log.Warn("storage settings: ViewerMaxDistance " + ViewerMaxDistance + " is outside 3..50, using 5");
-            ViewerMaxDistance = 5;
-            warnings++;
-        }
+        if (FakePingMs > 0)
+            OZ_Log.Warn("storage settings: FakePingMs is " + FakePingMs + " -- every operation is delayed on purpose. This is a stand setting; a live server leaves it at 0");
         if (ProxyRowsPerMessage < 1 || ProxyRowsPerMessage > 200)
         {
             OZ_Log.Warn("storage settings: ProxyRowsPerMessage " + ProxyRowsPerMessage + " is outside 1..200, using 40");
@@ -211,9 +169,8 @@ class OZS_Settings : OZ_ConfigBase
         OZ_ConfigLoader<OZS_Settings>.Load(OZS_Const.SETTINGS, OZS_Const.SETTINGS_TAG, s_Inst);
         OZ_Log.SetDebug(s_Inst.DebugLog || OZ_Log.IsDebug());
         string s = "storage settings: budget=" + s_Inst.OpenFrameBudgetMs + "ms rate=" + s_Inst.OpenItemsPerSecond + "/s";
-        s = s + " close=" + s_Inst.CloseFrameBudgetMs + "ms/" + s_Inst.CloseDeletesPerFrame + " autoclose=" + s_Inst.AutoCloseSeconds + "s";
-        s = s + " viewers=" + s_Inst.ViewerHeartbeatSeconds + "/" + s_Inst.ViewerTimeoutSeconds + "s/" + s_Inst.ViewerMaxDistance + "m";
         s = s + " proxy=" + s_Inst.ProxyRowsPerMessage + "x" + s_Inst.ProxyMessagesPerFrame + "/frame idle=" + s_Inst.ProxyIdleSeconds + "s";
+        s = s + " wait_for_record=" + s_Inst.WaitForRecord + " fake_ping=" + s_Inst.FakePingMs + "ms";
         OZ_Log.Info(s);
     }
 }

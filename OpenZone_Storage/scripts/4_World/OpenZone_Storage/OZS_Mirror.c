@@ -28,12 +28,62 @@ class OZS_Mirrors
     // id, so this is the only thing that pairs a proxy with the box in the
     // world it stands for.
     protected Object m_Asked;
+    // WHICH OF THE SCREEN'S METHODS AN OPERATION CAME IN THROUGH. Only ever
+    // read into a log line. The screen has a dozen ways of saying "move this
+    // there", and a report of the shape "I was not taking anything out" is
+    // unanswerable without knowing which one the gesture used.
+    static string s_Via = "?";
+    // THE PANEL DOES NOT NOTICE A LOCAL MOVE.
+    //
+    // A proxy is moved with `InventoryMode.LOCAL`, and the vanilla inventory
+    // learns of a container's contents changing from the engine's own
+    // inventory events -- which a local move on a client-only entity does not
+    // raise. So the server performed the swap, the proxy applied it, and the
+    // screen went on drawing the old picture: no refusal, no rebuild, nothing
+    // in any log (owner, 2026-09-25 -- "it still does not drag").
+    //
+    // The redraw itself belongs to 5_Mission, which is the only tier that can
+    // see the menu; this side just says that something changed.
+    // WHERE THE PLAYER WAS LOOKING WHILE THE BOX IS REBUILT.
+    //
+    // A resynchronisation throws away every proxy item and makes them again,
+    // so the panel rebuilds from nothing and starts at the top. In a box five
+    // hundred cells deep that costs the player their place every time somebody
+    // else touches the box. Below zero means nothing is being kept.
+    //
+    // 4_World cannot see a widget, so the number is only stored here; the
+    // screen puts it in and takes it out (OZS_ClientViewer).
+    static float s_ScrollWas = -1;
+
+    static bool s_Redraw;
+
+    static void Changed()
+    {
+        s_Redraw = true;
+    }
+
+    static bool TakeRedraw()
+    {
+        bool was = s_Redraw;
+        s_Redraw = false;
+        return was;
+    }
 
     static OZS_Mirrors Get()
     {
         if (!s_Inst)
             s_Inst = new OZS_Mirrors();
         return s_Inst;
+    }
+
+    // Mission finish on the client. Statics survive a reconnect inside one
+    // process; a mirror kept across one holds a container the world took
+    // with it (review 2026-09-26, D4).
+    static void Reset()
+    {
+        if (s_Inst)
+            s_Inst.DropAll();
+        s_Inst = null;
     }
 
     void OZS_Mirrors()
@@ -50,6 +100,19 @@ class OZS_Mirrors
     Object Asked()
     {
         return m_Asked;
+    }
+
+    // THE ONE MIRROR THERE USUALLY IS. A client holds one open box at a time
+    // in practice, and the stand's own control file needs a way to name it
+    // without knowing its id.
+    OZS_Mirror First()
+    {
+        for (int i = 0; i < m_Mirrors.Count(); i++)
+        {
+            if (m_Mirrors.Get(i))
+                return m_Mirrors.Get(i);
+        }
+        return null;
     }
 
     OZS_Mirror Find(string id)
@@ -109,15 +172,51 @@ class OZS_Mirrors
 
     void Update(float timeslice)
     {
-        if (!m_Waiting)
-            return;
-        OZS_Mirror m = Newest();
-        if (!m || !m.m_Whole)
-            return;
-        m_Waiting = false;
+        if (m_Waiting)
+        {
+            OZS_Mirror m = Newest();
+            if (!m || !m.m_Whole)
+                return;
+            m_Waiting = false;
 #ifndef NO_GUI
-        if (GetGame().GetMission())
-            GetGame().GetMission().ShowInventory();
+            if (GetGame().GetMission())
+            {
+                GetGame().GetMission().ShowInventory();
+                m_Shown = true;
+            }
+#endif
+            return;
+        }
+        Watch();
+    }
+
+    // THE PROXY LIVES EXACTLY AS LONG AS THE SCREEN THAT NEEDS IT.
+    //
+    // It used to live until the client process exited: nothing on either side
+    // ever said "let it go", so every box a player opened stayed in their
+    // vicinity panel for the rest of the session, under the box's own name.
+    // The player then had two entries called СЕРЕДНЯ СКРИНЯ, one of them a
+    // ghost -- and opening the wrong one showed an empty box (owner,
+    // 2026-09-24).
+    //
+    // The screen closing is the honest end of a session: the server is told,
+    // which lets the authority go and the box be closed, and the proxy is
+    // deleted here. The server also says `GONE` of its own accord when a
+    // session ends for any other reason.
+    protected bool m_Shown;
+
+    protected void Watch()
+    {
+#ifndef NO_GUI
+        if (!m_Shown || m_Mirrors.Count() == 0)
+            return;
+        UIManager ui = GetGame().GetUIManager();
+        if (ui && ui.IsMenuOpen(MENU_INVENTORY))
+            return;
+        m_Shown = false;
+        for (int i = 0; i < m_Mirrors.Count(); i++)
+            m_Mirrors.Get(i).Shut();
+        DropAll();
 #endif
     }
 
@@ -147,6 +246,22 @@ class OZS_Mirrors
         if (!s_Inst)
             return true;
         return s_Inst.m_Mirrors.Count() == 0;
+    }
+
+    // IS EVERY BOX ON THIS CLIENT FINISHED BEING BUILT?
+    //
+    // Asked before the screen's own state is worth saving: a box halfway
+    // through a rebuild has nothing drawn, and everything measured off the
+    // panel at that moment describes an empty column rather than the player's
+    // place in a full one.
+    bool Whole()
+    {
+        for (int i = 0; i < m_Mirrors.Count(); i++)
+        {
+            if (!m_Mirrors.Get(i).m_Whole)
+                return false;
+        }
+        return true;
     }
 
     // The proxy this entity belongs to, or null. An item nested three
@@ -250,6 +365,19 @@ class OZS_Mirrors
             }
             return true;
         }
+        if (type == OZS_Const.RPC_PX_GONE)
+        {
+            string goneId;
+            if (!ctx.Read(goneId))
+                return true;
+            // A GONE for a box this client never got to build is the end of
+            // an open that failed on the server: the screen was waiting for
+            // it, and must stop.
+            if (!OZS_Mirrors.Get().Find(goneId))
+                OZS_Mirrors.Get().Unwait();
+            OZS_Mirrors.Get().Drop(goneId);
+            return true;
+        }
         if (type == OZS_Const.RPC_PX_END)
         {
             string endId;
@@ -288,9 +416,45 @@ class OZS_Mirrors
             OZS_Mirror said = OZS_Mirrors.Get().Find(noId);
             if (said)
                 said.Refused(noHandle, noVersion, noWhy);
+            else
+                OZS_Mirrors.Get().Told(noWhy);
             return true;
         }
         return false;
+    }
+
+    // ---- a refusal with no box behind it ---------------------------------
+
+    // The open itself was turned away -- the bridge down, the box in a
+    // transition, the fill failed -- and there is no mirror to be refused
+    // through. The wait for a stream ends and the player is told why, in
+    // their own language when the reason is one of the stringtable's
+    // (review 2026-09-26, C2, C3).
+    void Told(string why)
+    {
+        OZ_Log.Warn("storage: proxy: the box could not be shown: " + why);
+        Unwait();
+        Tell(why);
+    }
+
+    void Unwait()
+    {
+        m_Waiting = false;
+    }
+
+    // A refusal, in the player's own language, where they are looking. Only
+    // the reasons written as a stringtable key are shown; the rest are our
+    // own words to ourselves.
+    static void Tell(string why)
+    {
+#ifndef NO_GUI
+        if (why == "" || why.Get(0) != "#")
+            return;
+        string text = Widget.TranslateString(why);
+        if (text == "")
+            return;
+        NotificationSystem.AddNotificationExtended(4, text, "", "set:dayz_gui_icon image:missing");
+#endif
     }
 }
 
@@ -321,6 +485,12 @@ class OZS_Mirror
     int m_Expected;
     int m_Missed;
     bool m_Whole;
+    // Did this proxy draw a guess of its own that a refusal would have to
+    // undo? A MOVE is shown at once and the server's word follows; a SWAP is
+    // not drawn at all until the server answers. Only the first kind needs the
+    // box to ask for itself again when the answer is no -- asking anyway is
+    // the blink the player sees on every refusal (owner, 2026-09-25).
+    protected bool m_Guessed;
     float m_Started;
     float m_Spent;
     // Wall time from the first chunk to the end: the stream is paced by the
@@ -351,6 +521,9 @@ class OZS_Mirror
 
     void Begin()
     {
+        // The box is about to be built from nothing. Whatever the screen has
+        // remembered of the player's place stands until it is whole again.
+        OZS_Mirrors.Changed();
         m_Started = GetGame().GetTickTime();
         m_Spent = 0;
         Man me = GetGame().GetPlayer();
@@ -420,6 +593,30 @@ class OZS_Mirror
             m_Spent = m_Spent + (GetGame().GetTickTime() - t0);
             return;
         }
+        // WHERE IT ACTUALLY LANDED. `CreateEntityInCargoEx` answers with the
+        // entity whether or not it honoured the cell: asked for 6,4 turned, in
+        // a box where 6,4 was still empty, it made the can at 6,3 -- and the
+        // next can then landed on top of it. That is why a box the client had
+        // just built from the authority, ten rows for ten items, already
+        // disagreed with the server about two of them, with nothing in either
+        // log to say so (measured 2026-09-25).
+        //
+        // The authority's layout never overlaps, so an item put exactly where
+        // it is told can never block a later one. Correcting each one the
+        // moment it is made keeps that true for the whole build.
+        if (r.lt == InventoryLocationType.CARGO && r.row >= 0)
+        {
+            InventoryLocation got = new InventoryLocation();
+            bool knows = made.GetInventory().GetCurrentInventoryLocation(got);
+            if (!knows || !Matches(got, parent, r))
+            {
+                string landed = "nowhere it will say";
+                if (knows)
+                    landed = got.GetRow().ToString() + "," + got.GetCol().ToString() + " flip " + got.GetFlip().ToString();
+                OZ_Log.Warn("storage: proxy: made " + r.cls + " for " + r.Where() + " and the engine put it at " + landed + "; moving it");
+                Place(made, r);
+            }
+        }
         Dress(made, r);
         m_Handles.Insert(r.handle);
         m_Items.Insert(made);
@@ -431,11 +628,60 @@ class OZS_Mirror
     // OnStoreLoad running where it was never meant to (§10.2).
     static void Dress(EntityAI e, OZS_Row r)
     {
+        // WHICH WAY ROUND, TOLD TO THE ITEM AND NOT ONLY TO ITS CELL.
+        //
+        // `CreateEntityInCargoEx` takes the turn as part of the PLACE, and the
+        // panel draws from the place -- so a turned rag was drawn lying across
+        // correctly. But everything that works out WHICH CELLS an item covers
+        // asks the ITEM (GameInventory.GetFlipCargo), and that stayed false.
+        // So the vanilla screen drew the rag across three columns while
+        // believing it reached three rows DOWN: a drop onto an empty cell
+        // looked to it like a drop onto whatever sat below, and it offered an
+        // exchange instead of a move. The player reads that as "I am putting
+        // it on an empty cell and it tells me the two cannot trade places"
+        // (owner, 2026-09-26).
+        if (r.lt == InventoryLocationType.CARGO && e.GetInventory())
+            e.GetInventory().SetFlipCargo(r.flip == 1);
         if (r.health >= 0)
             e.SetHealth01("", "", r.health / 100.0);
         ItemBase item = ItemBase.Cast(e);
         if (item && r.qty >= 0)
-            item.SetQuantity(r.qty, false, false);
+        {
+            // THE FOURTH ARGUMENT IS `allow_client`, AND WITHOUT IT THIS DOES
+            // NOTHING HERE.
+            //
+            //   SetQuantity(float value, bool destroy_config = true,
+            //               bool destroy_forced = false,
+            //               bool allow_client = false,
+            //               bool clamp_to_stack_max = true)
+            //
+            // A proxy lives on a client, so the default `false` made every
+            // call return without touching the item -- silently, the way this
+            // engine prefers. Every stack in the box then drew the quantity
+            // its CONFIG gives a fresh one, not the one in the record: the
+            // owner saw ammo piles counting 20, 25, 50 and 70 rounds that
+            // nobody had put there (2026-09-25).
+            item.SetQuantity(r.qty, false, false, true);
+        }
+        // THE ROUNDS ARE SET SEPARATELY, because the screen reads them
+        // separately: `QuantityConversions.GetItemQuantityText` returns
+        // `GetAmmoCount()` for a magazine and never looks at the quantity at
+        // all (quantityconversions.c:12-19). `LocalSetAmmoCount` is the
+        // client-side half of the pair; the server-side one would do nothing
+        // here.
+        Magazine mag = Magazine.Cast(e);
+        if (mag && r.ammo >= 0)
+        {
+            mag.LocalSetAmmoCount(r.ammo);
+            // READ BACK WHAT THE SCREEN WILL READ. `GetAmmoCount` is the one
+            // number the panel draws for a magazine, so asking it here is the
+            // same question the player's eyes ask -- and a setter that did
+            // nothing would otherwise be invisible until somebody counted
+            // rounds by hand.
+            int got = mag.GetAmmoCount();
+            if (got != r.ammo)
+                OZ_Log.Warn("storage: proxy: " + r.cls + " was given " + r.ammo.ToString() + " round(s) and reports " + got.ToString());
+        }
     }
 
     void End(int total, int version)
@@ -453,7 +699,7 @@ class OZS_Mirror
         if (m_Missed > 0)
             s = s + ", " + m_Missed.ToString() + " REFUSED BY THIS CLIENT";
         OZ_Log.Info(s);
-        m_OnChanged.Invoke(this);
+        Announce();
     }
 
     // ---- the server's word -----------------------------------------------
@@ -464,7 +710,7 @@ class OZS_Mirror
         if (what == OZS_Const.CH_GONE)
         {
             Forget(r.handle, true);
-            m_OnChanged.Invoke(this);
+            Announce();
             return;
         }
         if (what == OZS_Const.CH_ADDED)
@@ -474,20 +720,38 @@ class OZS_Mirror
             // either way, so the two can never drift apart.
             Forget(r.handle, true);
             Add(r);
-            m_OnChanged.Invoke(this);
+            Announce();
             return;
         }
         if (what == OZS_Const.CH_MOVED)
         {
             EntityAI e = ByHandle(r.handle);
+            // THE LAST SILENT STRETCH: what the server said, and what the
+            // proxy did about it. A swap the server performed and the screen
+            // never showed left no trace at all on this side -- no refusal, no
+            // rebuild, nothing to tell "the message never came" from "it came
+            // and changed nothing" (owner, 2026-09-25).
+            string told = "#" + r.handle.ToString() + " " + r.cls + " to " + r.Where();
             if (!e)
             {
+                OZ_Log.Dbg("storage: proxy: told " + told + ", which this proxy does not have; adding it");
                 Add(r);
-                m_OnChanged.Invoke(this);
+                Announce();
                 return;
             }
-            Place(e, r);
-            m_OnChanged.Invoke(this);
+            OZ_Log.Dbg("storage: proxy: told " + told);
+            m_Guessed = false;
+            // A CHANGE FROM THE AUTHORITY IS NOT A GUESS. When the proxy
+            // cannot do what the server did, the two are out of step by
+            // definition, and the only honest answer is to ask for the box
+            // again -- silently keeping the old picture is what let the screen
+            // show the cans unswapped while both logs said they had swapped.
+            if (!Place(e, r))
+            {
+                Resync();
+                return;
+            }
+            Announce();
             return;
         }
         if (what == OZS_Const.CH_QTY)
@@ -495,9 +759,18 @@ class OZS_Mirror
             EntityAI q = ByHandle(r.handle);
             if (q)
                 Dress(q, r);
-            m_OnChanged.Invoke(this);
+            Announce();
             return;
         }
+    }
+
+    // One change, one repaint. Every branch above ended with the same pair of
+    // calls -- the panel's own redraw and this box's listeners -- and a
+    // scripted edit had already doubled one of them in every branch.
+    void Announce()
+    {
+        OZS_Mirrors.Changed();
+        m_OnChanged.Invoke(this);
     }
 
     // The authority says this item is here. The proxy is moved to match --
@@ -515,13 +788,132 @@ class OZS_Mirror
                 return false;
         }
         InventoryLocation src = new InventoryLocation();
-        e.GetInventory().GetCurrentInventoryLocation(src);
+        if (!e.GetInventory().GetCurrentInventoryLocation(src))
+            return false;
+        // ALREADY THERE IS ALREADY DONE. Asking the engine to move an item to
+        // the cell it is already in returns false, and most changes a proxy is
+        // told are the echo of a move it made itself a moment ago.
+        if (Matches(src, parent, r))
+            return true;
         InventoryLocation dst = new InventoryLocation();
         if (r.lt == InventoryLocationType.ATTACHMENT)
             dst.SetAttachment(parent, e, r.slot);
         else
             dst.SetCargo(parent, e, 0, r.row, r.col, r.flip == 1);
-        return e.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
+        // THE PLACE IS EMPTIED BEFORE IT IS ASKED FOR. A move onto a cell
+        // another item stands on answers true and does nothing -- measured in
+        // the same client log where a move to an EMPTY cell reported itself
+        // correctly, so it is the taken cell that the engine refuses, not the
+        // reading that is unreliable (2026-09-25). Whoever stands there is
+        // parked out of the way first; a swap always brings that item's own
+        // change in the same burst, so the parking place is never drawn.
+        if (r.lt == InventoryLocationType.CARGO && r.row >= 0)
+            Vacate(parent, e, r);
+        bool took = e.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
+        // WHERE IT ACTUALLY WENT, NOT WHAT THE CALL SAID. `TakeToDst` has been
+        // seen to answer true and leave the item where it was, and on a drop
+        // onto a TAKEN cell it can leave two items lying over one another: the
+        // panel then draws one of them and the other is gone from the screen
+        // while still holding its cells, so nothing can be put there either.
+        // That is what the owner saw as "the second item disappears and I
+        // cannot use its cell" (2026-09-25).
+        InventoryLocation now = new InventoryLocation();
+        bool read = e.GetInventory().GetCurrentInventoryLocation(now);
+        bool landed = false;
+        if (read)
+            landed = Matches(now, parent, r);
+        // THE SAME WITNESS THE SERVER'S `Put` HAS, ON THIS SIDE TOO. Both
+        // boxes logged "told #2 to 6,4" and neither complained, yet the client
+        // still had the two cans the way round they were before: the proxy
+        // reported a move it had not made, and there was nothing in the log
+        // to say so (measured 2026-09-25). What was asked, what the call
+        // answered, where the item really is.
+        if (!landed)
+        {
+            string at = "unreadable";
+            if (read)
+                at = now.GetRow().ToString() + "," + now.GetCol().ToString() + " flip " + now.GetFlip().ToString();
+            string want = r.row.ToString() + "," + r.col.ToString() + " flip " + (r.flip == 1).ToString();
+            OZ_Log.Warn("storage: proxy: " + r.cls + " would not go to " + want + " (the move said " + took.ToString() + "); it is at " + at);
+        }
+        return landed;
+    }
+
+    // Move whoever stands on the rectangle this item is about to occupy.
+    void Vacate(EntityAI parent, EntityAI e, OZS_Row r)
+    {
+        int w;
+        int h;
+        if (!OZS_Ops.SizeOf(e, w, h))
+            return;
+        // `SizeOf` answers for the way the item lies NOW. The row names the
+        // way it is going to lie, and a can turned the other way covers a
+        // different rectangle -- which is the pair the owner found broken:
+        // two items turned the same way exchanged places, two turned
+        // differently did not (2026-09-25).
+        bool now = OZS_Ops.Flipped(e);
+        bool then = r.flip == 1;
+        if (now != then)
+        {
+            int turned = w;
+            w = h;
+            h = turned;
+        }
+        for (int row = r.row; row < r.row + h; row++)
+        {
+            for (int col = r.col; col < r.col + w; col++)
+            {
+                EntityAI sitting = OZS_Ops.Occupant(parent, row, col, e);
+                if (!sitting)
+                    continue;
+                InventoryLocation from = new InventoryLocation();
+                if (!sitting.GetInventory().GetCurrentInventoryLocation(from))
+                    continue;
+                InventoryLocation park = new InventoryLocation();
+                if (!OZS_Ops.Somewhere(parent, sitting, r.row, r.col, w, h, park))
+                    continue;
+                sitting.GetInventory().TakeToDst(InventoryMode.LOCAL, from, park);
+            }
+        }
+    }
+
+    // Is this location the one the row describes?
+    static bool Matches(InventoryLocation il, EntityAI parent, OZS_Row r)
+    {
+        if (il.GetParent() != parent)
+            return false;
+        if (il.GetType() != r.lt)
+            return false;
+        if (r.lt == InventoryLocationType.ATTACHMENT)
+            return il.GetSlot() == r.slot;
+        if (r.lt == InventoryLocationType.CARGO)
+        {
+            if (il.GetRow() != r.row)
+                return false;
+            if (il.GetCol() != r.col)
+                return false;
+            // AND THE SAME WAY ROUND. A cell is not a place on its own: an
+            // item lying turned covers a different rectangle, so a proxy that
+            // accepts "right cell, wrong orientation" believes it agrees with
+            // the authority while the two boxes have different shapes in them.
+            // The can was the only item in the test that flips, and the can
+            // was the one that went out of step (owner, 2026-09-25).
+            bool turned = il.GetFlip();
+            bool wanted = r.flip == 1;
+            return turned == wanted;
+        }
+        return true;
+    }
+
+    // Ask the server for this box from the beginning. The authority is the
+    // truth; when the proxy's own guess was wrong, rebuilding from it is the
+    // only way back to agreement, and one rebuild is cheaper than a picture
+    // the player cannot trust.
+    void Resync()
+    {
+        if (!m_Anchor)
+            return;
+        Ask(m_Anchor);
     }
 
     // ---- what the screen asks of the server ------------------------------
@@ -552,9 +944,72 @@ class OZS_Mirror
         Send(OZS_Const.OP_COMBINE, handle, other, 0, 0, InventoryLocationType.CARGO, -1, -1, -1, 0);
     }
 
-    void Swap(int handle, int other)
+    // TIDY THE WHOLE BOX. It names no item, so every argument is the empty
+    // one; the server reads the layout it wants off the planner.
+    void Sort()
     {
-        Send(OZS_Const.OP_SWAP, handle, other, 0, 0, InventoryLocationType.CARGO, -1, -1, -1, 0);
+        Send(OZS_Const.OP_SORT, 0, 0, 0, 0, InventoryLocationType.CARGO, -1, -1, -1, 0);
+    }
+
+    // THE PLACE THE SCREEN CHOSE FOR THE DISPLACED ITEM TRAVELS WITH THE
+    // OPERATION. Vanilla's forced swap is `ForceSwapEntities(item1, item2,
+    // item2_dst)` -- the screen works out where the item being replaced
+    // should go and hands it over. Throwing that argument away and letting
+    // the server pick is why a bandage dropped on the middle of a rifle
+    // landed on the rifle's CORNER: the only places the server knew were the
+    // two root cells (owner, 2026-09-25). `row` below -1 means "the screen
+    // did not name one", which is the ordinary swap.
+    // THE CELL THE PLAYER AIMED AT TRAVELS TOO, IN `net`.
+    //
+    // An exchange used to carry no cell at all, so the only place the server
+    // could put the dragged item was the OTHER ITEM'S ROOT -- and a can
+    // dropped on the middle of a rifle jumped to the rifle's corner (owner,
+    // 2026-09-25: "you move the item by its root and put it on a root"). For a
+    // swap the two network id halves carry no network id -- there is none
+    // inside a box -- so they carry the aimed row and column instead. Below
+    // zero means the screen did not tell us, which is every swap the panel
+    // decided on by itself.
+    void Swap(int handle, int other, int aimRow, int aimCol, int lt, int slot, int row, int col, int flip)
+    {
+        Send(OZS_Const.OP_SWAP, handle, other, aimRow, aimCol, lt, slot, row, col, flip);
+    }
+
+    // ONE STACK BECOMES TWO, BOTH INSIDE THIS BOX.
+    //
+    // `into` is the container the new stack goes in -- the box itself, or
+    // something standing in it. The kind says WHICH of vanilla's two splits
+    // the screen asked for; see OZS_Const.SPLIT_HALF.
+    //
+    // Nothing is guessed on this side and nothing is drawn ahead of the
+    // answer: a split makes an entity that only the authority can make, so
+    // there is nothing for a proxy to guess AT. The new stack arrives as an
+    // ordinary addition a moment later.
+    void Split(EntityAI item, EntityAI into, int kind, int lt, int slot, int row, int col, int flip)
+    {
+        int handle = HandleOf(item);
+        if (handle == 0)
+            return;
+        int where = 0;
+        if (into && into != m_Box)
+        {
+            where = HandleOf(into);
+            if (where == 0)
+                return;
+        }
+        Send(OZS_Const.OP_SPLIT, handle, where, kind, 0, lt, slot, row, col, flip);
+    }
+
+    // An item of the player's own trades places with one in the box. The two
+    // are named in different words on purpose: the one inside has no network
+    // id to give, and the one outside has no handle in this box's record.
+    void Across(EntityAI mine, int handle)
+    {
+        if (!mine)
+            return;
+        int low;
+        int high;
+        mine.GetNetworkID(low, high);
+        Send(OZS_Const.OP_XSWAP, handle, 0, low, high, InventoryLocationType.CARGO, -1, -1, -1, 0);
     }
 
     // An item of the player's own goes in. It is named by its NETWORK id,
@@ -577,6 +1032,9 @@ class OZS_Mirror
         Man me = GetGame().GetPlayer();
         if (!me)
             return;
+        string asking = "op " + op.ToString() + " #" + handle.ToString() + "/" + other.ToString();
+        asking = asking + " lt " + lt.ToString() + " slot " + slot.ToString() + " at " + row.ToString() + "," + col.ToString();
+        OZ_Log.Dbg("storage: proxy: asking " + asking + " via " + OZS_Mirrors.s_Via);
         ScriptRPC rpc = new ScriptRPC();
         OZS_Wire.WriteOp(rpc, m_Id, op, handle, other, netLow, netHigh, lt, slot, row, col, flip, m_Version);
         rpc.Send(me, OZS_Const.RPC_PX_OP, true, null);
@@ -645,6 +1103,29 @@ class OZS_Mirror
         return false;
     }
 
+    // WHICH WAY ROUND THE ITEM IS GOING, asked of the item and not only of the
+    // place.
+    //
+    // The turn lives on the ITEM's inventory (GameInventory.SetFlipCargo), and
+    // vanilla's own MakeDstForSwap reads it from there -- "the flip comes from
+    // the item that is moving, never from the location it is moving into".
+    // A drop carries it in the destination only once the item has been PUT
+    // somewhere turned; a player who turns it in mid-drag and drops it
+    // straight into the box hands us a destination with no flip at all, so we
+    // wrote the item down as upright while their screen drew it lying across.
+    // The two pictures then disagreed about which cells it covers, and every
+    // drop near it was refused for reasons that made no sense on screen
+    // (owner, 2026-09-26: "turn it without putting it down first, and it
+    // counts as vertical").
+    protected int FlipOf(EntityAI item, InventoryLocation dst)
+    {
+        if (dst && dst.GetFlip())
+            return 1;
+        if (item && item.GetInventory() && item.GetInventory().GetFlipCargo())
+            return 1;
+        return 0;
+    }
+
     protected bool Inside(EntityAI item, InventoryLocation dst)
     {
         int handle = HandleOf(item);
@@ -653,17 +1134,58 @@ class OZS_Mirror
         int into = 0;
         if (dst.GetParent() != m_Box)
             into = HandleOf(dst.GetParent());
-        int flip = 0;
-        if (dst.GetFlip())
-            flip = 1;
+        int flip = FlipOf(item, dst);
+        // A CELL SOMETHING ELSE IS STANDING ON IS NOT A PLACE TO DROP.
+        //
+        // The engine will happily put one item on top of another inside a
+        // client-local container: both then hold the same cells, the panel
+        // draws whichever it meets first, and the other is GONE from the
+        // screen while still occupying its cells -- so nothing can be put
+        // there either. The owner hit it twice in a row, with a can and then
+        // with a rifle (2026-09-25). The server refuses such a move anyway, so
+        // the guess was never going to survive; refusing it here means nothing
+        // moves and nothing disappears.
+        // A DROP ONTO A CELL SOMEBODY IS STANDING ON IS A SWAP. That is what
+        // it means in the vanilla inventory, and the screen would ask
+        // `CanSwapEntities` about it -- a native that refuses everything in a
+        // container the engine has never been told about, so for a box the
+        // screen never offers the swap at all and falls back to a plain move
+        // onto a taken cell. The meaning is recognised from the CELL instead,
+        // and sent as what it is. The server decides which of the two vanilla
+        // swaps applies and may still refuse; the proxy draws nothing until it
+        // answers, because a swap guessed here would take two moves to undo.
+        if (dst.GetType() == InventoryLocationType.CARGO)
+        {
+            // WHOEVER IS UNDER THE ITEM'S WHOLE BODY, not just under the
+            // cursor. A bandage dropped with its head on a free cell and its
+            // tail over a can is a swap with the CAN; asking only about the
+            // first cell sent it as a plain move and the can was pushed out.
+            // In the orientation it is being DROPPED in, not the one it is
+            // lying in now -- see OZS_Ops.SizeFor.
+            EntityAI sitting = OZS_Ops.InTheWay(dst.GetParent(), item, dst.GetRow(), dst.GetCol(), flip);
+            if (sitting)
+            {
+                int sits = HandleOf(sitting);
+                if (sits == 0)
+                    return true;
+                // The cell under the item's own top-left corner, which is
+                // where the player let go -- not the corner of whatever is
+                // standing there.
+                Swap(handle, sits, dst.GetRow(), dst.GetCol(), InventoryLocationType.CARGO, -1, -1, -1, 0);
+                return true;
+            }
+        }
         // The picture first, the word from the server after. The proxy may be
         // wrong here and the server will say so (§5).
         OZS_Row want = new OZS_Row();
         want.Set(handle, into, dst.GetType(), dst.GetSlot(), dst.GetRow(), dst.GetCol(), flip, item.GetType());
-        Place(item, want);
+        if (!Place(item, want))
+            return true;
+        m_Guessed = true;
         Move(handle, into, dst.GetType(), dst.GetSlot(), dst.GetRow(), dst.GetCol(), flip);
         return true;
     }
+
 
     // THE PLACE THE PLAYER DROPPED IT TRAVELS WITH THE OPERATION. `dst` is
     // already exactly what the vanilla screen computed -- the backpack they
@@ -675,9 +1197,7 @@ class OZS_Mirror
         int handle = HandleOf(item);
         if (handle == 0)
             return false;
-        int flip = 0;
-        if (dst.GetFlip())
-            flip = 1;
+        int flip = FlipOf(item, dst);
         Out(handle, dst.GetParent(), dst.GetType(), dst.GetSlot(), dst.GetRow(), dst.GetCol(), flip);
         return true;
     }
@@ -687,9 +1207,7 @@ class OZS_Mirror
         int into = 0;
         if (dst.GetParent() != m_Box)
             into = HandleOf(dst.GetParent());
-        int flip = 0;
-        if (dst.GetFlip())
-            flip = 1;
+        int flip = FlipOf(item, dst);
         In(item, into, dst.GetType(), dst.GetSlot(), dst.GetRow(), dst.GetCol(), flip);
         return true;
     }
@@ -729,13 +1247,49 @@ class OZS_Mirror
     }
 
     // Two items changing places, both inside this proxy.
+    // An ordinary swap: equal footprints, each into the other's place, and
+    // the screen names no destination because none is needed.
     bool DragSwap(EntityAI a, EntityAI b)
     {
         int ha = HandleOf(a);
         int hb = HandleOf(b);
         if (ha == 0 || hb == 0)
             return false;
-        Swap(ha, hb);
+        // NO CELL IS CARRIED, AND VANILLA CARRIES NONE EITHER. `MakeDstForSwap`
+        // gives each item the OTHER one's location and its own orientation
+        // (itemmanager.c); the point the cursor was over never enters it. A
+        // cell was carried here for a while, read off the screen, and it was
+        // wrong -- measured from the container's root widget, which in this
+        // mod's panel holds a title, a search field and buttons above the
+        // grid, so a drop aimed at row 3 came out as row 10 (2026-09-25).
+        Swap(ha, hb, -1, -1, InventoryLocationType.CARGO, -1, -1, -1, 0);
+        return true;
+    }
+
+    // A forced swap: `a` takes `b`'s place and `b` goes where the SCREEN said,
+    // which is the whole difference from the one above.
+    bool DragForceSwap(EntityAI a, EntityAI b, InventoryLocation forB)
+    {
+        int ha = HandleOf(a);
+        int hb = HandleOf(b);
+        if (ha == 0 || hb == 0)
+            return false;
+        // THE SCREEN'S PLACE IS ONLY WORTH TAKING WHEN IT IS IN THIS BOX.
+        //
+        // Dropping a small item on a rifle makes the vanilla panel offer a
+        // forced swap whose place for the rifle is a RESERVED SLOT ON THE
+        // PLAYER: it does not know the box has weapon slots of its own, so it
+        // looks where it can and finds your back. A swap inside a box must not
+        // fling anything out of it (owner, 2026-09-25), so that answer is
+        // dropped -- and nothing is put in its place. The operation goes with
+        // NO place named, and the server, which is the only side that may
+        // decide, finds one inside the box.
+        if (!forB || OZS_Mirrors.At(forB) != this)
+            return DragSwap(a, b);
+        // fall through with the screen's own place for the displaced item, in
+        // the orientation `b` is actually in (see FlipOf).
+        int flip = FlipOf(b, forB);
+        Swap(ha, hb, -1, -1, forB.GetType(), forB.GetSlot(), forB.GetRow(), forB.GetCol(), flip);
         return true;
     }
 
@@ -755,7 +1309,31 @@ class OZS_Mirror
     void Refused(int handle, int version, string why)
     {
         OZ_Log.Warn("storage: proxy: box " + m_Id + " refused #" + handle.ToString() + " (" + why + "), the server is at v" + version.ToString());
-        m_OnChanged.Invoke(this);
+        // THE PLAYER IS TOLD, NOT THE LOG. A refusal nobody sees is a box that
+        // "just does not work": the owner dropped a bandage on a rifle, the
+        // right thing happened -- nothing -- and there was no way to tell that
+        // from a broken screen (2026-09-25). Only the reasons written as a
+        // stringtable key are shown; the rest are our own words to ourselves.
+        Say(why);
+        // THE PROXY GUESSED AND THE SERVER SAID NO. Whatever the proxy drew
+        // for that operation is now a picture of a box that does not exist,
+        // and there is no undo: the only way back to agreement is to ask the
+        // authority again. Refusals are rare; a wrong picture the player keeps
+        // acting on is not.
+        //
+        // But only when it DID guess. A refused swap leaves nothing to undo.
+        if (m_Guessed)
+        {
+            m_Guessed = false;
+            Resync();
+        }
+        Announce();
+    }
+
+    // A refusal, in the player's own language, where they are looking.
+    protected void Say(string why)
+    {
+        OZS_Mirrors.Tell(why);
     }
 
     // ---- handles ---------------------------------------------------------
@@ -786,12 +1364,21 @@ class OZS_Mirror
     {
         for (int i = m_Handles.Count() - 1; i >= 0; i--)
         {
+            EntityAI e = m_Items.Get(i);
+            // A row whose entity the engine already took -- a child deleted
+            // with its container -- goes whenever the table is walked
+            // (review 2026-09-26, D5).
+            if (!e)
+            {
+                m_Handles.RemoveOrdered(i);
+                m_Items.RemoveOrdered(i);
+                continue;
+            }
             if (m_Handles.Get(i) != handle)
                 continue;
-            EntityAI e = m_Items.Get(i);
             m_Handles.RemoveOrdered(i);
             m_Items.RemoveOrdered(i);
-            if (andDelete && e)
+            if (andDelete)
                 GetGame().ObjectDelete(e);
         }
     }

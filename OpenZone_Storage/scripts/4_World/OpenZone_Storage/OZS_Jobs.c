@@ -1,308 +1,13 @@
-// The two transitions of a box as jobs that run a slice per frame and wait
-// for one bridge reply each (design 2026-09-19, sections 3.1 and 3.2).
+// The fill of an authority as a job that runs a slice per frame and waits
+// for one bridge reply (design 2026-09-19, section 3.2; proxy design
+// 2026-09-24): ask the bridge, read the cache it names root by root at the
+// item rate, build each root local into the unannounced container. A root
+// the engine cannot read is deleted with everything this open created so
+// far, parked with the bridge, and the open is asked again; a half-restored
+// box is never left standing.
 //
-// Close: write the wire file within the frame budget, tell the bridge,
-// wait for its answer, and only then delete the entities -- the engine's
-// cargo is the truth until SQL has the box. Refused or unanswered: the file
-// goes and the box stays open with everything in it.
-//
-// Open: ask the bridge, read the cache it names root by root at the item
-// rate, publish each root once. A root the engine cannot read is deleted
-// with everything this open created so far, parked with the bridge, and
-// the open is asked again; a half-restored box is never left standing.
-
-class OZS_CloseJob
-{
-    static const int PHASE_CAPTURE = 0;
-    static const int PHASE_WAIT    = 1;
-    static const int PHASE_DELETE  = 2;
-    static const int PHASE_DONE    = 3;
-
-    protected OZ_StorageBox m_Box;
-    protected ref array<EntityAI> m_Roots;
-    protected ref OZS_StoreWriter m_Writer;
-    protected string m_Who;
-    protected string m_Uid;
-    protected string m_Why;
-    protected int m_Phase;
-    protected int m_Next;
-    protected int m_Entities;
-    protected int m_Deleted;
-    protected int m_CaptureFrames;
-    protected int m_DeleteFrames;
-    protected float m_CaptureMs;
-    protected float m_DeleteMs;
-    protected float m_MaxStepMs;
-    protected float m_Posted;
-    protected float m_WaitMs;
-    protected int m_Version;
-    protected bool m_Sorted;
-    protected bool m_Reopen;
-    protected ref array<int> m_NewRows;
-    protected ref array<int> m_NewCols;
-    protected bool m_Answered;
-    protected bool m_Accepted;
-    protected string m_Refusal;
-
-    // `why` is the bridge's word for the close: player, idle, sort, boot.
-    void OZS_CloseJob(OZ_StorageBox box, string who, string uid, string why, bool sorted = false)
-    {
-        m_Box = box;
-        m_Who = who;
-        m_Uid = uid;
-        m_Why = why;
-        m_Roots = new array<EntityAI>();
-        m_Phase = PHASE_CAPTURE;
-        m_Sorted = sorted;
-        m_Reopen = sorted;
-        m_NewRows = new array<int>();
-        m_NewCols = new array<int>();
-    }
-
-    OZ_StorageBox Box()
-    {
-        return m_Box;
-    }
-
-    bool IsFor(OZ_StorageBox box)
-    {
-        return m_Box == box;
-    }
-
-    bool Begin(out string why)
-    {
-        m_Box.OZS_SetState(OZS_Const.STATE_CLOSING);
-        m_Box.OZS_GetRoots(m_Roots);
-        m_Entities = 0;
-        for (int i = 0; i < m_Roots.Count(); i++)
-            m_Entities = m_Entities + OZS_Records.CountTree(m_Roots.Get(i));
-        if (m_Sorted)
-        {
-            int placed = OZS_Sorter.Plan(m_Box, m_Roots, m_NewRows, m_NewCols);
-            OZ_Log.Dbg("storage: box " + m_Box.OZS_GetId() + " sort plan: " + placed.ToString() + " of " + m_Roots.Count().ToString() + " roots placed");
-        }
-        m_Next = 0;
-        if (m_Roots.Count() == 0)
-            return true;
-        m_Writer = new OZS_StoreWriter();
-        if (!m_Writer.Open(m_Box, m_Roots.Count(), m_Entities, why))
-        {
-            m_Writer = null;
-            m_Box.OZS_SetState(OZS_Const.STATE_OPEN);
-            return false;
-        }
-        return true;
-    }
-
-    bool Tick(float budgetSec, int deleteBudget)
-    {
-        if (!m_Box)
-        {
-            Abandon("the box is gone");
-            return true;
-        }
-        if (m_Phase == PHASE_DONE)
-            return true;
-        float frameStart = GetGame().GetTickTime();
-        float now = frameStart;
-
-        if (m_Phase == PHASE_CAPTURE)
-        {
-            while (m_Next < m_Roots.Count())
-            {
-                if (m_Sorted)
-                    m_Writer.WriteRoot(m_Roots.Get(m_Next), m_NewRows.Get(m_Next), m_NewCols.Get(m_Next));
-                else
-                    m_Writer.WriteRoot(m_Roots.Get(m_Next));
-                m_Next++;
-                now = GetGame().GetTickTime();
-                if (now - frameStart >= budgetSec)
-                    break;
-            }
-            m_CaptureFrames++;
-            Account(frameStart, now, m_CaptureMs);
-            if (m_Next < m_Roots.Count())
-                return false;
-            PostClose();
-            return m_Phase == PHASE_DONE;
-        }
-
-        if (m_Phase == PHASE_WAIT)
-        {
-            if (!m_Answered)
-            {
-                if (now - m_Posted <= OZS_Const.REPLY_TIMEOUT)
-                    return false;
-                OnBridge(false, "no answer within " + OZS_Const.REPLY_TIMEOUT.ToString() + " s", 0);
-            }
-            m_WaitMs = (now - m_Posted) * 1000;
-            if (!m_Accepted)
-            {
-                Revert("the bridge did not take the close: " + m_Refusal);
-                return true;
-            }
-            string s = "storage: box " + m_Box.OZS_GetId() + " closing by " + m_Who + ": " + m_Roots.Count().ToString() + " items";
-            s = s + " (" + m_Entities.ToString() + " entities) written in " + m_CaptureFrames.ToString() + " frame(s), " + R1(m_CaptureMs) + " ms";
-            s = s + "; the bridge holds version " + m_Version.ToString() + " after " + R1(m_WaitMs) + " ms";
-            OZ_Log.Info(s);
-            m_Phase = PHASE_DELETE;
-            m_Next = 0;
-            return false;
-        }
-
-        int done = 0;
-        while (m_Next < m_Roots.Count() && done < deleteBudget)
-        {
-            EntityAI e = m_Roots.Get(m_Next);
-            m_Next++;
-            if (!e)
-                continue;
-            int n = OZS_Records.CountTree(e);
-            GetGame().ObjectDelete(e);
-            done = done + n;
-            m_Deleted = m_Deleted + n;
-        }
-        m_DeleteFrames++;
-        Account(frameStart, GetGame().GetTickTime(), m_DeleteMs);
-        if (m_Next < m_Roots.Count())
-            return false;
-        Finish();
-        return true;
-    }
-
-    // The file is complete: tell the bridge and wait.
-    protected void PostClose()
-    {
-        string fileName = "";
-        string stamp = OZS_Store.Stamp();
-        if (m_Writer)
-        {
-            string err;
-            if (!m_Writer.Finish(err))
-            {
-                Revert("the file could not be finished: " + err);
-                return;
-            }
-            fileName = m_Writer.Name();
-            stamp = m_Writer.Stamp();
-        }
-        OZS_CloseLetter letter = new OZS_CloseLetter();
-        letter.id = m_Box.OZS_GetId();
-        letter.stamp = stamp;
-        letter.file = fileName;
-        letter.roots = m_Roots.Count();
-        letter.entities = m_Entities;
-        letter.by = m_Uid;
-        letter.why = m_Why;
-        string json;
-        string jerr;
-        if (!JsonFileLoader<OZS_CloseLetter>.MakeData(letter, json, jerr, false))
-        {
-            Revert("the close letter cannot be written: " + jerr);
-            return;
-        }
-        m_Answered = false;
-        m_Accepted = false;
-        m_Refusal = "";
-        m_Posted = GetGame().GetTickTime();
-        m_Phase = PHASE_WAIT;
-        OZS_Bridge.Post(OZS_Const.ROUTE_CLOSE, json, new OZS_CloseReply(this));
-    }
-
-    // From the reply, or from the timeout above.
-    void OnBridge(bool ok, string why, int version)
-    {
-        if (m_Phase != PHASE_WAIT)
-            return;
-        m_Answered = true;
-        m_Accepted = ok;
-        m_Refusal = why;
-        m_Version = version;
-    }
-
-    // Mission finish: a deletion under way completes now (SQL already holds
-    // the box); a close still writing or still waiting is undone, the box
-    // stays open in the engine's own save and the boot rules close it.
-    void Flush()
-    {
-        if (m_Phase == PHASE_DELETE)
-        {
-            for (int guard = 0; guard < 4; guard++)
-            {
-                if (Tick(1000000, 1000000))
-                    return;
-            }
-            return;
-        }
-        if (m_Phase == PHASE_CAPTURE || m_Phase == PHASE_WAIT)
-            Revert("mission finish");
-    }
-
-    protected void Account(float from, float to, inout float total)
-    {
-        float ms = (to - from) * 1000;
-        total = total + ms;
-        if (ms > m_MaxStepMs)
-            m_MaxStepMs = ms;
-    }
-
-    // The close did not happen: the file goes (the bridge never read it
-    // into SQL, or refused it; a file the bridge already promoted into the
-    // cache no longer has this name and stays), the box keeps its cargo.
-    protected void Revert(string why)
-    {
-        if (m_Writer)
-        {
-            why = why + " (file " + m_Writer.Name() + ")";
-            m_Writer.Abort();
-        }
-        m_Phase = PHASE_DONE;
-        string id = "";
-        if (m_Box)
-        {
-            id = m_Box.OZS_GetId();
-            m_Box.OZS_SetState(OZS_Const.STATE_OPEN);
-            m_Box.OZS_SetTouchedAt(GetGame().GetTickTime());
-        }
-        OZ_Log.Error("storage: box " + id + " could not be closed by " + m_Who + ": " + why + "; nothing was removed");
-        OZS_Controller.Get().OnCloseFailed(m_Box, m_Who, m_Uid, why);
-    }
-
-    protected void Abandon(string why)
-    {
-        if (m_Writer)
-            m_Writer.Abort();
-        m_Phase = PHASE_DONE;
-        OZ_Log.Warn("storage: close job abandoned: " + why);
-    }
-
-    protected void Finish()
-    {
-        m_Phase = PHASE_DONE;
-        m_Box.OZS_SetState(OZS_Const.STATE_CLOSED);
-        m_Box.OZS_SetStoredCount(m_Roots.Count());
-        string id = m_Box.OZS_GetId();
-        string s = "storage: box " + id + " closed by " + m_Who + ": deleted " + m_Deleted.ToString() + " entities in ";
-        s = s + m_DeleteFrames.ToString() + " frame(s), " + R1(m_DeleteMs) + " ms; longest step " + R1(m_MaxStepMs) + " ms";
-        OZ_Log.Info(s);
-        OZS_IdLetter ack = new OZS_IdLetter();
-        ack.id = id;
-        ack.version = m_Version;
-        string json;
-        string err;
-        if (JsonFileLoader<OZS_IdLetter>.MakeData(ack, json, err, false))
-            OZS_Bridge.Post(OZS_Const.ROUTE_CLOSED, json, new OZS_AckReply("closed"));
-        string note = m_Why + " version=" + m_Version.ToString() + " write_ms=" + R1(m_CaptureMs) + " wait_ms=" + R1(m_WaitMs) + " delete_ms=" + R1(m_DeleteMs);
-        OZS_Audit.Log("close", id, m_Uid, m_Who, "", m_Roots.Count(), -1, -1, "", note);
-        OZS_Controller.Get().OnClosed(m_Box, m_Reopen, m_Who, m_Uid);
-    }
-
-    static string R1(float v)
-    {
-        float r = Math.Round(v * 10) / 10;
-        return r.ToString();
-    }
-}
+// The close job -- the other transition, a placed box's cargo captured into
+// SQL -- stood here until 2026-09-26 and went with the old scheme.
 
 class OZS_OpenJob
 {
@@ -362,6 +67,12 @@ class OZS_OpenJob
     bool IsFor(OZ_StorageBox box)
     {
         return m_Box == box;
+    }
+
+    static string R1(float v)
+    {
+        float r = Math.Round(v * 10) / 10;
+        return r.ToString();
     }
 
     bool Begin(out string why)
@@ -719,10 +430,9 @@ class OZS_OpenJob
         m_Box.OZS_SetRestoring(false);
         m_Box.OZS_SetState(OZS_Const.STATE_OPEN);
         m_Box.OZS_SetStoredCount(m_Roots);
-        OZS_Controller.Get().OnOpened(m_Box);
         float wall = GetGame().GetTickTime() - m_Started;
         string s = "storage: box " + m_Id + " opened by " + m_Who + ": " + m_Roots.ToString() + " items (" + m_Created.ToString() + " entities) in " + m_Frames.ToString() + " frame(s),";
-        s = s + " work " + OZS_CloseJob.R1(m_WorkMs) + " ms, longest step " + OZS_CloseJob.R1(m_MaxStepMs) + " ms, wall " + OZS_CloseJob.R1(wall) + " s";
+        s = s + " work " + R1(m_WorkMs) + " ms, longest step " + R1(m_MaxStepMs) + " ms, wall " + R1(wall) + " s";
         s = s + ", missed " + m_Missed.ToString() + ", parked " + m_Parked.ToString() + ", attempts " + m_Attempt.ToString();
         // The record's order is what every later commit names a root by, so a
         // box that ends an open knowing fewer roots than it read will add the
@@ -754,7 +464,7 @@ class OZS_OpenJob
         string err;
         if (JsonFileLoader<OZS_IdLetter>.MakeData(ack, json, err, false))
             OZS_Bridge.Post(OZS_Const.ROUTE_OPENED, json, new OZS_AckReply("opened"));
-        string note = "roots=" + m_Roots.ToString() + " work_ms=" + OZS_CloseJob.R1(m_WorkMs) + " parked=" + m_Parked.ToString();
+        string note = "roots=" + m_Roots.ToString() + " work_ms=" + R1(m_WorkMs) + " parked=" + m_Parked.ToString();
         OZS_Audit.Log("open", m_Id, m_Uid, m_Who, "", m_Roots, -1, -1, "", note);
     }
 }

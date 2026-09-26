@@ -91,9 +91,15 @@ class OZS_Records
     static int s_Missed;
     static int s_LoadFails;
 
+    // AN ENTITY ON ITS WAY OUT IS NOT IN THE BOX. `ObjectDelete` takes effect
+    // at the end of the frame, and until then the engine still lists the
+    // item in its parent's cargo: a stack emptied by a combine and deleted
+    // was still counted, and still written into its container's blob by the
+    // letter posted in the same frame -- a stack of nothing in the record,
+    // rebuilt by the next open (review 2026-09-26). Both walks skip it.
     static int CountTree(EntityAI e)
     {
-        if (!e)
+        if (!e || e.IsSetForDeletion())
             return 0;
         int n = 1;
         GameInventory inv = e.GetInventory();
@@ -117,6 +123,8 @@ class OZS_Records
     // The subtree in depth-first order: the node, its attachments, its cargo.
     static void Flatten(EntityAI e, int parent, array<EntityAI> nodes, array<int> parents)
     {
+        if (!e || e.IsSetForDeletion())
+            return;
         int me = nodes.Count();
         nodes.Insert(e);
         parents.Insert(parent);
@@ -167,12 +175,16 @@ class OZS_Records
             if (loc.GetFlip())
                 flip = 1;
         }
-        // The sort hands the root a new cell.
+        // The sort hands the root a new cell. THE WAY ROUND STAYS: the planner
+        // measured the item as it lies (OZS_Ops.SizeOf swaps a turned item's
+        // sides), so writing it down unturned stood a rag planned three wide
+        // across the cells reserved for its neighbours -- the engine then
+        // refused the cell and the root was parked as no_room (review
+        // 2026-09-26, B2).
         if (isRoot && newRow >= 0 && newCol >= 0 && lt == InventoryLocationType.CARGO)
         {
             row = newRow;
             col = newCol;
-            flip = 0;
         }
         float quantity = 0;
         int liquid = 0;
@@ -456,7 +468,23 @@ class OZS_Records
         {
             vector pos = box.GetPosition();
             pos[0] = pos[0] + 2;
-            e = EntityAI.Cast(GetGame().CreateObjectEx(n.cls, pos, ECE_LOCAL | ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME));
+            // ECE_NOPERSISTENCY_WORLD IS NOT OPTIONAL HERE, and leaving it
+            // out cost the owner a week of "kits keep appearing beside the
+            // box" (measured again 2026-09-25, PlateCarrierPouches).
+            //
+            // This container stands on the ground for one frame before it
+            // moves into the box, and for that frame it is an ordinary
+            // saveable object. A world save in that frame -- an autosave, a
+            // server_stop, a crash -- writes it into the world file. The next
+            // boot loads it as a normal, ANNOUNCED item lying beside the box,
+            // while the record still describes it inside: one item, two
+            // places. The player picks it up, puts it back, and now the
+            // record has two.
+            //
+            // ECE_LOCAL alone does not prevent that. It says "do not tell the
+            // network"; persistence is a separate flag, and the authority
+            // itself has always carried both (OZS_Authority.Create).
+            e = EntityAI.Cast(GetGame().CreateObjectEx(n.cls, pos, ECE_LOCAL | ECE_NOPERSISTENCY_WORLD | ECE_PLACE_ON_SURFACE | ECE_NOLIFETIME));
             n.ground = true;
         }
         else if (n.lt == InventoryLocationType.ATTACHMENT)
@@ -499,7 +527,10 @@ class OZS_Records
             OZ_Log.Warn("storage: cannot create " + n.cls + " in " + where + " at " + n.row.ToString() + "," + n.col.ToString() + " (slot " + n.slot.ToString() + ")");
             vector spare = box.GetPosition();
             spare[1] = spare[1] + 50;
-            e = EntityAI.Cast(GetGame().CreateObjectEx(n.cls, spare, ECE_LOCAL));
+            // The same two flags, for the same reason: a stand-in is thrown
+            // away a moment later, and a save in that moment would leave it
+            // in the world for good -- fifty metres above the box.
+            e = EntityAI.Cast(GetGame().CreateObjectEx(n.cls, spare, ECE_LOCAL | ECE_NOPERSISTENCY_WORLD | ECE_NOLIFETIME));
             n.standIn = true;
         }
         n.made = e;

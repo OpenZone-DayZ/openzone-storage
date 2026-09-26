@@ -69,8 +69,20 @@ class OZ_ProbeClientControl
         }
         else if (line.IndexOf("sort") == 0)
         {
-            OZS_ClientViewer.Get().RequestSort();
-            ErrorEx("[OpenZone] probe control: sort requested", ErrorExSeverity.WARNING);
+            // THROUGH THE PROXY, like the button in the panel. The old path
+            // went through the client's vicinity scan, which is gone with the
+            // old scheme (2026-09-26): it looked for a PLACED box that was
+            // open, and under the proxy there is never one.
+            OZS_Mirror only = OZS_Mirrors.Get().First();
+            if (only)
+            {
+                only.Sort();
+                ErrorEx("[OpenZone] probe control: sort requested", ErrorExSeverity.WARNING);
+            }
+            else
+            {
+                ErrorEx("[OpenZone] probe control: no box is open to sort", ErrorExSeverity.WARNING);
+            }
         }
         else if (line.IndexOf("inventory") == 0)
         {

@@ -41,17 +41,6 @@ class OZS_ClassesLetter
     }
 }
 
-class OZS_CloseLetter
-{
-    string id;
-    string stamp;
-    string file;
-    int roots;
-    int entities;
-    string by;
-    string why;
-}
-
 // open {id, by}, opened {id, stamp}, closed {id, version}: the bridge reads
 // what each route needs and ignores the rest.
 class OZS_IdLetter
@@ -110,6 +99,10 @@ class OZS_BootAnswerBox
     string status;
     int version;
     int roots;
+    // Another server's id when that server holds the box open: it is
+    // answered as closed to this one, which may neither open nor close it
+    // (review 2026-09-26, B6).
+    string held_by;
 }
 
 class OZS_BootAnswer
@@ -126,15 +119,6 @@ class OZS_ClassesAnswer
     string why;
     int parked;
     int unparked;
-}
-
-class OZS_CloseAnswer
-{
-    bool ok;
-    string why;
-    int version;
-    int roots;
-    int entities;
 }
 
 class OZS_OpenAnswer
@@ -168,7 +152,6 @@ class OZS_BridgeSink : OZ_BridgeSink
     {
         routes.Insert(OZS_Const.ROUTE_BOOT);
         routes.Insert(OZS_Const.ROUTE_CLASSES);
-        routes.Insert(OZS_Const.ROUTE_CLOSE);
         routes.Insert(OZS_Const.ROUTE_CLOSED);
         routes.Insert(OZS_Const.ROUTE_OPEN);
         routes.Insert(OZS_Const.ROUTE_OPENED);
@@ -260,36 +243,6 @@ class OZS_AckReply : OZ_BridgeReply
 }
 
 // The job is held weakly: a job the controller dropped is not called back.
-class OZS_CloseReply : OZ_BridgeReply
-{
-    protected OZS_CloseJob m_Job;
-
-    void OZS_CloseReply(OZS_CloseJob job)
-    {
-        m_Job = job;
-    }
-
-    override void OnBody(string json)
-    {
-        if (!m_Job)
-            return;
-        OZS_CloseAnswer a = new OZS_CloseAnswer();
-        string err;
-        if (!JsonFileLoader<OZS_CloseAnswer>.LoadData(json, a, err) || !a)
-        {
-            m_Job.OnBridge(false, "the answer cannot be read: " + err, 0);
-            return;
-        }
-        m_Job.OnBridge(a.ok, a.why, a.version);
-    }
-
-    override void OnFail(int code)
-    {
-        if (m_Job)
-            m_Job.OnBridge(false, "no answer (code " + code.ToString() + ")", 0);
-    }
-}
-
 class OZS_OpenReply : OZ_BridgeReply
 {
     protected OZS_OpenJob m_Job;

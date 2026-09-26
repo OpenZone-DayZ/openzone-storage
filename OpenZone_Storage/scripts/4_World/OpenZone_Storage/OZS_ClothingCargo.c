@@ -12,8 +12,8 @@
 //
 // A container is not a Man, so a jacket attached to one can be emptied but
 // never filled -- taking out is not gated by this method, putting in is. That
-// asymmetry is exactly what the owner reported on 2026-09-23: "забрать могу,
-// положить нет".
+// asymmetry is exactly what the owner reported on 2026-09-23: "I can take
+// things out, I cannot put them in".
 //
 // This is NOT the AreChildrenAccessible() depth rule (entityai.c:1662). That
 // one is about ancestors sitting in CARGO and it passes here: an attachment

@@ -8,8 +8,6 @@ modded class ActionConstructor
     override void RegisterActions(TTypenameArray actions)
     {
         super.RegisterActions(actions);
-        actions.Insert(OZS_ActionOpenBox);
-        actions.Insert(OZS_ActionCloseBox);
         actions.Insert(OZS_ActionOpenStash);
         actions.Insert(OZS_ActionShowBox);
     }

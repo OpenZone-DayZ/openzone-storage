@@ -1,10 +1,10 @@
-// The wire of a box (design 2026-09-19, sections 1 and 2): one file per
-// close in the exchange directory, written by OZS_StoreWriter and handed to
-// the bridge by name; one cache per closed box, written by the bridge and
-// read by the open job. The truth of a closed box is the bridge's SQL, the
-// truth of an open one is the engine's cargo; a file is only the wire,
-// because an OnStoreSave body leaves the script VM through FileSerializer
-// and no other way.
+// The wire of a box (design 2026-09-19, sections 1 and 2; 2026-09-24 §7):
+// one file per TURN in the exchange directory, written by OZS_StoreWriter and
+// handed to the bridge by name; one cache per box, written by the bridge and
+// read by the open job that fills an authority. The truth of a box is the
+// bridge's SQL, written turn by turn; a file is only the wire, because an
+// OnStoreSave body leaves the script VM through FileSerializer and no other
+// way.
 class OZS_Store
 {
     static string XchgPath(string name)
@@ -12,16 +12,10 @@ class OZS_Store
         return OZS_Const.DIR_XCHG + "\\" + name;
     }
 
-    // "<boxId>-<YYYYMMDD-HHMMSS>.bin": the only close-file name the bridge
-    // accepts. Windows forbids ':' in a name, hence the second stamp format.
-    static string CloseName(string id)
-    {
-        return id + "-" + FileStamp() + ".bin";
-    }
-
-    // A TURN's file (design 2026-09-24 §7). Several turns can land in the
-    // same second, so the name carries a serial the close name has no need
-    // of; the bridge knows both shapes.
+    // A TURN's file: "<boxId>-<YYYYMMDD-HHMMSS>-<serial>.bin". Several turns
+    // can land in the same second, so the name carries a serial. Windows
+    // forbids ':' in a name, hence the second stamp format. (The close
+    // file's name, without the serial, went with the old scheme.)
     static string OpName(string id, int serial)
     {
         return id + "-" + FileStamp() + "-" + serial.ToString() + ".bin";
@@ -113,7 +107,7 @@ class OZS_Store
     }
 }
 
-// Writes one close file: the header with a fresh random marker, every root
+// Writes one turn's file: the header with a fresh random marker, every root
 // followed by the marker, BIN_END. Finish() closes the file and the bridge
 // is told its name; Abort() deletes it. Nothing here is atomic on purpose:
 // while the file is being written nobody knows it exists, and once the
@@ -133,20 +127,13 @@ class OZS_StoreWriter
     protected int m_Written;
     protected int m_RootsWritten;
     protected bool m_Open;
-    // Non-zero for a turn's file rather than a close's.
     protected int m_OpSerial;
 
-    // A TURN's file: the same format, a name of its own, and the box's id
-    // taken from what the box STANDS FOR -- an authority answers with the id
-    // of the box whose contents it holds.
+    // The box's id is taken from what the box STANDS FOR -- an authority
+    // answers with the id of the box whose contents it holds.
     bool OpenOp(OZ_StorageBox box, int roots, int entities, int serial, out string why)
     {
         m_OpSerial = serial;
-        return Open(box, roots, entities, why);
-    }
-
-    bool Open(OZ_StorageBox box, int roots, int entities, out string why)
-    {
         m_Id = box.OZS_GetId();
         if (m_Id == "")
         {
@@ -155,10 +142,7 @@ class OZS_StoreWriter
         }
         OZS_Store.EnsureDirs();
         m_Stamp = OZS_Store.Stamp();
-        if (m_OpSerial > 0)
-            m_Name = OZS_Store.OpName(m_Id, m_OpSerial);
-        else
-            m_Name = OZS_Store.CloseName(m_Id);
+        m_Name = OZS_Store.OpName(m_Id, m_OpSerial);
         m_Path = OZS_Store.XchgPath(m_Name);
         m_File = new FileSerializer();
         if (!m_File.Open(m_Path, FileMode.WRITE))
@@ -239,9 +223,8 @@ class OZS_StoreWriter
         return true;
     }
 
-    // The file is ours until the bridge is told about it; a close that
-    // fails before or after that point removes it (after: only when the
-    // bridge refused, so it never read it into SQL).
+    // The file is ours until the bridge is told about it; a turn that fails
+    // before that point removes it.
     void Abort()
     {
         if (m_File)

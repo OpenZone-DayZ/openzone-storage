@@ -10,6 +10,10 @@ class OZS_Const
     static const string SETTINGS     = "$profile:OpenZone\\OZ_Storage.json";
     static const string SETTINGS_TAG = "Storage";
 
+    // A placed box is always CLOSED under the proxy; OPENING and OPEN are the
+    // states of an AUTHORITY being filled and standing filled. CLOSING was
+    // the close job's and is never entered since 2026-09-26; it keeps its
+    // number so StateName reads an old save right.
     static const int STATE_CLOSED  = 0;
     static const int STATE_OPENING = 1;
     static const int STATE_OPEN    = 2;
@@ -28,7 +32,10 @@ class OZS_Const
     // Routes of the bridge, without the leading slash OZ_BridgeClient adds.
     static const string ROUTE_BOOT    = "v1/storage/boot";
     static const string ROUTE_CLASSES = "v1/storage/classes";
-    static const string ROUTE_CLOSE   = "v1/storage/close";
+    // v1/storage/close -- a placed box's cargo captured whole -- went with
+    // the old scheme on 2026-09-26; the bridge still serves it, this mod
+    // never calls it. A session writes per turn (ROUTE_OP) and closes with
+    // its last, absolute letter.
     static const string ROUTE_CLOSED  = "v1/storage/closed";
     static const string ROUTE_OPEN    = "v1/storage/open";
     static const string ROUTE_OPENED  = "v1/storage/opened";
@@ -54,16 +61,19 @@ class OZS_Const
     static const int   EVENT_BATCH   = 200;
     static const int   EVENT_QUEUE   = 500;
 
-    static const int RPC_VIEW_ID = 20260916;
-    static const int RPC_SORT_ID = 20260917;
+    // RPC_VIEW_ID and RPC_SORT_ID were here until 2026-09-26: a client saying
+    // "I am looking at this box" and the old Sort button. Both belonged to the
+    // scheme where the PLACED box held the items; the proxy has its own wire
+    // (RPC_PX_*) and a sort is an ordinary turn on it.
 
-    // The proxy wire (design 2026-09-24). Every one of these travels on the
-    // ANCHOR object -- the placed box or the stash's locker -- because the
-    // authoritative container has no network id to address, and the anchor is
-    // the one thing both sides already agree on.
+    // The proxy wire (design 2026-09-24). Client -> server messages ride on
+    // the player's own entity (OZS_Player.OnRPC); server -> client ones
+    // arrive with no target at all and are heard at DayZGame.Event_OnRPC
+    // (OZS_Mirrors.Listen). Every message names its box by id in its body,
+    // because the authoritative container has no network id to address.
     //
     // THE IDS ARE SMALL ON PURPOSE. A date-shaped id like 20260924 travels
-    // client -> server perfectly well (RPC_VIEW_ID above is one), but the same
+    // client -> server perfectly well, but the same
     // id sent server -> ONE CLIENT never arrives: measured 2026-09-24, the
     // server logged the send with the right target and the right recipient and
     // the client's DayZGame.OnRPC never saw it. Vanilla's own ERPCs end in the
@@ -75,6 +85,7 @@ class OZS_Const
     static const int RPC_PX_END    = 20503;  // the stream is whole
     static const int RPC_PX_CHANGE = 20504;  // one change, to every proxy of this box
     static const int RPC_PX_NO     = 20505;  // an operation was refused
+    static const int RPC_PX_GONE   = 20509;  // this session is over: drop the proxy
     // Client -> server:
     static const int RPC_PX_OPEN   = 20506;  // show me this box
     static const int RPC_PX_OP     = 20507;  // do this to it
@@ -92,6 +103,53 @@ class OZS_Const
     static const int OP_IN      = 3;
     static const int OP_COMBINE = 4;
     static const int OP_SWAP    = 5;
+    // One end in the box and one outside, trading places. Its own operation
+    // rather than a flavour of OP_SWAP: the two items are named differently
+    // -- the one inside by handle, the one outside by network id -- and the
+    // steps it takes are the boundary's, not the box's.
+    static const int OP_XSWAP   = 6;
+    // One stack becomes two, both inside the box. `netLow` carries WHICH split
+    // the screen asked for, because vanilla has two and they are not the same
+    // call: SPLIT_HALF is `SplitItemToInventoryLocation`, which Magazine
+    // overrides to move cartridges one at a time with their own damage, and
+    // SPLIT_MAX is `SplitIntoStackMaxToInventoryLocationEx`, which works on
+    // quantity and therefore does nothing at all to an ammo pile -- in vanilla
+    // too, because `ShouldSplitQuantity` wants `GetQuantity() > 1` and a pile's
+    // quantity is 1 (measured 2026-09-25).
+    static const int OP_SPLIT   = 7;
+    // A SORT IS A TURN LIKE ANY OTHER (owner, 2026-09-26). It used to be the
+    // old scheme's own gesture -- close the placed box with new cells, open it
+    // again into the world -- which cannot work on a proxy: the placed box is
+    // never open, so the sort's first test refused every press.
+    static const int OP_SORT    = 8;
+    static const int SPLIT_HALF = 0;
+    static const int SPLIT_MAX  = 1;
+
+    // How many operations may wait for the wire before a client is told to
+    // start again (§8.3). A drag is one operation and a player cannot make
+    // them much faster than a bridge round trip; a client further ahead than
+    // this is drawing a box it cannot justify.
+    static const int MAX_WAITING = 16;
+
+    // How many times one session may rewrite its record to end a
+    // disagreement before giving up on rewriting. See OZS_Session.m_Repairs.
+    static const int MAX_REPAIRS = 3;
+
+    // HOW FAR FROM THE ANCHOR A SESSION MAY BE USED, in metres. The server
+    // asks it at the open and once a frame after; the client's own reach
+    // test is not consulted, because a crafted message never runs it
+    // (review 2026-09-26, A1). Two metres of reach (UAMaxDistances.DEFAULT),
+    // 0.7 m from the player to the proxy, and the radius the vicinity panel
+    // keeps the proxy in: six metres is past all of them together, and the
+    // stash has used the same figure since 2026-09-23 (StashMaxDistance).
+    static const float SESSION_LEASH = 6.0;
+
+    // The least time, in seconds, between two restreams of one watcher. A
+    // restream is a fresh snapshot and every row of the box again, and a
+    // client that can trigger one per message can keep the server doing
+    // nothing else (review 2026-09-26, A3). A restart asked for sooner is
+    // kept and done when the gap has passed, never dropped.
+    static const float RESTART_GAP = 1.0;
 
     // What a change is, as the server tells it to every proxy.
     static const int CH_MOVED   = 1;   // handle -> a new place
@@ -105,9 +163,6 @@ class OZS_Const
     static const float BOX_LIFETIME = 3888000.0;
     static const float DEPLOY_SECONDS = 10.0;
 
-    static const float VIEW_HEARTBEAT = 4.0;
-    static const float VIEW_SCAN      = 0.5;
-    static const float AUTO_TICK     = 5.0;
     // Seconds after mission start before the boot exchange and the summary:
     // the world's persistent entities load a few frames after OnMissionStart.
     static const float SUMMARY_DELAY = 15.0;

@@ -1,11 +1,13 @@
 // The storage box. One script class for the three sizes; the sizes differ
 // only in config (grid and weapon slots).
 //
-// State machine (netsynced): CLOSED -> OPENING -> OPEN -> CLOSING -> CLOSED.
-// While OPEN the cargo and the weapon slots are the engine's ordinary cargo
-// and attachments. While CLOSED nothing exists in the world and the count of
-// stored items rides along as a netsynced int for the action text. OPENING
-// and CLOSING are the paced jobs of OZS_Controller.
+// TWO KINDS OF INSTANCE, ONE CLASS. A PLACED box stands in the world as the
+// anchor a player walks up to: it is always CLOSED, holds nothing, and its
+// stored count rides along as a netsynced int for the action text. An
+// AUTHORITY (OZS_Authority) is a box of the same class nobody is told about,
+// standing for a placed box's contents while somebody looks into it; it is
+// OPENING while the open job fills it from SQL and OPEN after. (A third, the
+// client's proxy, is a client-local instance the mirror builds.)
 //
 // The gates below follow the vanilla barrel: cargo and slots display and
 // accept only while open; the box is never takeable and never goes into
@@ -20,17 +22,19 @@ class OZ_StorageBox : DeployableContainer_Base
     // Server only: the controller's job is creating entities in this box, so
     // the receive gates answer yes although the box is not OPEN yet.
     protected bool   m_OZS_Restoring;
+    // Server only: this box is being torn down, so the items leaving it are
+    // leaving because it is ending -- not because anybody took them. Without
+    // this every session close wrote one `take` per item into the admin
+    // history, and a box of 121 items closed looked exactly like a box of 121
+    // items emptied by a player (measured 2026-09-25).
+    protected bool   m_OZS_Releasing;
     // Server only: this box is an authority -- unannounced, unsaved, standing
     // for a box somewhere else. See OZS_Authority.
     protected bool   m_OZS_Authority;
     // Server only: the top-level items in the order the stored record lists
     // them. See OZS_RootOrder.
     protected ref array<EntityAI> m_OZS_RootOrder;
-    // Server only: tick time of the last activity in this box, which is the
-    // opening itself or any item going in, out or across (0 = not open);
-    // the auto-close counts idle time from it. And the time of the last
-    // sort, for its cooldown.
-    protected float  m_OZS_TouchedAt;
+    // Server only: the time of the last sort, for its cooldown.
     protected float  m_OZS_LastSort;
 
     override void InitItemVariables()
@@ -40,6 +44,7 @@ class OZ_StorageBox : DeployableContainer_Base
         m_OZS_StoredCount = 0;
         m_OZS_Id = "";
         m_OZS_Restoring = false;
+        m_OZS_Releasing = false;
         RegisterNetSyncVariableInt("m_OZS_State", 0, 3);
         RegisterNetSyncVariableInt("m_OZS_StoredCount", 0, 100000);
     }
@@ -89,7 +94,27 @@ class OZ_StorageBox : DeployableContainer_Base
                 string what = "removed from the world as " + OZS_Const.StateName(m_OZS_State);
                 what = what + " with " + OZS_CountEntities() + " entities, " + m_OZS_StoredCount + " stored";
                 OZ_Log.Warn("storage: box " + m_OZS_Id + " " + what);
+                // WHO IS DELETING THIS BOX. Four boxes vanished from the world
+                // at boot on 2026-09-24/25, every one of them a CLOSED box
+                // with contents in SQL, and nothing in this mod deletes a
+                // placed box except the admin's `remove`. The stack says which
+                // side of the engine the call came from; without it the only
+                // evidence is that the box is gone.
+                // The stack under an unexplained deletion is worth a lot when
+                // one is being hunted and nothing the rest of the time.
+                if (OZ_Log.IsDebug())
+                    DumpStack();
                 OZS_Audit.Log("removed", m_OZS_Id, "", "", GetType(), 0, -1, -1, "", what + " at " + GetPosition().ToString(false));
+                // AND ANYBODY LOOKING INTO IT IS SENT AWAY. The contents are
+                // in an authority of their own and outlive this entity, so a
+                // session went on trading through a box that was no longer
+                // in the world (review 2026-09-26, E2). Closing it writes
+                // what the authority holds into the record -- which the
+                // bridge keeps as the archive of a removed box -- and that is
+                // what an admin restores from.
+                OZS_Session inIt = OZS_Proxies.Get().Find(OZS_GetId());
+                if (inIt)
+                    inIt.Close("the box was removed from the world");
             }
             OZS_Controller.Get().Unregister(this);
         }
@@ -144,6 +169,18 @@ class OZ_StorageBox : DeployableContainer_Base
                 OZ_Log.Info("storage: box " + m_OZS_Id + " is " + pid + " by its persistent id from now on");
                 m_OZS_Id = pid;
             }
+            // HOW LONG THE ENGINE THINKS THIS BOX HAS LEFT.
+            //
+            // Boxes kept vanishing at world load, and the stack under the
+            // deletion had NOTHING between `main()` and this class -- the
+            // engine takes them, not any script (measured 2026-09-25). The
+            // first suspect is the central economy's cleanup: a class with no
+            // types.xml entry gets a default lifetime, and the `SetLifetime`
+            // in EEInit runs BEFORE the engine restores the saved one and
+            // overwrites it. So the number is printed, and then set again --
+            // here, where it is the last word.
+            OZ_Log.Info("storage: box " + m_OZS_Id + " comes back with " + GetLifetime().ToString() + " s of lifetime left of " + GetLifetimeMax().ToString() + "; renewing it");
+            SetLifetime(OZS_Const.BOX_LIFETIME);
             OZS_Controller.Get().Reconcile(this);
         }
     }
@@ -248,38 +285,35 @@ class OZ_StorageBox : DeployableContainer_Base
         return m_OZS_Restoring;
     }
 
-    float OZS_GetTouchedAt()
+    // TWO CASES, AND ONLY ONE OF THEM IS FOR GOOD.
+    //
+    // A DISCARD raises this and never lowers it: the box is going away with
+    // everything in it. A SORT raises it to empty the authority and lowers it
+    // again before the refill, because the box goes on serving the player
+    // afterwards -- and a flag left up there would silence the audit for the
+    // rest of the session, which is how a box stops telling an admin anything.
+    void OZS_Releasing(bool on = true)
     {
-        return m_OZS_TouchedAt;
-    }
-
-    void OZS_SetTouchedAt(float t)
-    {
-        m_OZS_TouchedAt = t;
-    }
-
-    // Any item moving in, out or across the box restarts the idle timer, so
-    // AutoCloseSeconds means "nobody has touched it for that long" and not
-    // "that long since it was opened" (owner 2026-09-17). The paced jobs do
-    // not count: OPENING and CLOSING are not OPEN.
-    void OZS_Touch()
-    {
-        if (!GetGame() || !GetGame().IsServer())
-            return;
-        if (m_OZS_State != OZS_Const.STATE_OPEN || m_OZS_Restoring)
-            return;
-        m_OZS_TouchedAt = GetGame().GetTickTime();
+        m_OZS_Releasing = on;
     }
 
     // An item moving in or out while the box is open and not being restored
-    // is a player's doing: it restarts the idle clock and becomes an event.
-    // The restore and the close move hundreds of items through these hooks
-    // and are not events.
+    // is a player's doing and becomes an event. The restore moves hundreds
+    // of items through these hooks and is not one. (The idle clock these
+    // hooks used to restart went with the auto-close on 2026-09-26; a
+    // session has its own, OZS_Session.m_Empty.)
     protected bool OZS_Live()
     {
         if (!GetGame() || !GetGame().IsServer())
             return false;
-        if (m_OZS_State != OZS_Const.STATE_OPEN || m_OZS_Restoring)
+        if (m_OZS_State != OZS_Const.STATE_OPEN || m_OZS_Restoring || m_OZS_Releasing)
+            return false;
+        // NOT ON AN AUTHORITY. Every crossing of its boundary is written by
+        // the boundary itself, with the player's name (OZS_Boundary's `in`
+        // and `out`); the cargo events wrote a second row for each, and a
+        // `take` for a move into a container standing inside the box, which
+        // never left it (review 2026-09-26, E4).
+        if (m_OZS_Authority)
             return false;
         return true;
     }
@@ -288,46 +322,28 @@ class OZ_StorageBox : DeployableContainer_Base
     {
         super.EECargoIn(item);
         if (OZS_Live())
-        {
-            OZS_Touch();
             OZS_Audit.Item("put", this, item, "");
-        }
     }
 
     override void EECargoOut(EntityAI item)
     {
         super.EECargoOut(item);
         if (OZS_Live())
-        {
-            OZS_Touch();
             OZS_Audit.Item("take", this, item, "");
-        }
-    }
-
-    override void EECargoMove(EntityAI item)
-    {
-        super.EECargoMove(item);
-        OZS_Touch();
     }
 
     override void EEItemAttached(EntityAI item, string slot_name)
     {
         super.EEItemAttached(item, slot_name);
         if (OZS_Live())
-        {
-            OZS_Touch();
             OZS_Audit.Item("put", this, item, slot_name);
-        }
     }
 
     override void EEItemDetached(EntityAI item, string slot_name)
     {
         super.EEItemDetached(item, slot_name);
         if (OZS_Live())
-        {
-            OZS_Touch();
             OZS_Audit.Item("take", this, item, slot_name);
-        }
     }
 
     float OZS_GetLastSort()
@@ -342,25 +358,15 @@ class OZ_StorageBox : DeployableContainer_Base
 
     // ---- RPCs from the client's inventory screen ---------------------------
 
-    override void OnRPC(PlayerIdentity sender, int rpc_type, ParamsReadContext ctx)
-    {
-        if (rpc_type == OZS_Const.RPC_VIEW_ID)
-        {
-            if (!GetGame() || !GetGame().IsServer())
-                return;
-            Param1<bool> p = new Param1<bool>(false);
-            if (ctx.Read(p))
-                OZS_Controller.Get().OnView(this, sender, p.param1);
-            return;
-        }
-        if (rpc_type == OZS_Const.RPC_SORT_ID)
-        {
-            if (GetGame() && GetGame().IsServer())
-                OZS_Controller.Get().RequestSort(this, sender);
-            return;
-        }
-        super.OnRPC(sender, rpc_type, ctx);
-    }
+    // NO RPC OF ITS OWN ANY MORE (owner, 2026-09-26).
+    //
+    // Two branches lived here, and both belonged to the old scheme: RPC_VIEW_ID
+    // (a client saying "I am looking at this box", so the server would not
+    // close it) and RPC_SORT_ID (the Sort button, which needed the PLACED box
+    // to be open). Under the proxy the server knows its watchers and the
+    // placed box is never open, so the first had nothing to protect and the
+    // second could not fire at all. A sort is now an ordinary turn of the
+    // session (OZS_Ops.Sort), asked for over the proxy's own wire.
 
     // Entities directly in the box: cargo items plus items in the weapon slots.
     int OZS_CountEntities()

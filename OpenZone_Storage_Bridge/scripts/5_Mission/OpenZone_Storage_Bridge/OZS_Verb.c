@@ -2,16 +2,17 @@
 //
 //   world_exec verb=oz_storage args={"op":"spawn","size":"large","pos":"x y z"}
 //   world_exec verb=oz_storage args={"op":"list"}
-//   world_exec verb=oz_storage args={"op":"open","id":"<box id>"}      (or pos, or nearest to the player)
-//   world_exec verb=oz_storage args={"op":"close","id":"<box id>"}
-//   world_exec verb=oz_storage args={"op":"status","id":"<box id>"}
+//   world_exec verb=oz_storage args={"op":"status","id":"<box id>"}      (or pos, or nearest to the player)
 //   world_exec verb=oz_storage args={"op":"files","id":"<box id>"}
-//   world_exec verb=oz_storage args={"op":"slot","id":"<box id>","item":"AKM","slot":"OZ_Weapon_1","mag":"Mag_AKM_30Rnd","ammo":"17","chamber":"Bullet_762x39"}
+//   world_exec verb=oz_storage args={"op":"tune","ping":"100","wait":"1"}                    (stand: settings at runtime)
 //   world_exec verb=oz_storage args={"op":"probe","class":"OZ_PersonalStash","slot":"Body"}          (stand measurement)
-//   world_exec verb=oz_storage args={"op":"stash","uid":"76561198000000000","offset":"2"}          (stand: a stash with a chosen owner)
-//   world_exec verb=oz_storage args={"op":"fill","id":"<box id>","class":"BandageDressing","count":"5","into":"MountainBag","kids":"3"}   (stand)
 //   world_exec verb=oz_storage args={"op":"auth","do":"make","id":"<box id>"}                 (stand: the authoritative box, design 2026-09-24)
 //   world_exec verb=oz_storage args={"op":"proxy","do":"open","id":"<box id>"}                (stand: a proxy session, design 2026-09-24)
+//
+// `open`, `close`, `open_all`, `close_all`, `fill`, `slot` and `auth do=close`
+// stood here until 2026-09-26: the old scheme's verbs, which materialised the
+// record into the PLACED box or captured its cargo. A placed box holds
+// nothing now; everything goes through `proxy do=...`.
 modded class DZMCP_BridgeCore
 {
     override protected string KnownVerbs()
@@ -74,26 +75,14 @@ modded class DZMCP_BridgeCore
 
         if (op == "tune")
         {
-            // Runtime overrides of the settings, for the stand only.
+            // Runtime overrides of the settings, for the stand only. `ping`
+            // is the fake round trip in ms and `wait` is WaitForRecord, so
+            // the feel of a box at a real latency can be tried without a
+            // restart (owner asked for it, 2026-09-25).
             OZS_Settings st = OZS_Settings.Get();
-            string v = OZS_Arg(args, "autoclose", "");
-            if (v != "")
-                st.AutoCloseSeconds = v.ToInt();
-            v = OZS_Arg(args, "timeout", "");
-            if (v != "")
-                st.ViewerTimeoutSeconds = v.ToInt();
-            v = OZS_Arg(args, "distance", "");
-            if (v != "")
-                st.ViewerMaxDistance = v.ToFloat();
-            v = OZS_Arg(args, "rate", "");
+            string v = OZS_Arg(args, "rate", "");
             if (v != "")
                 st.OpenItemsPerSecond = v.ToInt();
-            v = OZS_Arg(args, "deletes", "");
-            if (v != "")
-                st.CloseDeletesPerFrame = v.ToInt();
-            v = OZS_Arg(args, "close_budget", "");
-            if (v != "")
-                st.CloseFrameBudgetMs = v.ToInt();
             v = OZS_Arg(args, "px_rows", "");
             if (v != "")
                 st.ProxyRowsPerMessage = v.ToInt();
@@ -103,9 +92,18 @@ modded class DZMCP_BridgeCore
             v = OZS_Arg(args, "px_idle", "");
             if (v != "")
                 st.ProxyIdleSeconds = v.ToInt();
-            detail = "autoclose=" + st.AutoCloseSeconds + "s viewers=" + st.ViewerTimeoutSeconds + "s/" + st.ViewerMaxDistance + "m rate=" + st.OpenItemsPerSecond;
-            detail = detail + " close=" + st.CloseFrameBudgetMs + "ms/" + st.CloseDeletesPerFrame;
+            v = OZS_Arg(args, "ping", "");
+            if (v != "")
+                st.FakePingMs = v.ToInt();
+            v = OZS_Arg(args, "wait", "");
+            if (v != "")
+            {
+                bool wantWait = v.ToInt() != 0;
+                st.WaitForRecord = wantWait;
+            }
+            detail = "rate=" + st.OpenItemsPerSecond;
             detail = detail + " proxy=" + st.ProxyRowsPerMessage + "x" + st.ProxyMessagesPerFrame + "/frame idle=" + st.ProxyIdleSeconds + "s";
+            detail = detail + " ping=" + st.FakePingMs + "ms wait_for_record=" + st.WaitForRecord;
             return true;
         }
 
@@ -139,34 +137,6 @@ modded class DZMCP_BridgeCore
                 return false;
             }
             detail = "spawned " + type + " id=" + box.OZS_GetId() + " at " + box.GetPosition().ToString();
-            return true;
-        }
-
-        // Every box at once, in one frame: the load test of ten boxes opening
-        // or closing together needs the requests to land in the same frame,
-        // which ten separate bridge commands never do.
-        if (op == "open_all" || op == "close_all")
-        {
-            array<OZ_StorageBox> all = c.Boxes();
-            int took = 0;
-            int refused = 0;
-            for (int bi = 0; bi < all.Count(); bi++)
-            {
-                OZ_StorageBox b = all.Get(bi);
-                if (!b)
-                    continue;
-                string whyAll;
-                bool ok;
-                if (op == "open_all")
-                    ok = c.RequestOpen(b, null, whyAll);
-                else
-                    ok = c.RequestClose(b, null, whyAll);
-                if (ok)
-                    took++;
-                else
-                    refused++;
-            }
-            detail = op + ": " + took + " accepted, " + refused + " refused, of " + all.Count() + " boxes";
             return true;
         }
 
@@ -205,6 +175,14 @@ modded class DZMCP_BridgeCore
             pNames.Insert("nopersist");
             pFlags.Insert(ECE_PLACE_ON_SURFACE | ECE_LOCAL | ECE_NOPERSISTENCY_WORLD);
             pNames.Insert("local+nopersist");
+            // THE ONE THE RESTORE ACTUALLY USED, and the reason this verb was
+            // opened again on 2026-09-25: a ground-built container carried
+            // ECE_LOCAL and ECE_NOLIFETIME but NOT ECE_NOPERSISTENCY_WORLD.
+            // If "local" alone were enough to keep an object out of the save,
+            // the copies beside the box could not have come from there -- so
+            // this case decides whether the diagnosis is right.
+            pFlags.Insert(ECE_PLACE_ON_SURFACE | ECE_LOCAL | ECE_NOLIFETIME);
+            pNames.Insert("local-only (the old restore flags)");
             detail = "";
             for (int pi = 0; pi < pFlags.Count(); pi++)
             {
@@ -375,59 +353,10 @@ modded class DZMCP_BridgeCore
             return true;
         }
 
-        if (op == "stash")
-        {
-            // STAND ONLY, measurement M2 (spec 2026-09-23 §7.2): put a stash
-            // in the world with a chosen owner, so two of them with different
-            // owners can be looked at from two clients. The real opening path
-            // (task C) will create these itself; this is the instrument that
-            // lets the filter be judged before that path exists.
-            string stashUid = OZS_Arg(args, "uid", "");
-            float stashStep = OZS_Arg(args, "offset", "0").ToFloat();
-            vector stashAt;
-            if (!OZS_PlayerPos(stashAt))
-            {
-                detail = "nobody is connected";
-                return false;
-            }
-            stashAt[0] = stashAt[0] + stashStep;
-            // One scope per method in Enforce: `made` is taken by the probe op below.
-            Object stashMade = GetGame().CreateObjectEx("OZ_PersonalStash", stashAt, ECE_PLACE_ON_SURFACE);
-            OZ_PersonalStash stash = OZ_PersonalStash.Cast(stashMade);
-            if (!stash)
-            {
-                detail = "OZ_PersonalStash could not be created";
-                return false;
-            }
-            if (stashUid != "")
-                stash.OZS_SetOwner(stashUid);
-            // `anchor` and `open` make this verb able to produce the state a
-            // player would: a stash with a real key, OPEN. Without them the
-            // stash is CLOSED, and a closed box refuses every attachment --
-            // which looks like a slot defect and is not one.
-            string stashAnchor = OZS_Arg(args, "anchor", "");
-            if (stashAnchor == "")
-                stashAnchor = OZS_Const.AnchorKeyAt(stashAt);
-            stash.OZS_SetAnchor(stashAnchor);
-            detail = "stash " + stash.OZS_GetId() + " at " + stashAt.ToString(false);
-            if (OZS_Arg(args, "open", "") != "")
-            {
-                string stashWhy;
-                PlayerBase stashWho = OZS_Controller.FindPlayerByUid(stash.OZS_OwnerUid());
-                bool stashOpened = false;
-                if (stashWho)
-                    stashOpened = OZS_Controller.Get().RequestOpen(stash, stashWho, stashWhy);
-                else
-                    stashOpened = OZS_Controller.Get().RequestOpenAs(stash, "probe", stash.OZS_OwnerUid(), stashWhy);
-                if (!stashOpened)
-                {
-                    detail = detail + ", but it would not open: " + stashWhy;
-                    return false;
-                }
-                detail = detail + ", opening";
-            }
-            return true;
-        }
+        // `stash` -- a physical stash put in the world with a chosen owner --
+        // stood here until 2026-09-26. Nothing of that class is placed in
+        // the world any more; a stash is a proxy session (`proxy do=open`
+        // through a rack).
 
         if (op == "probe")
         {
@@ -501,6 +430,132 @@ modded class DZMCP_BridgeCore
                 detail = OZS_Proxies.Get().Status();
                 return true;
             }
+            if (pxDo == "grid")
+            {
+                // THE BOX'S REAL GEOMETRY, cell by cell. "Visually empty" and
+                // "the engine thinks it is taken" are different claims, and
+                // until this existed there was no way to tell them apart from
+                // outside the game (2026-09-25).
+                string gridId = OZS_Arg(args, "id", "");
+                string gridOnly = OZS_Arg(args, "only", "");
+                OZS_Session gs = OZS_Proxies.Get().Find(gridId);
+                if (!gs || !gs.m_Auth)
+                {
+                    detail = "no session for " + gridId;
+                    return false;
+                }
+                CargoBase gc = gs.m_Auth.GetInventory().GetCargo();
+                if (!gc)
+                {
+                    detail = "that box has no cargo";
+                    return false;
+                }
+                detail = "grid " + gc.GetWidth().ToString() + "x" + gc.GetHeight().ToString();
+                for (int gi = 0; gi < gc.GetItemCount(); gi++)
+                {
+                    EntityAI ge = gc.GetItem(gi);
+                    // `only=<text>` narrows the dump to the items whose class
+                    // contains it. A box of sixty items writes more detail
+                    // than the bridge will carry in one answer, and the line
+                    // is cut where it is cut.
+                    if (gridOnly != "")
+                    {
+                        if (ge && ge.GetType().IndexOf(gridOnly) < 0)
+                            continue;
+                    }
+                    if (!ge)
+                        continue;
+                    int gr;
+                    int gcl;
+                    // From the item, not from the cargo index: the index
+                    // accessor writes numbers that are not the item's
+                    // (measured 2026-09-25).
+                    OZS_Ops.Where(ge, gr, gcl);
+                    int gw;
+                    int gh;
+                    gc.GetItemSize(gi, gw, gh);
+                    int fw;
+                    int fh;
+                    bool gknown = OZS_Ops.SizeOf(ge, fw, fh);
+                    detail = detail + " | #" + OZS_Authority.Handle(gs.m_Auth, ge).ToString() + " " + ge.GetType();
+                    detail = detail + " at " + gr.ToString() + "," + gcl.ToString() + " size " + gw.ToString() + "x" + gh.ToString();
+                    // THE SAME QUESTION ASKED TWICE. The cargo's own numbers
+                    // and the config's, side by side: if they disagree about
+                    // which of the two is the width, every rectangle this mod
+                    // measures is transposed, and a cell that looks free is
+                    // refused (owner, 2026-09-26, a rag that lies across).
+                    int cfgW;
+                    int cfgH;
+                    GetGame().GetInventoryItemSize(InventoryItem.Cast(ge), cfgW, cfgH);
+                    detail = detail + " cfg " + cfgW.ToString() + "x" + cfgH.ToString();
+                    // The rectangle it actually covers, which differs from its
+                    // own size whenever it lies turned.
+                    if (OZS_Ops.Flipped(ge))
+                        detail = detail + " FLIPPED covers " + fw.ToString() + "x" + fh.ToString();
+                    // BOTH NUMBERS OFF THE SAME LIVE ENTITY, because they are
+                    // not the same number and the difference decides whether
+                    // an emptied stack is deleted and what the panel draws.
+                    ItemBase gib = ItemBase.Cast(ge);
+                    if (gib)
+                    {
+                        detail = detail + " qty " + gib.GetQuantity().ToString();
+                        Magazine gmag = Magazine.Cast(ge);
+                        if (gmag)
+                            detail = detail + " ammo " + gmag.GetAmmoCount().ToString() + "/" + gmag.GetAmmoMax().ToString();
+                    }
+                }
+                int ga = gs.m_Auth.GetInventory().AttachmentCount();
+                detail = detail + " | slots used " + ga.ToString();
+                // WHAT THE ENGINE ACTUALLY KNOWS ABOUT THIS BOX'S SLOTS.
+                //
+                // Three separate claims that were all being assumed: what the
+                // CONFIG declares, what the engine's slot table resolves those
+                // names to, and what the CONTAINER says it has. A weapon that
+                // would not hang on the rack had all three disagreeing
+                // somewhere, and nothing printed any of them (2026-09-25).
+                array<string> gslots = new array<string>();
+                GetGame().ConfigGetTextArray("CfgVehicles " + gs.m_Auth.GetType() + " attachments", gslots);
+                detail = detail + " | config declares " + gslots.Count().ToString() + ":";
+                for (int gsi = 0; gsi < gslots.Count(); gsi++)
+                {
+                    string gsn = gslots.Get(gsi);
+                    int gsid = InventorySlots.GetSlotIdFromString(gsn);
+                    string gshas = "absent";
+                    if (gsid != InventorySlots.INVALID && gs.m_Auth.GetInventory().HasAttachmentSlot(gsid))
+                    {
+                        gshas = "empty";
+                        // WHICH SLOT ACTUALLY HOLDS IT. "The weapon fell into
+                        // the first one" is two different bugs depending on
+                        // whether the ENGINE put it there or the PANEL merely
+                        // draws it first, and nothing distinguished them.
+                        EntityAI gsin = gs.m_Auth.GetInventory().FindAttachment(gsid);
+                        if (gsin)
+                            gshas = gsin.GetType();
+                    }
+                    detail = detail + " " + gsn + "=" + gshas;
+                }
+                detail = detail + " | the box offers " + gs.m_Auth.GetInventory().GetAttachmentSlotsCount().ToString() + " slot(s)";
+                // DO THE ENGINE'S OWN PRE-CHECKS STILL REFUSE THIS BOX?
+                //
+                // The whole server-side swap was written around the answer
+                // "yes, because the authority is a container the engine was
+                // never told about" (measured at e1df77e). That measurement
+                // predates everything built since, so it is taken again here,
+                // on two real items of a real box, rather than assumed.
+                if (gc.GetItemCount() > 1)
+                {
+                    EntityAI one = gc.GetItem(0);
+                    EntityAI two = gc.GetItem(1);
+                    if (one && two)
+                    {
+                        detail = detail + " | natives on " + one.GetType() + "+" + two.GetType();
+                        detail = detail + ": CanSwapEntities=" + GameInventory.CanSwapEntities(one, two).ToString();
+                        InventoryLocation forTwo = new InventoryLocation();
+                        detail = detail + " CanForceSwapEntities=" + GameInventory.CanForceSwapEntities(one, null, two, forTwo).ToString();
+                    }
+                }
+                return true;
+            }
             string pxId = OZS_Arg(args, "id", "");
             if (pxId == "")
             {
@@ -558,10 +613,17 @@ modded class DZMCP_BridgeCore
             int pxHandle = OZS_Arg(args, "handle", "1").ToInt();
             int pxRow = OZS_Arg(args, "row", "-1").ToInt();
             int pxCol = OZS_Arg(args, "col", "-1").ToInt();
+            // THE WAY ROUND, ON PURPOSE. A turned item is the one shape the
+            // proxy got wrong, and until this existed there was no way to ask
+            // for one from outside the game -- the only turned can in the box
+            // had arrived by hand (2026-09-25).
+            int pxFlip = OZS_Arg(args, "flip", "0").ToInt();
             int pxInto = OZS_Arg(args, "into", "0").ToInt();
             string pxSlot = OZS_Arg(args, "slot", "");
             int pxLt = InventoryLocationType.CARGO;
-            int pxSlotId = -1;
+            // The same sentinel the game uses; -1 is a possible slot id, not
+            // a way of saying "none".
+            int pxSlotId = InventorySlots.INVALID;
             if (pxSlot != "")
             {
                 pxSlotId = InventorySlots.GetSlotIdFromString(pxSlot);
@@ -569,7 +631,7 @@ modded class DZMCP_BridgeCore
             }
             if (pxDo == "move")
             {
-                pxS.Operate(pxWho, OZS_Const.OP_MOVE, pxHandle, pxInto, 0, 0, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                pxS.Operate(pxWho, OZS_Const.OP_MOVE, pxHandle, pxInto, 0, 0, pxLt, pxSlotId, pxRow, pxCol, pxFlip, pxS.m_Version);
                 detail = "move sent -> " + pxS.Status();
                 return true;
             }
@@ -583,6 +645,291 @@ modded class DZMCP_BridgeCore
             {
                 pxS.Operate(pxWho, OZS_Const.OP_SWAP, pxHandle, OZS_Arg(args, "other", "2").ToInt(), 0, 0, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
                 detail = "swap sent -> " + pxS.Status();
+                return true;
+            }
+            if (pxDo == "seed")
+            {
+                // STAND ONLY: many small items into the box by the ORDINARY
+                // inbound path. IN TWO STAGES: `stage=make` puts them in the
+                // player's own inventory, `stage=send` sends those of the
+                // named classes into the box.
+                //
+                // NOT VIA THE GROUND, and not both in one call. Either one
+                // ends the server process inside `TakeToDst` -- a ground
+                // source kills it outright (the mod refuses that now), and an
+                // item created and moved in the same frame is the engine trap
+                // the skill records. Both were measured here on 2026-09-25,
+                // and neither leaves a crash dump.
+                //
+                //   do=seed stage=make [classes=A,B,C] [count=12]
+                //   do=seed stage=send [classes=A,B,C] [count=12]
+                string seedStage = OZS_Arg(args, "stage", "make");
+                int seedCount = OZS_Arg(args, "count", "12").ToInt();
+                if (seedCount < 1 || seedCount > 60)
+                {
+                    detail = "count must be between 1 and 60";
+                    return false;
+                }
+                // SEVERAL CLASSES ON PURPOSE. A box of one class is a box
+                // where every descriptor is the same size and every stack can
+                // merge with every other; mixed types are what a real box
+                // holds (owner, 2026-09-25).
+                string seedList = OZS_Arg(args, "classes", "Ammo_762x39,Ammo_556x45,Ammo_9x19,Ammo_45ACP,Apple,Plum,Nail,Rag");
+                array<string> seedClasses = new array<string>();
+                seedList.Split(",", seedClasses);
+                if (seedClasses.Count() == 0)
+                {
+                    detail = "no classes named";
+                    return false;
+                }
+                for (int seedTrim = 0; seedTrim < seedClasses.Count(); seedTrim++)
+                {
+                    string seedOne = seedClasses.Get(seedTrim);
+                    seedOne.TrimInPlace();
+                    seedClasses.Set(seedTrim, seedOne);
+                }
+                PlayerBase seedMe = PlayerBase.Cast(pxMen.Get(0));
+                int seedDone = 0;
+                if (seedStage == "make")
+                {
+                    for (int seedStep = 0; seedStep < seedCount; seedStep++)
+                    {
+                        string seedCls = seedClasses.Get(seedStep % seedClasses.Count());
+                        if (seedCls == "")
+                            continue;
+                        if (seedMe.GetInventory().CreateInInventory(seedCls))
+                            seedDone++;
+                    }
+                    detail = "made " + seedDone.ToString() + " of " + seedCount.ToString() + " in the player; send them with stage=send";
+                    return true;
+                }
+                if (seedStage == "send")
+                {
+                    array<EntityAI> seedHeld = new array<EntityAI>();
+                    seedMe.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, seedHeld);
+                    // AND WHAT IS LYING AROUND. The box takes a loose item as
+                    // readily as a carried one (design section 6), and after
+                    // the destination check went in it does so without killing
+                    // anything -- which is the case this seeder exists to
+                    // exercise (2026-09-25).
+                    array<Object> seedNear = new array<Object>();
+                    GetGame().GetObjectsAtPosition3D(seedMe.GetPosition(), 4.0, seedNear, null);
+                    for (int seedN = 0; seedN < seedNear.Count(); seedN++)
+                    {
+                        ItemBase seedLoose = ItemBase.Cast(seedNear.Get(seedN));
+                        if (!seedLoose || seedLoose.GetHierarchyParent())
+                            continue;
+                        if (OZ_StorageBox.Cast(seedLoose))
+                            continue;
+                        seedHeld.Insert(seedLoose);
+                    }
+                    for (int seedI = 0; seedI < seedHeld.Count(); seedI++)
+                    {
+                        if (seedDone >= seedCount)
+                            break;
+                        EntityAI seedItem = seedHeld.Get(seedI);
+                        if (!seedItem)
+                            continue;
+                        // ONLY WHAT THIS COMMAND MADE. The player is wearing
+                        // their own gear and it is in the same enumeration;
+                        // naming the classes is what keeps the seeder from
+                        // posting somebody's trousers into the box.
+                        if (seedClasses.Find(seedItem.GetType()) < 0)
+                            continue;
+                        int seedLow;
+                        int seedHigh;
+                        seedItem.GetNetworkID(seedLow, seedHigh);
+                        pxS.Operate(pxWho, OZS_Const.OP_IN, 0, 0, seedLow, seedHigh, InventoryLocationType.CARGO, -1, -1, -1, 0, pxS.m_Version);
+                        seedDone++;
+                    }
+                    detail = "sent " + seedDone.ToString() + " item(s) -> " + pxS.Status();
+                    return true;
+                }
+                detail = "seed: stage must be make or send";
+                return false;
+            }
+            if (pxDo == "burst")
+            {
+                // STAND ONLY: several operations in one handler call, which is
+                // the only way from outside to put more than one turn in the
+                // air at a time -- every bridge verb waits for its own command
+                // to finish, and a local round trip is faster than the gap
+                // between two of them. It measures the queue of section 8.3
+                // and gives the crash test of stage E something to interrupt.
+                int burstCount = OZS_Arg(args, "count", "8").ToInt();
+                int burstRow2 = OZS_Arg(args, "row2", "-1").ToInt();
+                int burstCol2 = OZS_Arg(args, "col2", "-1").ToInt();
+                if (burstCount < 1 || burstCount > 200)
+                {
+                    detail = "count must be between 1 and 200";
+                    return false;
+                }
+                if (pxRow < 0 || pxCol < 0 || burstRow2 < 0 || burstCol2 < 0)
+                {
+                    detail = "burst needs two free cells: row/col and row2/col2";
+                    return false;
+                }
+                int burstUseRow;
+                int burstUseCol;
+                for (int burstStep = 0; burstStep < burstCount; burstStep++)
+                {
+                    burstUseRow = pxRow;
+                    burstUseCol = pxCol;
+                    if (burstStep % 2 == 1)
+                    {
+                        burstUseRow = burstRow2;
+                        burstUseCol = burstCol2;
+                    }
+                    pxS.Operate(pxWho, OZS_Const.OP_MOVE, pxHandle, 0, 0, 0, InventoryLocationType.CARGO, -1, burstUseRow, burstUseCol, 0, pxS.m_Version);
+                }
+                detail = "burst of " + burstCount.ToString() + " sent -> " + pxS.Status();
+                return true;
+            }
+            if (pxDo == "split")
+            {
+                // STAND ONLY: the split without a drag.
+                //   do=split id=<box> handle=N [kind=0|1] [row=R col=C]
+                // kind 0 is vanilla's half split, 1 its stack-max one.
+                int splitKind = OZS_Arg(args, "kind", "0").ToInt();
+                pxS.Operate(pxWho, OZS_Const.OP_SPLIT, pxHandle, 0, splitKind, 0, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                detail = "split sent -> " + pxS.Status();
+                return true;
+            }
+            if (pxDo == "asother")
+            {
+                // STAND ONLY: an operation attributed to SOMEBODY ELSE.
+                //
+                // The rules about two people in one box -- whose operation is
+                // refused as stale, whose change raises the other's mark --
+                // all turn on the uid an operation is attributed to, and
+                // nothing else. So a watcher with a made-up uid, which no
+                // player is behind, is enough to measure them: the real
+                // client's mark rises exactly as it would for a second
+                // machine, and the made-up watcher is sent nothing because
+                // `Listening` finds nobody there.
+                //
+                // It is NOT in the session's watcher list on purpose: a
+                // watcher nobody is behind would hold the box open forever and
+                // be counted among the people looking into it.
+                //
+                //   do=asother id=<box> what=move|swap|split handle=N
+                //              [other=M] [row=R col=C] [who=<uid>]
+                string asWhat = OZS_Arg(args, "what", "move");
+                OZS_Watcher ghost = new OZS_Watcher(pxS, null);
+                ghost.m_Uid = OZS_Arg(args, "who", "stand-second-player");
+                int asOther = OZS_Arg(args, "other", "0").ToInt();
+                if (asWhat == "move")
+                    OZS_Ops.Run(pxS, ghost, OZS_Const.OP_MOVE, pxHandle, asOther, 0, 0, pxLt, pxSlotId, pxRow, pxCol, 0);
+                else if (asWhat == "swap")
+                    OZS_Ops.Run(pxS, ghost, OZS_Const.OP_SWAP, pxHandle, asOther, 0, 0, pxLt, pxSlotId, pxRow, pxCol, 0);
+                else if (asWhat == "split")
+                    OZS_Ops.Run(pxS, ghost, OZS_Const.OP_SPLIT, pxHandle, 0, OZS_Arg(args, "kind", "0").ToInt(), 0, pxLt, pxSlotId, pxRow, pxCol, 0);
+                else
+                {
+                    detail = "asother: what must be move, swap or split";
+                    return false;
+                }
+                detail = asWhat + " done as " + ghost.m_Uid + " -> " + pxS.Status();
+                return true;
+            }
+            if (pxDo == "across")
+            {
+                // STAND ONLY: the cross-boundary swap, with the outside half
+                // taken from the player rather than from a drag. `from=hands`
+                // is the case that cannot be reasoned about from the code
+                // alone -- `Asked` refuses a hands destination while the hands
+                // are full, and whether they are empty by the time step three
+                // asks depends on the order of the steps (2026-09-25).
+                string acrossFrom = OZS_Arg(args, "from", "hands");
+                PlayerBase acrossMe = PlayerBase.Cast(pxMen.Get(0));
+                if (!acrossMe)
+                {
+                    detail = "nobody is connected";
+                    return false;
+                }
+                EntityAI acrossItem = null;
+                if (acrossFrom == "hands")
+                    acrossItem = acrossMe.GetHumanInventory().GetEntityInHands();
+                else
+                {
+                    array<EntityAI> acrossAll = new array<EntityAI>();
+                    acrossMe.GetInventory().EnumerateInventory(InventoryTraversalType.PREORDER, acrossAll);
+                    for (int ai = 0; ai < acrossAll.Count(); ai++)
+                    {
+                        EntityAI acrossCand = acrossAll.Get(ai);
+                        if (acrossCand && acrossCand.GetType() == acrossFrom)
+                        {
+                            acrossItem = acrossCand;
+                            break;
+                        }
+                    }
+                }
+                if (!acrossItem)
+                {
+                    detail = "the player has no " + acrossFrom;
+                    return false;
+                }
+                int acrossLow;
+                int acrossHigh;
+                acrossItem.GetNetworkID(acrossLow, acrossHigh);
+                pxS.Operate(pxWho, OZS_Const.OP_XSWAP, pxHandle, 0, acrossLow, acrossHigh, pxLt, pxSlotId, pxRow, pxCol, 0, pxS.m_Version);
+                detail = "across sent with " + acrossItem.GetType() + " -> " + pxS.Status();
+                return true;
+            }
+            if (pxDo == "drift")
+            {
+                // STAND ONLY: BREAKS THE BOOKKEEPING ON PURPOSE, so the repair
+                // that exists for it can be watched doing its job instead of
+                // waited for. `OZS_RootOrder` is the list a relative letter
+                // names roots by position in; knock an entry out of it and
+                // every later letter is written in a numbering the bridge does
+                // not share, which is exactly how the record and the box
+                // stopped agreeing on 2026-09-25.
+                //
+                // Nothing here touches the container: the ITEMS are fine and
+                // the box is fine. Only this side's idea of their order is
+                // wrong, which is the fault the absolute rewrite answers.
+                array<EntityAI> driftOrder = pxS.m_Auth.OZS_RootOrder();
+                int driftAt = OZS_Arg(args, "at", "0").ToInt();
+                if (driftAt < 0 || driftAt >= driftOrder.Count())
+                {
+                    detail = "the order has " + driftOrder.Count().ToString() + " root(s); there is no position " + driftAt.ToString();
+                    return false;
+                }
+                string driftWhat = "nothing";
+                if (driftOrder.Get(driftAt))
+                    driftWhat = driftOrder.Get(driftAt).GetType();
+                driftOrder.RemoveOrdered(driftAt);
+                detail = "the order lost position " + driftAt.ToString() + " (" + driftWhat + "): it now has " + driftOrder.Count().ToString() + " root(s) while the box holds " + pxS.m_Auth.OZS_CountEntities().ToString() + " -- the next turn should be caught and put straight";
+                return true;
+            }
+            if (pxDo == "vanish")
+            {
+                // STAND ONLY, and the other half of `drift`: this one takes an
+                // item out of the AUTHORITY without writing a letter about it,
+                // so the box and the record disagree about TOTALS while every
+                // name the letters use still matches. That is the fault the
+                // count check exists for, and the only way to reach it now
+                // that the identity check catches a bad position first.
+                EntityAI vanishIt = OZS_Authority.ByHandle(pxS.m_Auth, pxHandle);
+                if (!vanishIt)
+                {
+                    detail = "no item with handle " + pxHandle.ToString();
+                    return false;
+                }
+                string vanishWhat = vanishIt.GetType();
+                // The watchdog is told, or it reports this as an item that
+                // left the box on its own -- which is exactly what it is, and
+                // exactly what we are doing on purpose.
+                OZS_Watchdog.Expect(vanishIt);
+                GetGame().ObjectDelete(vanishIt);
+                detail = vanishWhat + " was taken out of the authority with nothing written about it; the next turn should find the counts disagreeing";
+                return true;
+            }
+            if (pxDo == "sort")
+            {
+                pxS.Operate(pxWho, OZS_Const.OP_SORT, 0, 0, 0, 0, InventoryLocationType.CARGO, InventorySlots.INVALID, -1, -1, 0, pxS.m_Version);
+                detail = "sort sent -> " + pxS.Status();
                 return true;
             }
             if (pxDo == "combine")
@@ -615,48 +962,6 @@ modded class DZMCP_BridgeCore
             return false;
         }
 
-        if (op == "fill")
-        {
-            // STAND ONLY: items straight into an OPEN box, optionally inside a
-            // container in it, so a nested tree exists to be stored and read
-            // back. The box's own gates apply -- a closed box refuses.
-            //
-            //   do=fill id=<box id> class=BandageDressing count=5
-            //           [into=MountainBag] [kids=3]
-            string fillClass = OZS_Arg(args, "class", "BandageDressing");
-            int fillCount = OZS_Arg(args, "count", "3").ToInt();
-            string fillInto = OZS_Arg(args, "into", "");
-            int fillKids = OZS_Arg(args, "kids", "0").ToInt();
-            OZ_StorageBox fillBox = OZS_Pick(args, detail);
-            if (!fillBox)
-                return false;
-            int madeFlat = 0;
-            for (int fq = 0; fq < fillCount; fq++)
-            {
-                if (fillBox.GetInventory().CreateEntityInCargo(fillClass))
-                    madeFlat++;
-            }
-            detail = "put " + madeFlat.ToString() + " of " + fillCount.ToString() + " " + fillClass + " into " + fillBox.OZS_GetId();
-            if (fillInto != "")
-            {
-                EntityAI holder = fillBox.GetInventory().CreateEntityInCargo(fillInto);
-                if (!holder)
-                {
-                    detail = detail + "; the box refused " + fillInto;
-                    return false;
-                }
-                int madeKids = 0;
-                for (int fk = 0; fk < fillKids; fk++)
-                {
-                    if (holder.GetInventory().CreateEntityInCargo(fillClass))
-                        madeKids++;
-                }
-                detail = detail + "; " + fillInto + " with " + madeKids.ToString() + " of " + fillKids.ToString() + " inside";
-            }
-            detail = detail + "; the box now holds " + fillBox.OZS_CountEntities().ToString() + " root(s), " + (OZS_Records.CountTree(fillBox) - 1).ToString() + " entities";
-            return true;
-        }
-
         if (op == "auth")
         {
             // STAND ONLY (proxy design 2026-09-24, stage A): the authoritative
@@ -665,7 +970,6 @@ modded class DZMCP_BridgeCore
             //
             //   do=make   id=<box id> [class=<cls>] [pos="x y z"]
             //   do=open   id=<box id>       fill it from SQL by the ordinary open
-            //   do=close  id=<box id>       write it back the ordinary way
             //   do=index  id=<box id>       a handle for every entity in it
             //   do=peek   id=<box id> [handle=N]
             //   do=discard id=<box id>      delete it, write nothing
@@ -747,17 +1051,6 @@ modded class DZMCP_BridgeCore
                 detail = "open accepted for the authority of " + aid + ", state now " + OZS_Const.StateName(auth.OZS_GetState());
                 return true;
             }
-            if (what == "close")
-            {
-                string whyShut;
-                if (!c.RequestCloseAs(auth, "stand", "authority", "stand", "", whyShut))
-                {
-                    detail = "close refused: " + whyShut;
-                    return false;
-                }
-                detail = "close accepted for the authority of " + aid + ", state now " + OZS_Const.StateName(auth.OZS_GetState());
-                return true;
-            }
             if (what == "index")
             {
                 int handed = OZS_Authority.Index(auth);
@@ -807,41 +1100,7 @@ modded class DZMCP_BridgeCore
         {
             detail = target.GetType() + " id=" + target.OZS_GetId() + " state=" + OZS_Const.StateName(target.OZS_GetState());
             detail = detail + " entities=" + target.OZS_CountEntities() + " stored=" + target.OZS_GetStoredCount();
-            detail = detail + " slots=[" + OZS_Slots(target) + "] viewers=" + c.ViewerCount(target);
-            return true;
-        }
-        if (op == "open")
-        {
-            string whyOpen;
-            if (!c.RequestOpen(target, null, whyOpen))
-            {
-                detail = "open refused: " + whyOpen;
-                return false;
-            }
-            detail = "open accepted for " + target.OZS_GetId() + ", state now " + OZS_Const.StateName(target.OZS_GetState());
-            return true;
-        }
-        if (op == "close")
-        {
-            string whyClose;
-            if (!c.RequestClose(target, null, whyClose))
-            {
-                detail = "close refused: " + whyClose;
-                return false;
-            }
-            detail = "close accepted for " + target.OZS_GetId() + ", state now " + OZS_Const.StateName(target.OZS_GetState());
-            return true;
-        }
-
-        if (op == "sort")
-        {
-            string whySort;
-            if (!c.RequestSortAs(target, "server", "", "", whySort))
-            {
-                detail = "sort refused: " + whySort;
-                return false;
-            }
-            detail = "sort accepted for " + target.OZS_GetId() + ", state now " + OZS_Const.StateName(target.OZS_GetState());
+            detail = detail + " slots=[" + OZS_Slots(target) + "]";
             return true;
         }
         if (op == "lower")
@@ -856,7 +1115,7 @@ modded class DZMCP_BridgeCore
         {
             // The box as the engine sees it, the bridge's reachability, and
             // what sits in the exchange directory: the cache of this box and
-            // any close file of it still waiting for the bridge.
+            // any turn file of it still waiting for the bridge.
             string bid = target.OZS_GetId();
             detail = "box " + bid + " " + OZS_Const.StateName(target.OZS_GetState()) + " stored=" + target.OZS_GetStoredCount() + " entities=" + target.OZS_CountEntities();
             detail = detail + " bridge=" + OZS_Bridge.Up() + " boot_done=" + c.BootDone();
@@ -882,58 +1141,11 @@ modded class DZMCP_BridgeCore
                 }
                 CloseFindFile(h);
             }
-            detail = detail + " close_files_waiting=" + waiting + " other_files=" + others;
-            return true;
-        }
-        if (op == "slot")
-        {
-            // A weapon into a weapon slot of the box, with an optional loaded
-            // magazine and a chambered round -- the composite case of the
-            // store. Refused by the box's own gates unless it is open.
-            string item = OZS_Arg(args, "item", "AKM");
-            string slotName = OZS_Arg(args, "slot", "OZ_Weapon_1");
-            string magType = OZS_Arg(args, "mag", "");
-            int ammo = OZS_Arg(args, "ammo", "0").ToInt();
-            string chamber = OZS_Arg(args, "chamber", "");
-            int slotId = InventorySlots.GetSlotIdFromString(slotName);
-            if (slotId == InventorySlots.INVALID)
-            {
-                detail = "unknown slot " + slotName;
-                return false;
-            }
-            EntityAI weapon = target.GetInventory().CreateAttachmentEx(item, slotId);
-            if (!weapon)
-            {
-                detail = "the box refused " + item + " in " + slotName + " (state " + OZS_Const.StateName(target.OZS_GetState()) + ")";
-                return false;
-            }
-            detail = "attached " + weapon.GetType() + " in " + slotName;
-            if (magType != "")
-            {
-                EntityAI magE = weapon.GetInventory().CreateAttachment(magType);
-                Magazine mag = Magazine.Cast(magE);
-                if (mag)
-                {
-                    if (ammo > 0)
-                        mag.ServerSetAmmoCount(ammo);
-                    detail = detail + ", " + magType + " with " + mag.GetAmmoCount();
-                }
-                else
-                {
-                    detail = detail + ", no " + magType;
-                }
-            }
-            Weapon_Base w = Weapon_Base.Cast(weapon);
-            if (w && chamber != "")
-            {
-                w.PushCartridgeToChamber(0, 0.0, chamber);
-                w.Synchronize();
-                detail = detail + ", chambered " + chamber;
-            }
+            detail = detail + " turn_files_waiting=" + waiting + " other_files=" + others;
             return true;
         }
 
-        detail = "unknown op '" + op + "'; known: list, spawn, status, open, close, open_all, close_all, sort, files, slot, tune, lower, probe, stash, nest, chain";
+        detail = "unknown op '" + op + "'; known: list, spawn, status, files, tune, lower, persist, chain, nest, probe, auth, proxy";
         return false;
     }
 

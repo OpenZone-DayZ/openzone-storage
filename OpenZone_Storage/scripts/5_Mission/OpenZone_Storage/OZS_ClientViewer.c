@@ -1,97 +1,18 @@
-// Client: tells the server which boxes the inventory screen is showing.
-// The server has no idea what a player is browsing (measured 2026-09-16:
-// OnInventoryMenuOpen/Close are empty client-side declarations, the
-// VicinityItemManager is a client singleton), so this scans the vicinity
-// list twice a second while the screen is open, sends "looking" when a box
-// enters it and "gone" when it leaves or the screen closes, and repeats
-// "looking" every VIEW_HEARTBEAT seconds so a lost packet cannot pin a box.
+// Client: the mission hooks the proxy needs -- the wire's client end, and the
+// redraw that keeps the player's scroll position.
+//
+// WHAT WAS HERE UNTIL 2026-09-26: a scan of the vicinity list twice a second
+// that told the server which boxes the inventory screen was showing, so the
+// server would not close one under a player who was browsing it. That was the
+// old scheme's problem: there the contents lived in the PLACED box, and the
+// server had no other way to know anybody was looking.
+//
+// Under the proxy the server knows exactly who is looking -- a session has its
+// watchers -- and the placed box is never open, so there was nothing left for
+// the scan to protect. What it still did was cost every client two vicinity
+// walks a second and an RPC per box in reach. Gone with the scheme that needed
+// it (owner, 2026-09-26).
 #ifndef NO_GUI
-class OZS_ClientViewer
-{
-    protected static ref OZS_ClientViewer s_Inst;
-
-    protected ref array<OZ_StorageBox> m_Viewing;
-    protected float m_Scan;
-    protected float m_Beat;
-
-    static OZS_ClientViewer Get()
-    {
-        if (!s_Inst)
-            s_Inst = new OZS_ClientViewer();
-        return s_Inst;
-    }
-
-    void OZS_ClientViewer()
-    {
-        m_Viewing = new array<OZ_StorageBox>();
-    }
-
-    void Update(float dt)
-    {
-        m_Scan = m_Scan + dt;
-        if (m_Scan < OZS_Const.VIEW_SCAN)
-            return;
-        m_Beat = m_Beat + m_Scan;
-        m_Scan = 0;
-
-        // The inventory menu stays in the manager while hidden (measured
-        // 2026-09-16: FindMenu answered it with the screen closed), so the
-        // question is whether it is SHOWN.
-        array<OZ_StorageBox> now = new array<OZ_StorageBox>();
-        InventoryMenu menu = InventoryMenu.Cast(GetGame().GetUIManager().FindMenu(MENU_INVENTORY));
-        if (menu && menu.IsOpened())
-        {
-            array<EntityAI> items = VicinityItemManager.GetInstance().GetVicinityItems();
-            if (items)
-            {
-                for (int i = 0; i < items.Count(); i++)
-                {
-                    OZ_StorageBox b = OZ_StorageBox.Cast(items.Get(i));
-                    if (b && now.Find(b) < 0)
-                        now.Insert(b);
-                }
-            }
-        }
-
-        bool beat = m_Beat >= OZS_Const.VIEW_HEARTBEAT;
-        if (beat)
-            m_Beat = 0;
-
-        for (int o = 0; o < m_Viewing.Count(); o++)
-        {
-            OZ_StorageBox old = m_Viewing.Get(o);
-            if (old && now.Find(old) < 0)
-                Send(old, false);
-        }
-        for (int n = 0; n < now.Count(); n++)
-        {
-            OZ_StorageBox b2 = now.Get(n);
-            if (m_Viewing.Find(b2) < 0 || beat)
-                Send(b2, true);
-        }
-        m_Viewing = now;
-    }
-
-    protected void Send(OZ_StorageBox box, bool viewing)
-    {
-        box.RPCSingleParam(OZS_Const.RPC_VIEW_ID, new Param1<bool>(viewing), true);
-    }
-
-    // The Sort button: the first open box the screen shows.
-    void RequestSort()
-    {
-        for (int i = 0; i < m_Viewing.Count(); i++)
-        {
-            OZ_StorageBox b = m_Viewing.Get(i);
-            if (b && b.OZS_GetState() == OZS_Const.STATE_OPEN)
-            {
-                b.RPCSingleParam(OZS_Const.RPC_SORT_ID, new Param1<bool>(true), true);
-                return;
-            }
-        }
-    }
-}
-
 modded class MissionGameplay
 {
     override void OnInit()
@@ -103,13 +24,52 @@ modded class MissionGameplay
         OZS_Mirrors.Listen();
     }
 
+    override void OnMissionFinish()
+    {
+        // The proxies go with the world they mirrored; see OZS_Mirrors.Reset.
+        OZS_Mirrors.Reset();
+        super.OnMissionFinish();
+    }
+
     override void OnUpdate(float timeslice)
     {
         super.OnUpdate(timeslice);
         if (GetGame() && GetGame().IsClient())
         {
-            OZS_ClientViewer.Get().Update(timeslice);
             OZS_Mirrors.Get().Update(timeslice);
+            // Something in a proxy moved: tell the open inventory to draw
+            // itself again. Once per frame at most, and only while a box is
+            // open -- with no box the flag is never raised.
+            if (OZS_Mirrors.TakeRedraw())
+            {
+                InventoryMenu open = InventoryMenu.Cast(GetGame().GetUIManager().FindMenu(MENU_INVENTORY));
+                if (open && open.m_Inventory)
+                {
+                    // WHERE THE PLAYER WAS LOOKING, KEPT ACROSS THE REDRAW.
+                    // A rebuilt panel starts at the top, and a box five
+                    // hundred cells tall makes that expensive to the person
+                    // who had scrolled down to the thing they were moving.
+                    ScrollWidget bar = open.m_Inventory.OZS_Scroller();
+                    float was = -1;
+                    if (bar)
+                        was = bar.GetVScrollPos();
+                    // A BOX BEING REBUILT READS AS ZERO, AND ZERO IS A LIE.
+                    //
+                    // While a resynchronisation is in flight the column has
+                    // nothing in it, so the scroller honestly answers 0 -- and
+                    // saving that would throw away the very place this is
+                    // meant to keep. So the last position taken while the box
+                    // was WHOLE is held aside, and only that one is put back.
+                    if (OZS_Mirrors.Get().Whole())
+                    {
+                        if (was >= 0)
+                            OZS_Mirrors.s_ScrollWas = was;
+                    }
+                    open.m_Inventory.Refresh();
+                    if (bar && OZS_Mirrors.s_ScrollWas >= 0)
+                        bar.VScrollToPos(OZS_Mirrors.s_ScrollWas);
+                }
+            }
         }
     }
 }

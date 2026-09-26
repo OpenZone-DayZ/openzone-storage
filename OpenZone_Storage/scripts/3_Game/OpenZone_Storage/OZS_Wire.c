@@ -23,6 +23,14 @@ class OZS_Row
     int flip;     // 1 when the item lies across its cell
     int qty;      // rounded quantity, -1 when the item has no quantity
     int qtyMax;   // its maximum, -1 likewise; the screen draws the bar from these
+    // ROUNDS IN A MAGAZINE, WHICH IS NOT THE QUANTITY, -1 when not a magazine.
+    //
+    // The inventory screen draws a magazine's number from `GetAmmoCount()`
+    // and nothing else (quantityconversions.c:12-19), so an ammo pile whose
+    // rounds never travel draws whatever a FRESH pile of its class holds. The
+    // owner had piles of one and two rounds in the box and the screen showed
+    // them as 20, 25 and 50 (2026-09-25).
+    int ammo;
     int health;   // 0..100, for the damage tint
     string cls;
 
@@ -38,6 +46,7 @@ class OZS_Row
         cls = type;
         qty = -1;
         qtyMax = -1;
+        ammo = -1;
         health = 100;
     }
 
@@ -45,6 +54,12 @@ class OZS_Row
     {
         if (lt == InventoryLocationType.ATTACHMENT)
             return "slot " + slot.ToString();
+        // THE WAY ROUND BELONGS TO THE PLACE. A cell alone does not say what
+        // rectangle an item covers, and two logs that both read "6,4" while
+        // one of them meant the turned can was the whole reason a build could
+        // disagree with the authority unseen (2026-09-25).
+        if (flip == 1)
+            return row.ToString() + "," + col.ToString() + " turned";
         return row.ToString() + "," + col.ToString();
     }
 }
@@ -64,6 +79,7 @@ class OZS_Wire
         ctx.Write(r.flip);
         ctx.Write(r.qty);
         ctx.Write(r.qtyMax);
+        ctx.Write(r.ammo);
         ctx.Write(r.health);
         ctx.Write(r.cls);
     }
@@ -79,6 +95,7 @@ class OZS_Wire
         if (!ctx.Read(r.flip)) return false;
         if (!ctx.Read(r.qty)) return false;
         if (!ctx.Read(r.qtyMax)) return false;
+        if (!ctx.Read(r.ammo)) return false;
         if (!ctx.Read(r.health)) return false;
         if (!ctx.Read(r.cls)) return false;
         return true;

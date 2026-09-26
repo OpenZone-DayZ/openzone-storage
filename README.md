@@ -14,44 +14,40 @@ Players get a box by deploying a **kit** from the hands (`OZ_StorageBoxKit_Small
 for ten seconds. Kits are not in the shipped economy --
 [packaging/OpenZone_Storage/types-example.xml](packaging/OpenZone_Storage/types-example.xml)
 lists all six classes at nominal 0 for a mission's own `types.xml`; an admin spawns or
-grants a kit. An open box closes itself 120 s after it was opened (a plain timer that
-waits while someone is looking). The inventory screen carries a **search bar** that shades
+grants a kit. A box is shown to whoever presses its one action, and the session ends when
+the last of them closes the screen, walks off, leaves or dies -- nothing about it is on a
+timer. The inventory screen carries a **search bar** that shades
 every item whose name does not contain the text and keeps a container lit if anything
 inside it matches, however deep; a **Sort** button that lays the open box out by name; and
 a **Count** button beside it that lists what the open box holds, total and by class.
 
 ### The personal stash
 
-An admin places a **locker** (`OZ_StashAnchor`). A player presses F on it and gets a
-container of their own at their feet, keyed by which locker and whose -- the same player
-at two lockers has two stashes, and one locker holds one per player. It carries the
-character's own slots (headgear, mask, eyewear, body, vest, back, hips, legs, feet,
-gloves, armband, shoulder, melee) plus four of the box's weapon slots, so a whole kit can
-be hung up rather than piled into a grid. Clothing kept in those slots keeps working
-pockets, which vanilla otherwise refuses to anything that is not a person.
+An admin places a **locker** (`OZ_StashAnchor`). A player presses F on it and is shown a
+record of their own, keyed by which locker and whose -- the same player at two lockers has
+two stashes, and one locker holds one per player. It carries the character's own slots
+(headgear, mask, eyewear, body, vest, back, hips, legs, feet, gloves, armband, shoulder,
+melee) plus four of the box's weapon slots, so a whole kit can be hung up rather than
+piled into a grid. Clothing kept in those slots keeps working pockets, which vanilla
+otherwise refuses to anything that is not a person.
 
-It exists only while it is in use, and every way out ends the same way and in this order:
-the contents go to the database, then the entity goes. The window is shut; the owner walks
-away or stands idle; they disconnect; they die. A server that falls over is not one of the
-four -- the next boot stores whatever survived and removes it.
-
-**Privacy here is a filter and not a lock.** Other players' stashes are kept out of the
-vicinity panel on their own client, and the server does not check the owner on an
-inventory move. It hides a stash from an ordinary player and from nobody else.
+Nothing stands in the world for it: the record goes to that one player's screen and
+nowhere else, and the pairing of locker and player is made on the server from who sent
+the message, so another player at the same locker cannot name it. What the player does
+with it is written to the database turn by turn, like a box.
 
 Still to come: placing anchors from a JSON file (today an admin spawns them), and the
 ten-at-once concurrency run.
 
 Three boxes -- `OZ_StorageBox_Small` (250 cells, 2 weapon slots, wooden crate model),
 `OZ_StorageBox_Medium` (500 cells, 4 slots, sea chest) and `OZ_StorageBox_Large`
-(1000 cells, 6 slots, sea chest). Two verbs on the box, "Open the box (N)" and
-"Close the box". While a box is open its cargo and slots are ordinary engine
-inventory; a close writes everything into one file under
-`$profile:OpenZone/Storage/xchg/` and deletes the entities a few dozen per
-frame; an open reads them back at 500 per second, 5 ms of a frame at most (see
-Where a closed box lives, below). Nothing is loaded on the main thread in one
-piece: the measured worst server frame across these jobs is 44 ms, with ten
-boxes (10768 entities) opening at once and a client standing among them.
+(1000 cells, 6 slots, sea chest). One verb on the box, "Show the box (N)": the record is
+read into an unannounced container of the same class at 500 entities per second, 5 ms of a
+frame at most, and streamed to the player's screen in chunks; every drag is one operation
+the server performs and writes to the database before the next (see Where a closed box
+lives, below). Nothing is loaded on the main thread in one piece: the measured worst
+server frame across these jobs is 44 ms, with ten boxes (10768 entities) filling at once
+and a client standing among them.
 
 The design and the decisions behind it: [docs/2026-09-16-storage-box-spec.md](docs/2026-09-16-storage-box-spec.md)
 (section 13 is the code as first built, section 24 the move to the bridge's SQL as the
@@ -62,8 +58,8 @@ and the later runs in [docs/measurements/](docs/measurements/), by date.
 
 | pbo | side | what |
 |---|---|---|
-| `OpenZone_Storage` | client + server | the boxes, the kits, the actions, the controller (jobs, viewers, auto-close, sort, boot rules), the store, the client viewer, the search bar |
-| `OpenZone_Storage_Bridge` | server only, stand | the `oz_storage` verb for the MCP bridge: list, spawn, status, open, close, open_all, close_all, sort, files, slot, tune, lower |
+| `OpenZone_Storage` | client + server | the boxes, the kits, the one action, the proxy (authority, sessions, mirrors, operations, per-turn commits), the fill job, the boot rules, the search bar |
+| `OpenZone_Storage_Bridge` | server only, stand | the `oz_storage` verb for the MCP bridge: list, spawn, status, files, tune, lower, and `proxy`/`auth` -- a session driven without a screen |
 | `OpenZone_StorageProbe` | client + server, stand | the measurement probe (crate, fill, inspect, blob round trip, frame monitors, the hologram diagnostic, the client control file) |
 | `OpenZone_StorageProbe_Bridge` | server only, stand | the `oz_probe` verb |
 
@@ -71,28 +67,34 @@ Only the first pbo is meant for players; the other three are stand tooling.
 
 ## Where a closed box lives
 
-A **closed** box's contents are not on this server's disk -- the truth is the OpenZone
-bridge's SQLite ([openzone-bridge](https://github.com/covalschi/openzone-bridge), a
-separate Node.js process the server must run; not the MCP bridge in the table above). An
-**open** box's truth is its ordinary engine cargo, the same as any container.
+A box's contents are never on this server's disk and never in the placed box -- the truth
+is the OpenZone bridge's SQLite ([openzone-bridge](https://github.com/covalschi/openzone-bridge),
+a separate Node.js process the server must run; not the MCP bridge in the table above).
+While somebody looks into a box its contents stand in an **authority**: a real container of
+the same class that nobody is told about and nothing saves, written to SQL turn by turn.
+The player's screen shows a client-local **proxy** of it, and every drag is an operation
+the server performs and answers. The placed box is the anchor a player walks up to; it is
+always closed and empty.
 
 - `$profile:OpenZone/OZ_Storage.json` -- the settings, written with defaults on the first
-  boot: `OpenFrameBudgetMs` 5, `OpenItemsPerSecond` 500, `CloseFrameBudgetMs` 5,
-  `CloseDeletesPerFrame` 50, `AutoCloseSeconds` 120, `ViewerHeartbeatSeconds` 5, `ViewerTimeoutSeconds` 15, `ViewerMaxDistance` 5, `DebugLog`.
-- `$profile:OpenZone/Storage/xchg/<box id>-<stamp>.bin` -- the wire: one file per close,
-  handed to the bridge by name and folded into a per-box cache, `<box id>.bin` in the same
-  folder, that the bridge alone writes and deletes. The engine only reads that cache, on an
-  open; neither file is a record of anything once the bridge has answered.
+  boot: `OpenFrameBudgetMs` 5, `OpenItemsPerSecond` 500, `ProxyRowsPerMessage` 40,
+  `ProxyMessagesPerFrame` 4, `ProxyIdleSeconds` 20, `WaitForRecord` (off: the item is
+  handed over before the bridge has confirmed the turn; on: one round trip per take-out
+  and nothing can be duplicated), `FakePingMs` (stand only), `DebugLog`.
+- `$profile:OpenZone/Storage/xchg/<box id>-<stamp>-<serial>.bin` -- the wire: one file per
+  turn, handed to the bridge by name and read into SQL; and a per-box cache, `<box id>.bin`
+  in the same folder, that the bridge alone writes and deletes and the engine reads when
+  it fills a box. Neither file is a record of anything once the bridge has answered.
 
-**The bridge is mandatory.** Open, Close and Sort are refused (`#STR_OZ_ERR_NO_BRIDGE`)
-while it is unreachable or before the boot check has answered; idle auto-close waits for it
-instead of firing, and the server never closes a box on its own shutdown (there is no
-round trip to wait in) -- an open box that goes down with the server loses at most the
-last second, the same as any container (the engine autosaves every second while a player
-is connected). At boot the engine and the bridge reconcile: SQL wins over a half-finished
-transition, an open box the engine still has cargo for is the engine's truth and closes
-into a new version, and a class the bridge remembers that no longer exists in
-`CfgVehicles`/`CfgWeapons`/`CfgMagazines` gets its root parked until the class comes back.
+**The bridge is mandatory.** A box cannot be shown (`#STR_OZ_ERR_NO_BRIDGE`) while the
+bridge is unreachable or before the boot check has answered, and a session whose bridge
+goes away ends: the record stands at the last confirmed turn, which is also what a crash
+costs. A session is held to the player -- within six metres of the box, or it ends as if
+the screen had been closed. At boot the engine and the bridge reconcile: a box SQL still
+believes open is a session the last run never ended and is closed on its record, a box
+held open by another server on the same bridge is refused here, and a class the bridge
+remembers that no longer exists in `CfgVehicles`/`CfgWeapons`/`CfgMagazines` gets its
+root parked until the class comes back.
 Full protocol: section 24 of [the spec](docs/2026-09-16-storage-box-spec.md).
 
 Admins also get a web page from the bridge itself: box lists, contents, history and a

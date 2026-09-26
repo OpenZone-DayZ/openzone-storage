@@ -36,6 +36,16 @@ class OZS_Authority
         return s_Making;
     }
 
+    // Mission finish. Statics survive a restart inside one process, and a
+    // session whose End was still waiting for the wire at the finish never
+    // discarded its row: one dead entry per such restart (review 2026-09-26,
+    // D4). The entities themselves go with the world.
+    static void Reset()
+    {
+        s_Live = null;
+        s_Making = false;
+    }
+
     protected static array<ref OZS_AuthRec> Live()
     {
         if (!s_Live)
@@ -127,14 +137,28 @@ class OZS_Authority
         OZS_AuthRec rec = RecOf(box);
         if (!rec || !item)
             return 0;
-        for (int i = 0; i < rec.m_Items.Count(); i++)
+        // ONE READ, CHECKED. The number on the item (OZS_Handle.c) is
+        // trusted only when this box's own table says it names this very
+        // entity: a number left over from a box the item has since left
+        // could otherwise collide with one this box has handed out.
+        int has = OZS_HandleTag.Read(item);
+        if (has > 0 && rec.m_ByHandle.Get(has) == item)
+            return has;
+        if (!OZS_HandleTag.Taggable(item))
         {
-            if (rec.m_Items.Get(i) == item)
-                return rec.m_Handles.Get(i);
+            // Nothing to write a number on: the table is walked, as it was
+            // for everything before 2026-09-26.
+            for (int i = 0; i < rec.m_Items.Count(); i++)
+            {
+                if (rec.m_Items.Get(i) == item)
+                    return rec.m_Handles.Get(i);
+            }
         }
         rec.m_Next++;
         rec.m_Items.Insert(item);
         rec.m_Handles.Insert(rec.m_Next);
+        rec.m_ByHandle.Set(rec.m_Next, item);
+        OZS_HandleTag.Write(item, rec.m_Next);
         return rec.m_Next;
     }
 
@@ -156,22 +180,53 @@ class OZS_Authority
         return nodes.Count() - 1;
     }
 
+    // IS THIS ENTITY STILL UNDER THIS BOX? The same question OZS_Commit.TopOf
+    // asks, and the one that has always kept a take-out honest.
+    static bool Under(OZ_StorageBox box, EntityAI item)
+    {
+        if (!box || !item)
+            return false;
+        EntityAI up = item;
+        while (up.GetHierarchyParent())
+            up = up.GetHierarchyParent();
+        return up == box;
+    }
+
+    // A HANDLE NAMES A THING IN THIS BOX, NOT A THING FOR EVER.
+    //
+    // The table holds a direct reference, and a reference does not know where
+    // its entity has got to. An item that is taken OUT is not destroyed -- it
+    // is the same entity with a new owner -- so its row survived, and the
+    // number went on working as a pass to an entity that had left: `Move`,
+    // `Combine` and `Split` would then reach into a PLAYER'S inventory and
+    // haul the item back with a LOCAL move that tells no client anything.
+    // Two players in one box was enough: B keeps the number of the thing A
+    // has just taken (owner, 2026-09-26: "why do our methods reach into an
+    // inventory?").
+    //
+    // `Out` never had the bug, and not by luck of its own -- it asks TopOf,
+    // which is this very question. Asking it here gives every other operation
+    // the same footing, whatever future one is written.
     static EntityAI ByHandle(OZ_StorageBox box, int handle)
     {
         OZS_AuthRec rec = RecOf(box);
-        if (!rec)
+        if (!rec || handle <= 0)
             return null;
-        for (int i = 0; i < rec.m_Handles.Count(); i++)
-        {
-            if (rec.m_Handles.Get(i) == handle)
-                return rec.m_Items.Get(i);
-        }
-        return null;
+        EntityAI item = rec.m_ByHandle.Get(handle);
+        if (!item || !Under(box, item))
+            return null;
+        return item;
     }
 
-    // Entries whose item is gone -- taken out, merged away, destroyed. Called
-    // when the authority is asked to describe itself, so a long session does
-    // not grow a table of the dead.
+    // Entries whose item is no longer in this box -- destroyed, merged away,
+    // or handed to a player. Called when the authority is asked to describe
+    // itself, so a long session does not grow a table of things that left.
+    //
+    // IT USED TO DROP ONLY THE DESTROYED, and the comment above it already
+    // claimed "taken out" while the code tested `!item`. A taken-out item is
+    // very much alive, so its row stayed for the rest of the session -- one
+    // per thing anybody took. ByHandle refuses such a row on its own now; this
+    // keeps the table from collecting them in the first place.
     static int Forget(OZ_StorageBox box)
     {
         OZS_AuthRec rec = RecOf(box);
@@ -180,12 +235,18 @@ class OZS_Authority
         int dropped = 0;
         for (int i = rec.m_Items.Count() - 1; i >= 0; i--)
         {
-            if (!rec.m_Items.Get(i))
-            {
-                rec.m_Items.RemoveOrdered(i);
-                rec.m_Handles.RemoveOrdered(i);
-                dropped++;
-            }
+            EntityAI item = rec.m_Items.Get(i);
+            if (Under(box, item))
+                continue;
+            // The number goes off the entity too, when it is still alive: an
+            // item handed to a player must not carry a box's number into its
+            // next box (OZS_Handle.c).
+            if (item && OZS_HandleTag.Read(item) == rec.m_Handles.Get(i))
+                OZS_HandleTag.Write(item, 0);
+            rec.m_ByHandle.Remove(rec.m_Handles.Get(i));
+            rec.m_Items.RemoveOrdered(i);
+            rec.m_Handles.RemoveOrdered(i);
+            dropped++;
         }
         return dropped;
     }
@@ -212,11 +273,46 @@ class OZS_Authority
                 continue;
             if (rec.m_Box)
             {
+                // SILENCE BEFORE THE TEARDOWN. The engine calls EECargoOut for
+                // every item as the container goes, and the box cannot tell
+                // that from a player emptying it: saying so first is what
+                // keeps 121 phantom `take` rows out of the admin history.
+                rec.m_Box.OZS_Releasing();
                 gone = gone + DeleteTree(rec.m_Box);
                 GetGame().ObjectDelete(rec.m_Box);
                 OZ_Log.Info("storage: authority for " + forId + " discarded with " + gone.ToString() + " entity(ies)");
             }
             live.RemoveOrdered(i);
+        }
+        return gone;
+    }
+
+    // EVERYTHING OUT, THE CONTAINER ITSELF LEFT STANDING. A sort rewrites the
+    // record and then rebuilds the authority from it (OZS_Session.Resort), and
+    // rebuilding means starting from an empty box -- not from a new one, which
+    // would take a new id, a new registration and a new stream.
+    //
+    // The teardown flag goes up for the same reason Discard raises it: the
+    // engine calls EECargoOut for every item on the way, and a sort is not a
+    // player emptying the box.
+    static int Empty(OZ_StorageBox box)
+    {
+        if (!box)
+            return 0;
+        box.OZS_Releasing(true);
+        int gone = DeleteTree(box);
+        // Down again: the refill and everything the player does afterwards
+        // must be audited as usual.
+        box.OZS_Releasing(false);
+        // And the handles with them: the items they named are gone, and a
+        // rebuilt box hands out its own.
+        Forget(box);
+        OZS_AuthRec rec = RecOf(box);
+        if (rec)
+        {
+            rec.m_Items.Clear();
+            rec.m_Handles.Clear();
+            rec.m_ByHandle.Clear();
         }
         return gone;
     }
@@ -269,14 +365,17 @@ class OZS_Authority
 }
 
 // One authority: the container, the id it stands for, and its handle table.
-// Two parallel arrays rather than a map because Enforce's map wants a key it
-// can hash, and an EntityAI is not one.
+// Two parallel arrays for walking the table (Forget, Status), a map from the
+// number to the entity for looking one up, and the number itself on the
+// entity for the other direction (OZS_Handle.c): each lookup is one read
+// where it used to be a walk (review 2026-09-26, D1).
 class OZS_AuthRec
 {
     OZ_StorageBox m_Box;
     string m_For;
     ref array<EntityAI> m_Items;
     ref array<int> m_Handles;
+    ref map<int, EntityAI> m_ByHandle;
     int m_Next;
 
     void OZS_AuthRec(OZ_StorageBox box, string forId)
@@ -285,6 +384,7 @@ class OZS_AuthRec
         m_For = forId;
         m_Items = new array<EntityAI>();
         m_Handles = new array<int>();
+        m_ByHandle = new map<int, EntityAI>();
         m_Next = 0;
     }
 }

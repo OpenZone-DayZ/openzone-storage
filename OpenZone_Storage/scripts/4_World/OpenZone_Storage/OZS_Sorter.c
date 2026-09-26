@@ -57,9 +57,23 @@ class OZS_Sorter
             EntityAI item = roots.Get(index);
             if (!item)
                 continue;
+            // THE SHAPE IT ACTUALLY HAS, TURN AND ALL.
+            //
+            // `GetInventoryItemSize` answers the CONFIG's size and knows
+            // nothing about a turned item: a rag lying across three cells came
+            // back as one wide and three tall, so the planner reserved a
+            // narrow column for it and the restore then stood it sideways
+            // across two neighbours. The player saw a cell that looked empty,
+            // refused every drop, and the refusal blamed the exchange
+            // (owner, 2026-09-26).
+            //
+            // OZS_Ops.SizeOf reads the cargo's own numbers and swaps them when
+            // the item is flipped, which is the same shape every other check
+            // in this mod measures against.
             int w = 1;
             int h = 1;
-            GetGame().GetInventoryItemSize(InventoryItem.Cast(item), w, h);
+            if (!OZS_Ops.SizeOf(item, w, h))
+                GetGame().GetInventoryItemSize(InventoryItem.Cast(item), w, h);
             if (w < 1)
                 w = 1;
             if (h < 1)

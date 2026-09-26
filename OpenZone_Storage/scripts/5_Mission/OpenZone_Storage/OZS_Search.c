@@ -405,7 +405,16 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
     {
         if (w == m_Sort && m_Box)
         {
-            m_Box.RPCSingleParam(OZS_Const.RPC_SORT_ID, new Param1<bool>(true), true);
+            // THROUGH THE PROXY'S OWN WIRE, not at the box on the ground.
+            //
+            // The placed box is never open under this scheme, and the sort's
+            // first test was exactly "is it open" -- so a press on this button
+            // was answered with "opening" and nothing happened, silently
+            // (2026-09-26). The mirror is the thing that holds the contents,
+            // so it is the thing that is asked to tidy them.
+            OZS_Mirror mine = OZS_Mirrors.Of(m_Box);
+            if (mine)
+                mine.Sort();
             return true;
         }
         if (w == m_Count)
