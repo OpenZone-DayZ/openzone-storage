@@ -569,3 +569,11 @@ placed again gets a new persistent id, so an admin `restore`/`move` is the
 way back to a lost box's roots. A stash is keyed by position and needs
 nothing: the locker placed again on the same metre found the kit.
 
+---
+
+Everything above was committed as `f970c34` (the Workshop description within
+Steam's 8000-byte limit as `a23cb33`) and pushed on 2026-09-26; the bridge's
+`eb86ab5` pushed with it; Workshop item 3803455084 updated with this build
+at 14:14Z. "Not committed, not pushed" lines above describe the moment they
+were written.
+
