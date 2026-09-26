@@ -577,3 +577,133 @@ Steam's 8000-byte limit as `a23cb33`) and pushed on 2026-09-26; the bridge's
 at 14:14Z. "Not committed, not pushed" lines above describe the moment they
 were written.
 
+### Evening, live with two players: a sort on a nearly full box parked a rifle
+
+The owner and a second player used a Large box together (both watching,
+in and out constantly, items raced -- `no such item` refusals for the
+loser, no errors). At 976 of 1000 cells the owner pressed Sort: the
+planner packs by name, an AKM late in the alphabet found no 8x3 block in
+the new layout, the refill had nowhere to put it and parked the root with
+the bridge -- an item lost to a tidy-up, out of a box that held it a
+second earlier (`root 239 of 240 (AKM) cannot be read: no room in the
+box`). Fixed in source: `OZS_Ops.Sort` counts the cargo roots and refuses
+with `#STR_OZS_SORT_FULL` ("The box is too full to sort") when the planner
+placed fewer than all of them, moving nothing. Lint clean, not yet built
+-- the stand is in use. The parked AKM stays in `storage_parked` for an
+`unpark` once a block frees up.
+
+The seeder's `send` stage queues one turn per item and the session's queue
+holds sixteen: send in batches of 16 or the rest is refused as stale. The
+bridge's `give` needs the box closed in SQL; between two players' sessions
+it is, for the twenty idle seconds, which is enough for a retrying loop.
+
+### Evening, second pass: the warm cache, the teardown as a job, the magazine
+
+Three things from the same live session, all in source and lint clean, NOT
+BUILT: the stand is still in use by two players and the running server
+holds the pbo.
+
+**The warm cache is five minutes.** `ProxyIdleSeconds` is how long an
+authority is kept after the last watcher left, and a player who opens the
+box again inside that time gets it at once -- no read of the record, no
+refill. It was 20 s. The owner's word: five minutes. Applied to the running
+stand without a restart (`tune px_idle=300`, answered `idle=300s`), written
+into the stand's settings file, and made the shipped default: settings v7,
+whose migration gives a file still at the old default the new one and leaves
+an admin's own number alone. The price, stated: the memory of idle
+authorities, and a box that stays `open` in SQL for those five minutes,
+which is where the bridge refuses an admin's give, edit or rollback.
+
+**The teardown is a job.** `OZS_Authority.Discard` (a session's end) and
+`Empty` (a sort's refill) called `ObjectDelete` on every entity of an
+authority in one frame -- 240 for a full large box -- and the engine pays
+for each at the end of that frame. That was the last one-frame burst the
+scheme had left once the closing write was paced. Now `OZS_Teardown` lists
+the entities once, deepest first, and `OZS_Authority.OnFrame` (from
+`OZS_Proxies.OnFrame`) deletes `ReleaseDeletesPerFrame` of them a frame --
+50 by default, one budget shared by every teardown running. A discard
+deletes the box after the last of them; an empty leaves it standing and
+lowers its teardown flag then, so the refill is audited as usual. The sort
+therefore runs in two steps: `Resort` shuts the box, starts the emptying
+and restarts the screens; the session's `OnFrame` polls the job and asks
+for the refill the frame it is done (an entity deleted this frame holds its
+cells until the frame ends, and a refill over it would find no room). A
+close arriving meanwhile waits for the emptying and then ends with nothing
+to write: the sort's letter went first and the record holds the layout. At
+the mission's stop `EndAll` finishes every teardown at once, as it does the
+closing write. The stand's `tune` verb takes `release=N`.
+
+**The magazine on a weapon in the proxy.** The owner's screenshot: the AKM
+with the 75-round drum was drawn without it, while the panel listed the drum
+and the proxy held it (`tree 2`). Read from source: a weapon draws its
+magazine only when told to -- `Weapon_Base.ShowMagazine`/`HideMagazine`
+switch the selection (`SelectionMagazineShow`, or the simple hidden
+selection on the weapons that have one), and the game calls them from the
+weapon's state machine and from `ForceSyncSelectionState`; `EEItemAttached`
+on a weapon only refreshes its property modifiers (weapon_base.c:1116). A
+magazine created straight into the slot of a client-local weapon runs
+neither. `OZS_Mirror` now calls `ForceSyncSelectionState` on the weapon a
+row hangs on (Add), on both weapons a magazine moves between (Place), and
+hides it by name when the magazine's row is forgotten (Forget: the deletion
+is deferred to the frame's end, so a resync would still see it). The
+chamber the same call reads is empty on a proxy and stays hidden, which is
+right. Unverified on the stand until the rebuild. The other rifles in the
+box were seeded without magazines; nothing is missing from them.
+
+Still open from the same evening: the parked AKM (an `unpark` once a block
+frees up), and the second player's VPP super-admin entry, which this
+session was not allowed to write -- it is one line in
+`profiles/VPPAdminTools/Permissions/SuperAdmins/SuperAdmins.txt`, or the
+Permissions manager in VPP's own menu.
+
+### The charge beside the box: a ruined authority emptied the record
+
+The owner set off explosives beside the anchor, next to the first filled box
+(a large box of 272 roots). The authority of that box -- the real container
+that holds a session's contents -- stands in the placed box's own
+coordinates: unannounced, but solid on the server. The blast ruined it, and
+`Container_Base.EEHealthLevelChanged` answers RUINED by dropping the whole
+inventory on the ground (container_base.c:96). The watchdog shouted 264
+times -- 103 nails, 33 ammunition piles, 32 bandages, 30 apples, 20
+canteens, 20 bags, 13 rags, 8 rifles, a plum, a pear, a PDA -- `LEFT the
+authority and is now in nowhere`, each with the same stack through
+`DropAllItemsInInventoryInBounds`. Five minutes later the session's idle
+clock ended it, and the closing write did exactly what it is for: it set
+the record to what the box held. Nothing. The 264 entities lay in a pile at
+the box's coordinates as server-local ghosts, invisible to every client and
+bound for the world save; 239 of them were deleted by class before the
+wipe, the rest went with the world.
+
+Four guards, all in source, built and booted on the wiped stand:
+
+- **The authority takes no damage.** `SetAllowDamage(false)` right after
+  its creation (`OZS_Authority.Create`). It is contents in a container's
+  shape, not a thing in the world.
+- **A ruined authority keeps what it holds.** `OZ_StorageBox.
+  EEHealthLevelChanged` does nothing for an authority but log an error, so
+  whatever else changes its health level, vanilla's dump never runs on one.
+- **The watchdog acts, on every server.** It used to run behind `DebugLog`
+  and only say what it saw. Now an item that leaves an authority without an
+  operation is deleted (the record still describes it; the next open builds
+  it again exactly once) and the session is told it is compromised. The
+  walk it costs is a few pointer hops per item that changes hands, skipped
+  outright while no authority stands (`OZS_Authority.Any`).
+- **A compromised session writes nothing on the way out.** `OZS_Session.
+  Compromised` marks the record as already written, `OnFrame` ends the
+  session on the next frame, and the drift check neither compares nor
+  repairs: setting the record to what a compromised box holds is the write
+  that emptied one. The record stays at its last committed turn.
+
+The stand was wiped on the owner's word -- the world save and the storage
+half of the bridge's database (backup `state/bridge.sqlite.before-wipe2-
+2026-09-26`) -- and brought up again on this build.
+
+Read out of the same session, not yet explained and to be reproduced by
+the probe: a split of a stack lying inside a container hung in a stash's
+slot is refused by the engine itself (`CanBeSplit` asks
+`CanRemoveEntity`, and it answers no there); a move inside such a container
+comes back to the client under the container's own handle and forces a
+restream every time; and the owner's "six rags again" -- a stack split in
+a box that shows its whole pre-split count once taken back into the
+inventory -- did not leave a trace in either log.
+

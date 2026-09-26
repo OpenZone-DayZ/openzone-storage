@@ -92,6 +92,9 @@ modded class DZMCP_BridgeCore
             v = OZS_Arg(args, "px_idle", "");
             if (v != "")
                 st.ProxyIdleSeconds = v.ToInt();
+            v = OZS_Arg(args, "release", "");
+            if (v != "")
+                st.ReleaseDeletesPerFrame = v.ToInt();
             v = OZS_Arg(args, "ping", "");
             if (v != "")
                 st.FakePingMs = v.ToInt();
@@ -103,6 +106,7 @@ modded class DZMCP_BridgeCore
             }
             detail = "rate=" + st.OpenItemsPerSecond;
             detail = detail + " proxy=" + st.ProxyRowsPerMessage + "x" + st.ProxyMessagesPerFrame + "/frame idle=" + st.ProxyIdleSeconds + "s";
+            detail = detail + " release=" + st.ReleaseDeletesPerFrame + "/frame";
             detail = detail + " ping=" + st.FakePingMs + "ms wait_for_record=" + st.WaitForRecord;
             return true;
         }

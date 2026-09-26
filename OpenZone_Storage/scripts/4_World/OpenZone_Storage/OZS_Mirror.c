@@ -678,9 +678,29 @@ class OZS_Mirror
             }
         }
         Dress(made, r);
+        if (r.lt == InventoryLocationType.ATTACHMENT)
+            SyncWeapon(parent);
         m_Handles.Insert(r.handle);
         m_Items.Insert(made);
         m_Spent = m_Spent + (GetGame().GetTickTime() - t0);
+    }
+
+    // A WEAPON DRAWS ITS MAGAZINE ONLY WHEN TOLD TO. The magazine selection
+    // of a weapon is switched by Weapon_Base.ShowMagazine/HideMagazine
+    // (SelectionMagazineShow, or the simple hidden selection on the weapons
+    // that have one), and the only callers in the game are the weapon's own
+    // state machine and ForceSyncSelectionState. A magazine created straight
+    // into the slot of a local weapon runs neither: EEItemAttached on a
+    // weapon only refreshes its property modifiers (weapon_base.c:1116). So
+    // the proxy held the drum, the panel listed it, and the AKM was drawn
+    // without it (owner, 2026-09-26). ForceSyncSelectionState reads what is
+    // attached now and shows or hides accordingly; the chamber it also
+    // reads is empty on a proxy, and stays hidden, which is right.
+    static void SyncWeapon(EntityAI e)
+    {
+        Weapon_Base wpn = Weapon_Base.Cast(e);
+        if (wpn)
+            wpn.ForceSyncSelectionState();
     }
 
     // What of an item's state the proxy is given. Not the blob: it would buy
@@ -855,6 +875,8 @@ class OZS_Mirror
         // told are the echo of a move it made itself a moment ago.
         if (Matches(src, parent, r))
             return true;
+        // Whose slot a magazine leaves: told below, once it has (SyncWeapon).
+        EntityAI before = e.GetHierarchyParent();
         InventoryLocation dst = new InventoryLocation();
         if (r.lt == InventoryLocationType.ATTACHMENT)
             dst.SetAttachment(parent, e, r.slot);
@@ -870,6 +892,13 @@ class OZS_Mirror
         if (r.lt == InventoryLocationType.CARGO && r.row >= 0)
             Vacate(parent, e, r);
         bool took = e.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
+        // A local move is immediate, so both weapons -- the one the magazine
+        // left and the one it landed on -- read their slots right now.
+        if (Magazine.Cast(e))
+        {
+            SyncWeapon(before);
+            SyncWeapon(parent);
+        }
         // WHERE IT ACTUALLY WENT, NOT WHAT THE CALL SAID. `TakeToDst` has been
         // seen to answer true and leave the item where it was, and on a drop
         // onto a TAKEN cell it can leave two items lying over one another: the
@@ -1511,7 +1540,15 @@ class OZS_Mirror
             m_Handles.RemoveOrdered(i);
             m_Items.RemoveOrdered(i);
             if (andDelete)
+            {
+                // Hidden by name, not resynced: the deletion is deferred to
+                // the end of the frame, and until then the weapon would
+                // still answer that the magazine is attached (SyncWeapon).
+                Weapon_Base wpn = Weapon_Base.Cast(e.GetHierarchyParent());
+                if (wpn && Magazine.Cast(e))
+                    wpn.HideMagazine();
                 GetGame().ObjectDelete(e);
+            }
         }
     }
 

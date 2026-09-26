@@ -115,6 +115,10 @@ class OZS_Proxies
 
     void OnFrame(float timeslice)
     {
+        // The authorities being let go, a few deletions a frame -- before the
+        // sessions, so a resort waiting for its box to empty sees it empty in
+        // the same frame the last entity went.
+        OZS_Authority.OnFrame();
         for (int i = m_Sessions.Count() - 1; i >= 0; i--)
         {
             OZS_Session s = m_Sessions.Get(i);
@@ -142,6 +146,9 @@ class OZS_Proxies
             s.FinishWholeNow();
         }
         m_Sessions.Clear();
+        // And the authorities they let go: deleted a few a frame while the
+        // mission runs, all at once now that it stops.
+        OZS_Authority.FinishAllNow();
     }
 
     string Status()
@@ -354,6 +361,25 @@ class OZS_Session
     // and a box that repairs itself once per turn looks to the player like
     // nothing they do takes effect (owner, 2026-09-25).
     int m_Repairs;
+    // THE BOX LOST SOMETHING TO SOMEBODY WHO IS NOT THIS MOD. Raised by the
+    // watchdog when an item leaves the authority without an operation -- a
+    // ruined container dropping its inventory was the case that wrote it
+    // (owner's charge, 2026-09-26). From then on the box is not the truth
+    // about the record: nothing is written on the way out, no drift repair
+    // sets the record to what the box holds, and the session ends on the
+    // next frame with the record at its last committed turn.
+    bool m_Compromised;
+
+    void Compromised(string what)
+    {
+        if (m_Compromised || m_Ended)
+            return;
+        m_Compromised = true;
+        // Nothing to write: the closing write states what the container
+        // holds, and that stopped being the truth just now.
+        m_Wrote = true;
+        OZ_Log.Error("storage: proxy: box " + m_Id + " is compromised: " + what + "; the record stays at its last turn and the session ends");
+    }
 
     void OZS_Session(string id, string cls, vector spot)
     {
@@ -363,6 +389,7 @@ class OZS_Session
         m_Watchers = new array<ref OZS_Watcher>();
         m_Waiting = new array<ref OZS_Waiting>();
         m_Delayed = new array<ref OZS_Waiting>();
+        m_Compromised = false;
         m_Version = 0;
         m_Empty = 0;
         m_Ended = false;
@@ -514,10 +541,26 @@ class OZS_Session
     {
         if (m_Ended)
             return;
+        // A box that lost items outside the mod ends at once, writing
+        // nothing; End waits for a turn still on the wire, and OnCommitted
+        // brings it back here.
+        if (m_Compromised)
+        {
+            End();
+            return;
+        }
         // The absolute letter being written, a budget's worth per frame.
         TickWhole(OZS_Settings.Get().OpenFrameBudgetMs * 0.001);
         if (m_Ended)
             return;
+        // A sort whose box is being emptied, a few deletions a frame: the
+        // refill starts the frame the last of them has gone.
+        if (m_Emptying)
+        {
+            Resort();
+            if (m_Ended)
+                return;
+        }
         // The stand's fake ping: operations whose delay has passed run now,
         // in the order they came.
         while (m_Delayed.Count() > 0 && m_Delayed.Get(0).m_Due <= GetGame().GetTickTime())
@@ -567,7 +610,7 @@ class OZS_Session
             return true;
         if (m_Watchers.Count() > 0)
             return false;
-        if (m_Flying > 0 || m_Whole)
+        if (m_Flying > 0 || m_Whole || m_Emptying)
             return false;
         return m_Empty >= OZS_Settings.Get().ProxyIdleSeconds;
     }
@@ -595,7 +638,9 @@ class OZS_Session
         // queue exists so there is never more than one, and this is the last
         // place that has to respect it. A repair's job running now posts,
         // is answered, and the answer brings us back here (OnCommitted).
-        if (m_Auth && (m_Flying > 0 || m_Whole))
+        // A box being emptied for a sort is no different: it is half gone,
+        // and Resort brings us back here when the last entity has.
+        if (m_Auth && (m_Flying > 0 || m_Whole || m_Emptying))
         {
             m_Closing = true;
             return;
@@ -661,7 +706,7 @@ class OZS_Session
         if (m_Auth)
         {
             int gone = OZS_Authority.Discard(m_Id);
-            OZ_Log.Info("storage: proxy: session " + m_Id + " ended, " + gone.ToString() + " entity(ies) released");
+            OZ_Log.Info("storage: proxy: session " + m_Id + " ended, " + gone.ToString() + " entity(ies) being released");
             m_Auth = null;
         }
         // AND THE BRIDGE IS TOLD THE BOX IS SHUT.
@@ -941,16 +986,65 @@ class OZS_Session
     // filled it the first time: item by item, on the frame budget, into a real
     // container. That is the whole reason a sort does not have to move a
     // hundred things around a live box.
+    //
+    // IN TWO STEPS, A FEW FRAMES APART. The emptying is a job of the
+    // authority (OZS_Teardown, ReleaseDeletesPerFrame a frame), and the
+    // refill cannot be asked for until it is done: an entity deleted this
+    // frame holds its cells until the frame ends, and a refill over it would
+    // find no room. The box is shut for the whole of it, exactly as it is
+    // during the refill, so a turn arriving meanwhile is refused the same
+    // way. OnFrame calls back here every frame while `m_Emptying` stands.
+    protected ref OZS_Teardown m_Emptying;
+
     protected void Resort()
     {
+        if (m_Emptying)
+        {
+            if (!m_Emptying.IsDone())
+                return;
+            m_Emptying = null;
+            if (m_Ended || !m_Auth)
+                return;
+            // Closed while the box was being emptied: the record already
+            // holds the sorted layout (the sort's letter went first), and a
+            // box with nothing in it has nothing to write on the way out.
+            if (m_Closing)
+            {
+                OZ_Log.Info("storage: proxy: box " + m_Id + " was closed while being emptied for a sort; the record holds the sorted layout");
+                m_Wrote = true;
+                m_Closing = false;
+                End();
+                return;
+            }
+            Refill();
+            return;
+        }
         if (!m_Resort)
             return;
         m_Resort = false;
         if (m_Ended || !m_Auth)
             return;
-        int gone = OZS_Authority.Empty(m_Auth);
         m_Auth.OZS_ForgetRoots();
         m_Auth.OZS_SetState(OZS_Const.STATE_CLOSED);
+        m_Emptying = OZS_Authority.Empty(m_Auth);
+        if (!m_Emptying)
+        {
+            Fail("the box could not be emptied for the sort");
+            return;
+        }
+        OZ_Log.Info("storage: proxy: box " + m_Id + " is being emptied for the sort, " + m_Emptying.Count().ToString() + " entity(ies)");
+        // Every screen starts again: the rows they hold name cells that are
+        // all about to change. Sent now rather than after the refill's
+        // request, so no client draws a box that is half gone.
+        for (int i = 0; i < m_Watchers.Count(); i++)
+            m_Watchers.Get(i).Restart();
+        // Nothing to delete -- an empty box sorted -- refills at once.
+        if (m_Emptying.IsDone())
+            Resort();
+    }
+
+    protected void Refill()
+    {
         string why;
         if (!OZS_Controller.Get().RequestOpenAs(m_Auth, "sort", "", why))
         {
@@ -961,11 +1055,7 @@ class OZS_Session
             Fail("the box could not be refilled after the sort");
             return;
         }
-        OZ_Log.Info("storage: proxy: box " + m_Id + " emptied " + gone.ToString() + " entity(ies) and is refilling in sorted order");
-        // Every screen starts again: the rows they hold name cells that have
-        // all just changed.
-        for (int i = 0; i < m_Watchers.Count(); i++)
-            m_Watchers.Get(i).Restart();
+        OZ_Log.Info("storage: proxy: box " + m_Id + " is refilling in sorted order");
     }
 
     // ---- several steps, one letter ---------------------------------------
@@ -1187,6 +1277,14 @@ class OZS_Session
             NextWaiting();
             return;
         }
+        // NOT COMPARED, AND NOT REPAIRED: a compromised box disagrees with
+        // the record by definition, and setting the record to what it holds
+        // is exactly the write that emptied one (2026-09-26).
+        if (m_Compromised)
+        {
+            End();
+            return;
+        }
         int here = OZS_Records.CountTree(m_Auth) - 1;
         int roothere = m_Auth.OZS_CountEntities();
         if (here != entities || roothere != roots)
@@ -1286,6 +1384,9 @@ class OZS_Session
             m_Whole.Abort();
             m_Whole = null;
         }
+        // An emptying still running finishes by itself under the authority;
+        // the discard below only adds what is left of the box to the queue.
+        m_Emptying = null;
         // NO CLOSING WRITE ON THE WAY OUT OF A FAILURE. Whoever called Fail
         // has already decided the record cannot be put straight -- the repair
         // was tried and refused, or the bridge is gone. Trying again from here

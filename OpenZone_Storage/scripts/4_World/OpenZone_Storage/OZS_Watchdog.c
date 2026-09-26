@@ -29,22 +29,28 @@ class OZS_Watchdog
 
     // An item changed owner. The interesting case is the one that costs the
     // box an item: it WAS in an authority and now is not.
+    //
+    // NO LONGER ONLY A WITNESS (2026-09-26). It used to run behind the debug
+    // flag and only say what it saw. A charge set off beside a placed box
+    // ruined the authority standing in its coordinates, vanilla dropped all
+    // 264 entities on the ground, this shouted 264 times -- and then the
+    // session's closing write set the record to what the box held, nothing.
+    // Now the stray is DELETED, since the record still describes it and the
+    // next open builds it again exactly once, and the session is told it is
+    // compromised, so nothing is written over the record on the way out.
+    // That has to run on every server, not only on one with DebugLog on;
+    // the walk below is a few pointer hops on an event, not a frame, and it
+    // is skipped outright while no authority stands (OZS_Authority.Any).
     static void Moved(EntityAI e, EntityAI old_owner, EntityAI new_owner)
     {
-        // BEHIND THE DEBUG FLAG, AND FIRST. This runs from `ItemBase.
-        // OnItemLocationChanged`, which fires for EVERY item that changes
-        // hands anywhere in the world -- not only in a box. The walk up the
-        // hierarchy below is cheap, but cheap times everything is a cost the
-        // owner should be able to switch off (owner, 2026-09-25). The flag is
-        // the mod's own `DebugLog`, the one that already decides whether Dbg
-        // lines are written at all.
-        if (!OZ_Log.IsDebug())
-            return;
         if (!GetGame() || !GetGame().IsServer() || !e || !old_owner)
+            return;
+        if (!OZS_Authority.Any())
             return;
         if (OZS_Controller.IsShuttingDown())
             return;
-        if (!InAuthority(old_owner))
+        OZ_StorageBox box = AuthorityOf(old_owner);
+        if (!box)
             return;
         if (e == s_Expected)
         {
@@ -56,16 +62,30 @@ class OZS_Watchdog
         string now = "nowhere";
         if (new_owner)
             now = new_owner.GetType();
-        OZ_Log.Error("storage: proxy: " + e.GetType() + " LEFT the authority (" + old_owner.GetType() + ") and is now in " + now);
-        DumpStack();
+        OZ_Log.Error("storage: proxy: " + e.GetType() + " LEFT the authority (" + old_owner.GetType() + ") and is now in " + now + "; it is deleted, the record keeps it");
+        if (OZ_Log.IsDebug())
+            DumpStack();
+        OZS_Session s = OZS_Proxies.Get().Find(box.OZS_GetId());
+        if (s)
+            s.Compromised(e.GetType() + " left the box without an operation (now in " + now + ")");
+        GetGame().ObjectDelete(e);
     }
 
     static bool InAuthority(EntityAI e)
+    {
+        return AuthorityOf(e) != null;
+    }
+
+    // The authority an entity stands in, by its hierarchy root; null when it
+    // stands in none.
+    static OZ_StorageBox AuthorityOf(EntityAI e)
     {
         EntityAI root = e;
         while (root.GetHierarchyParent())
             root = root.GetHierarchyParent();
         OZ_StorageBox box = OZ_StorageBox.Cast(root);
-        return box && box.OZS_IsAuthority();
+        if (box && box.OZS_IsAuthority())
+            return box;
+        return null;
     }
 }

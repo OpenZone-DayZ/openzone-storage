@@ -36,12 +36,24 @@ class OZS_Authority
         return s_Making;
     }
 
+    // Whether any authority stands at all: the watchdog's first question,
+    // asked on every item that changes hands anywhere in the world.
+    static bool Any()
+    {
+        return s_Live && s_Live.Count() > 0;
+    }
+
     // Mission finish. Statics survive a restart inside one process, and a
     // session whose End was still waiting for the wire at the finish never
     // discarded its row: one dead entry per such restart (review 2026-09-26,
     // D4). The entities themselves go with the world.
     static void Reset()
     {
+        // Whatever was still being deleted a few a frame goes now: no frames
+        // are coming, and an authority left standing is a box of items the
+        // next mission would find (ECE_NOPERSISTENCY_WORLD keeps it out of
+        // the save, but not out of the process).
+        FinishAllNow();
         s_Live = null;
         s_Making = false;
     }
@@ -88,6 +100,15 @@ class OZS_Authority
         // AFTER creation: EEInit has left the id empty on purpose, and an
         // authority answers with the id of the box whose contents it holds.
         box.OZS_StandForId(forId);
+        // NOTHING HURTS IT. It stands in the placed box's own coordinates,
+        // unannounced but solid on the server, and a charge set off beside
+        // the box ruined it as well (owner, 2026-09-26). Container_Base
+        // answers RUINED by dropping everything it holds on the ground
+        // (container_base.c:96): 264 entities left this box in one frame,
+        // and the closing write then told the record the box was empty.
+        // An authority is contents in a container's shape, not a thing in
+        // the world; the world may not damage it.
+        box.SetAllowDamage(false);
         OZS_AuthRec rec = new OZS_AuthRec(box, forId);
         Live().Insert(rec);
         OZ_Log.Info("storage: authority for " + forId + " created as " + cls + ", netid " + box.GetNetworkIDString());
@@ -262,6 +283,13 @@ class OZS_Authority
     // Contents are deleted deepest-first rather than left to the container's
     // own deletion. It probably takes them with it; "probably" is how this
     // project got its ghosts on 2026-09-18.
+    //
+    // A FEW A FRAME, NOT ALL AT ONCE (owner, 2026-09-26: "deletion has to be
+    // budgeted like the write, N a frame"). The entities are listed here and
+    // deleted by OnFrame, ReleaseDeletesPerFrame of them a frame; the box
+    // itself goes after the last of them. The registration is dropped at
+    // once, so a session opening the same box again gets a fresh authority
+    // while the old one is still on its way out. Returns how many are going.
     static int Discard(string forId)
     {
         int gone = 0;
@@ -278,9 +306,9 @@ class OZS_Authority
                 // that from a player emptying it: saying so first is what
                 // keeps 121 phantom `take` rows out of the admin history.
                 rec.m_Box.OZS_Releasing();
-                gone = gone + DeleteTree(rec.m_Box);
-                GetGame().ObjectDelete(rec.m_Box);
-                OZ_Log.Info("storage: authority for " + forId + " discarded with " + gone.ToString() + " entity(ies)");
+                OZS_Teardown job = new OZS_Teardown(rec.m_Box, forId, true);
+                Teardowns().Insert(job);
+                gone = gone + job.Count();
             }
             live.RemoveOrdered(i);
         }
@@ -295,17 +323,21 @@ class OZS_Authority
     // The teardown flag goes up for the same reason Discard raises it: the
     // engine calls EECargoOut for every item on the way, and a sort is not a
     // player emptying the box.
-    static int Empty(OZ_StorageBox box)
+    //
+    // Paced the same way as a discard, and the caller waits for the job
+    // (OZS_Session.Resort polls IsDone) before it asks for the refill: an
+    // item deleted this frame still holds its cells until the frame ends,
+    // and a refill started over it would find no room. The flag comes down
+    // when the last entity has gone (Finish), not here.
+    static OZS_Teardown Empty(OZ_StorageBox box)
     {
         if (!box)
-            return 0;
+            return null;
         box.OZS_Releasing(true);
-        int gone = DeleteTree(box);
-        // Down again: the refill and everything the player does afterwards
-        // must be audited as usual.
-        box.OZS_Releasing(false);
-        // And the handles with them: the items they named are gone, and a
-        // rebuilt box hands out its own.
+        OZS_Teardown job = new OZS_Teardown(box, box.OZS_GetId(), false);
+        Teardowns().Insert(job);
+        // The handles go now: the items they named are on their way out, and
+        // a rebuilt box hands out its own.
         Forget(box);
         OZS_AuthRec rec = RecOf(box);
         if (rec)
@@ -314,33 +346,75 @@ class OZS_Authority
             rec.m_Handles.Clear();
             rec.m_ByHandle.Clear();
         }
-        return gone;
+        return job;
     }
 
-    // Everything under `root`, deepest first, root itself left alone.
-    protected static int DeleteTree(EntityAI root)
+    // ---- the teardowns, a few a frame -------------------------------------
+
+    protected static ref array<ref OZS_Teardown> s_Teardowns;
+
+    protected static array<ref OZS_Teardown> Teardowns()
     {
-        array<EntityAI> nodes = new array<EntityAI>();
-        array<int> parents = new array<int>();
-        OZS_Records.Flatten(root, -1, nodes, parents);
-        int gone = 0;
-        // Flatten lists a parent before its children, so backwards is
-        // deepest-first.
-        for (int i = nodes.Count() - 1; i >= 1; i--)
+        if (!s_Teardowns)
+            s_Teardowns = new array<ref OZS_Teardown>();
+        return s_Teardowns;
+    }
+
+    // Every frame, from OZS_Proxies.OnFrame. ONE budget for all the
+    // teardowns running, not one each: two sessions ending in the same
+    // second must not cost the frame twice what the setting allows.
+    static void OnFrame()
+    {
+        if (!s_Teardowns || s_Teardowns.Count() == 0)
+            return;
+        Step(OZS_Settings.Get().ReleaseDeletesPerFrame);
+    }
+
+    // The mission is stopping: everything still listed goes in this frame.
+    static void FinishAllNow()
+    {
+        if (!s_Teardowns || s_Teardowns.Count() == 0)
+            return;
+        int left = s_Teardowns.Count();
+        Step(-1);
+        OZ_Log.Info("storage: " + left.ToString() + " teardown(s) finished at once for the stop");
+    }
+
+    // `budget` is how many deletions this frame may spend; below zero, all.
+    protected static void Step(int budget)
+    {
+        int i = 0;
+        while (i < s_Teardowns.Count())
         {
-            if (nodes.Get(i))
+            OZS_Teardown job = s_Teardowns.Get(i);
+            budget = job.Step(budget);
+            if (job.IsDone())
             {
-                GetGame().ObjectDelete(nodes.Get(i));
-                gone++;
+                job.Finish();
+                s_Teardowns.RemoveOrdered(i);
             }
+            else
+            {
+                i++;
+            }
+            if (budget == 0)
+                return;
         }
-        return gone;
+    }
+
+    static int TeardownCount()
+    {
+        if (!s_Teardowns)
+            return 0;
+        return s_Teardowns.Count();
     }
 
     static string Status()
     {
         array<ref OZS_AuthRec> live = Live();
         string s = "authorities=" + live.Count();
+        if (TeardownCount() > 0)
+            s = s + " tearing_down=" + TeardownCount().ToString();
         for (int i = 0; i < live.Count(); i++)
         {
             OZS_AuthRec rec = live.Get(i);
@@ -369,6 +443,104 @@ class OZS_Authority
 // number to the entity for looking one up, and the number itself on the
 // entity for the other direction (OZS_Handle.c): each lookup is one read
 // where it used to be a walk (review 2026-09-26, D1).
+// THE TEARDOWN OF ONE AUTHORITY, AS A JOB. Its entities are listed once,
+// deepest first (Flatten lists a parent before its children, so the list is
+// walked backwards), and OZS_Authority.Step deletes a budget's worth a frame.
+// A discard deletes the container itself after the last of them; an empty
+// leaves it standing and lowers its teardown flag, so the refill that
+// follows is audited as usual.
+//
+// WHY A JOB. Discard and Empty used to call ObjectDelete on everything in
+// one frame -- 240 entities for a full large box, a thousand for a nested
+// one -- and the engine pays for each deletion at the end of that frame: the
+// world index, the physics, the network, the inventory tree. Once the
+// closing write became a job (OZS_WholeJob) this was the last one-frame
+// burst the scheme had left (owner, 2026-09-26).
+class OZS_Teardown
+{
+    protected ref array<EntityAI> m_Nodes;
+    protected OZ_StorageBox m_Box;
+    protected string m_For;
+    protected bool m_DiscardBox;
+    // The next index to delete, walking down to 1; index 0 is the box.
+    protected int m_Next;
+    protected int m_Gone;
+    protected int m_Frames;
+    protected bool m_Finished;
+
+    void OZS_Teardown(OZ_StorageBox box, string forId, bool discardBox)
+    {
+        m_Box = box;
+        m_For = forId;
+        m_DiscardBox = discardBox;
+        m_Nodes = new array<EntityAI>();
+        array<int> parents = new array<int>();
+        OZS_Records.Flatten(box, -1, m_Nodes, parents);
+        m_Next = m_Nodes.Count() - 1;
+        m_Gone = 0;
+        m_Frames = 0;
+        m_Finished = false;
+    }
+
+    // How many entities this job will delete, the box itself not counted.
+    int Count()
+    {
+        return m_Nodes.Count() - 1;
+    }
+
+    bool IsDone()
+    {
+        return m_Next < 1;
+    }
+
+    // Deletes up to `budget` entities (all of them below zero) and answers
+    // with what is left of the budget.
+    int Step(int budget)
+    {
+        if (IsDone())
+            return budget;
+        m_Frames++;
+        while (m_Next >= 1)
+        {
+            if (budget == 0)
+                return 0;
+            EntityAI e = m_Nodes.Get(m_Next);
+            m_Next--;
+            if (!e || e.IsSetForDeletion())
+                continue;
+            GetGame().ObjectDelete(e);
+            m_Gone++;
+            if (budget > 0)
+                budget--;
+        }
+        return budget;
+    }
+
+    // After the last entity: the box goes too, or stays and is audited again.
+    void Finish()
+    {
+        if (m_Finished)
+            return;
+        m_Finished = true;
+        string tail = m_Gone.ToString() + " entity(ies) over " + m_Frames.ToString() + " frame(s)";
+        if (!m_Box)
+        {
+            OZ_Log.Warn("storage: authority for " + m_For + " was gone before its teardown finished (" + tail + ")");
+            return;
+        }
+        if (m_DiscardBox)
+        {
+            GetGame().ObjectDelete(m_Box);
+            OZ_Log.Info("storage: authority for " + m_For + " discarded with " + tail);
+            return;
+        }
+        // Down again: the refill and everything the player does afterwards
+        // must be audited as usual.
+        m_Box.OZS_Releasing(false);
+        OZ_Log.Info("storage: authority for " + m_For + " emptied, " + tail);
+    }
+}
+
 class OZS_AuthRec
 {
     OZ_StorageBox m_Box;

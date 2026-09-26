@@ -48,7 +48,9 @@ Three boxes -- `OZ_StorageBox_Small` (250 cells, 2 weapon slots, wooden crate mo
 `OZ_StorageBox_Medium` (500 cells, 4 slots, sea chest) and `OZ_StorageBox_Large`
 (1000 cells, 6 slots, sea chest). One verb on the box, "Show the box (N)": the record is
 read into an unannounced container of the same class at 500 entities per second, 5 ms of a
-frame at most, and streamed to the player's screen in chunks; every drag is one operation
+frame at most, and streamed to the player's screen in chunks; the container is kept for
+five minutes after the last player leaves and then let go at 50 deletions a frame; every
+drag is one operation
 the server performs and writes to the database before the next (see Where a closed box
 lives, below). Nothing is loaded on the main thread in one piece: the measured worst
 server frame across these jobs is 44 ms, with ten boxes (10768 entities) filling at once
@@ -76,16 +78,21 @@ A box's contents are never on this server's disk and never in the placed box -- 
 is the OpenZone bridge's SQLite ([openzone-bridge](https://github.com/covalschi/openzone-bridge),
 a separate Node.js process the server must run; not the MCP bridge in the table above).
 While somebody looks into a box its contents stand in an **authority**: a real container of
-the same class that nobody is told about and nothing saves, written to SQL turn by turn.
+the same class that nobody is told about, nothing saves and nothing can damage, written to
+SQL turn by turn. An item that leaves it without an operation is deleted and the session
+ends without writing, so the record stays at its last turn.
 The player's screen shows a client-local **proxy** of it, and every drag is an operation
 the server performs and answers. The placed box is the anchor a player walks up to; it is
 always closed and empty.
 
 - `$profile:OpenZone/OZ_Storage.json` -- the settings, written with defaults on the first
   boot: `OpenFrameBudgetMs` 5, `OpenItemsPerSecond` 500, `ProxyRowsPerMessage` 40,
-  `ProxyMessagesPerFrame` 4, `ProxyIdleSeconds` 20, `WaitForRecord` (off: the item is
-  handed over before the bridge has confirmed the turn; on: one round trip per take-out
-  and nothing can be duplicated), `FakePingMs` (stand only), `DebugLog`.
+  `ProxyMessagesPerFrame` 4, `ProxyIdleSeconds` 300 (the warm cache: an authority is kept
+  for five minutes after the last player closed the box, and a player who comes back
+  inside that time gets it at once), `ReleaseDeletesPerFrame` 50 (how many of its
+  entities are deleted per frame when it is let go or emptied for a sort), `WaitForRecord`
+  (off: the item is handed over before the bridge has confirmed the turn; on: one round
+  trip per take-out and nothing can be duplicated), `FakePingMs` (stand only), `DebugLog`.
 - `$profile:OpenZone/Storage/xchg/<box id>-<stamp>-<serial>.bin` -- the wire: one file per
   turn, handed to the bridge by name and read into SQL; and a per-box cache, `<box id>.bin`
   in the same folder, that the bridge alone writes and deletes and the engine reads when

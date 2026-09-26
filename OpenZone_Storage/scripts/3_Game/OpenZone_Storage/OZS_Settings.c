@@ -33,11 +33,22 @@ class OZS_Settings : OZ_ConfigBase
     // The PROXY (design 2026-09-24). A box's contents go to one player as
     // chunked RPCs; these say how big a chunk is and how many chunks may
     // leave in one frame. ProxyIdleSeconds is how long an authoritative
-    // container waits after the last watcher left -- this is about memory,
-    // not about hiding loot, so it is short.
+    // container waits after the last watcher left before it is let go --
+    // THE WARM CACHE: a player who closes the box and opens it again inside
+    // that time gets it at once, with no read of the record and no refill.
+    // Five minutes by the owner's word (2026-09-26); the price is the memory
+    // of idle authorities and a box that stays `open` in SQL for that long,
+    // which is where an admin's give or edit is refused.
     int ProxyRowsPerMessage;
     int ProxyMessagesPerFrame;
     int ProxyIdleSeconds;
+    // LETTING GO, A FEW A FRAME. When a session ends its authority is
+    // deleted, and a sort empties one to refill it; this is how many of its
+    // entities go in one frame (OZS_Teardown). All in one frame was the last
+    // one-frame burst left once the closing write was paced -- 240 entities
+    // for a full large box, and the engine pays for every deletion at the
+    // end of that frame.
+    int ReleaseDeletesPerFrame;
     bool DebugLog;
 
     // WHAT WENT ON 2026-09-26, with the old scheme: CloseFrameBudgetMs and
@@ -47,13 +58,15 @@ class OZS_Settings : OZ_ConfigBase
     // stash. Under the proxy the placed box never holds anything, a session
     // ends when its last watcher leaves (ProxyIdleSeconds), and the leash
     // that keeps a player near the box is OZS_Const.SESSION_LEASH. A file
-    // that still carries those names is read without them.
+    // that still carries those names is read without them. (The pace of a
+    // deletion came back under its own name in v7, ReleaseDeletesPerFrame:
+    // the old one paced a close job that no longer exists.)
 
     private static ref OZS_Settings s_Inst;
 
     override int LatestVersion()
     {
-        return 6;
+        return 7;
     }
 
     override void LoadDefaults()
@@ -75,7 +88,12 @@ class OZS_Settings : OZ_ConfigBase
         // a burst either end would feel.
         ProxyRowsPerMessage = 40;
         ProxyMessagesPerFrame = 4;
-        ProxyIdleSeconds = 20;
+        ProxyIdleSeconds = 300;
+        // 50 a frame: at the measured cost of a creation (about 0.07 ms an
+        // entity, docs/2026-09-16-storage-box-spec.md) a deletion of the
+        // same order keeps a frame's share near the 5 ms of the write; a
+        // full large box is gone in five frames.
+        ReleaseDeletesPerFrame = 50;
         DebugLog = false;
         FakePingMs = 0;
         WaitForRecord = false;
@@ -102,6 +120,15 @@ class OZS_Settings : OZ_ConfigBase
         // the old scheme went with it (see the note above). Nothing to fill
         // in either time; a file written earlier still carries the names,
         // and they sit there until the next save rewrites it without them.
+        if (from < 7)
+        {
+            // v6 -> v7 (2026-09-26 evening): the pace of a teardown, and the
+            // idle raised from 20 s to five minutes. A file still at the old
+            // default takes the new one; a number an admin chose stays.
+            ReleaseDeletesPerFrame = 50;
+            if (ProxyIdleSeconds == 20)
+                ProxyIdleSeconds = 300;
+        }
         Version = LatestVersion();
         return true;
     }
@@ -143,8 +170,14 @@ class OZS_Settings : OZ_ConfigBase
         }
         if (ProxyIdleSeconds < 1 || ProxyIdleSeconds > 3600)
         {
-            OZ_Log.Warn("storage settings: ProxyIdleSeconds " + ProxyIdleSeconds + " is outside 1..3600, using 20");
-            ProxyIdleSeconds = 20;
+            OZ_Log.Warn("storage settings: ProxyIdleSeconds " + ProxyIdleSeconds + " is outside 1..3600, using 300");
+            ProxyIdleSeconds = 300;
+            warnings++;
+        }
+        if (ReleaseDeletesPerFrame < 1 || ReleaseDeletesPerFrame > 5000)
+        {
+            OZ_Log.Warn("storage settings: ReleaseDeletesPerFrame " + ReleaseDeletesPerFrame + " is outside 1..5000, using 50");
+            ReleaseDeletesPerFrame = 50;
             warnings++;
         }
     }
@@ -170,6 +203,7 @@ class OZS_Settings : OZ_ConfigBase
         OZ_Log.SetDebug(s_Inst.DebugLog || OZ_Log.IsDebug());
         string s = "storage settings: budget=" + s_Inst.OpenFrameBudgetMs + "ms rate=" + s_Inst.OpenItemsPerSecond + "/s";
         s = s + " proxy=" + s_Inst.ProxyRowsPerMessage + "x" + s_Inst.ProxyMessagesPerFrame + "/frame idle=" + s_Inst.ProxyIdleSeconds + "s";
+        s = s + " release=" + s_Inst.ReleaseDeletesPerFrame + "/frame";
         s = s + " wait_for_record=" + s_Inst.WaitForRecord + " fake_ping=" + s_Inst.FakePingMs + "ms";
         OZ_Log.Info(s);
     }

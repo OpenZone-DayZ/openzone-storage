@@ -274,6 +274,29 @@ class OZS_Ops
         array<int> cols = new array<int>();
         int placed = OZS_Sorter.Plan(s.m_Auth, roots, rows, cols);
         OZ_Log.Info("storage: proxy: box " + s.m_Id + " sorting " + roots.Count().ToString() + " root(s), " + placed.ToString() + " placed by the planner");
+        // A SORT THAT CANNOT PLACE EVERY ROOT DOES NOT HAPPEN. The planner
+        // packs by name, so a large item late in the alphabet can find no
+        // block in a box that held it perfectly well before -- and the refill
+        // then parks that root with the bridge: measured 2026-09-26 on a
+        // Large box at 976 of 1000 cells, one AKM parked out of a box it
+        // came from. Losing an item to a tidy-up is not a trade anyone made;
+        // the box stays as it is and the player is told why.
+        int cargoRoots = 0;
+        for (int cr = 0; cr < roots.Count(); cr++)
+        {
+            EntityAI cargoRoot = roots.Get(cr);
+            if (!cargoRoot || !cargoRoot.GetInventory())
+                continue;
+            InventoryLocation rootLoc = new InventoryLocation();
+            if (cargoRoot.GetInventory().GetCurrentInventoryLocation(rootLoc) && rootLoc.GetType() == InventoryLocationType.CARGO)
+                cargoRoots++;
+        }
+        if (placed < cargoRoots)
+        {
+            OZ_Log.Warn("storage: proxy: box " + s.m_Id + " is too full to sort: the planner placed " + placed.ToString() + " of " + cargoRoots.ToString() + " cargo root(s); nothing is moved");
+            w.No(0, "#STR_OZS_SORT_FULL", s.m_Version);
+            return;
+        }
         if (!OZS_Commit.Sorted(s, roots, rows, cols))
         {
             w.No(0, "#STR_OZS_STORE_FAILED", s.m_Version);

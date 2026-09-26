@@ -457,6 +457,24 @@ class OZ_StorageBox : DeployableContainer_Base
         return super.CanReceiveAttachment(attachment, slotId);
     }
 
+    // A RUINED AUTHORITY KEEPS WHAT IT HOLDS. Container_Base answers the
+    // RUINED level by dropping its whole inventory on the ground
+    // (container_base.c:96), which for an authority means every item the
+    // record describes leaving a container nobody can see. The authority
+    // takes no damage at all (OZS_Authority.Create), so this is the second
+    // lock on the same door: whatever else changes its health level, the
+    // contents stay where they are and the log says so. A placed box holds
+    // nothing, and vanilla's answer is right for it.
+    override void EEHealthLevelChanged(int oldLevel, int newLevel, string zone)
+    {
+        if (m_OZS_Authority)
+        {
+            OZ_Log.Error("storage: authority for " + OZS_GetId() + " changed health level " + oldLevel.ToString() + " -> " + newLevel.ToString() + " although it takes no damage; its contents stay where they are");
+            return;
+        }
+        super.EEHealthLevelChanged(oldLevel, newLevel, zone);
+    }
+
     // Taking is strictly for an OPEN box. The restore job only ever puts
     // things in, so it needs no exception here, and a player must not empty
     // a box that is still filling up.
