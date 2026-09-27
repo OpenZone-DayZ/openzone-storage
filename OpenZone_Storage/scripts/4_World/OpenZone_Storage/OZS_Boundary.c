@@ -476,6 +476,19 @@ class OZS_Boundary
         // about EVERY branch here, not just this one: a named cell and an
         // attachment slot can be wrong for their own reasons, and none of
         // them is worth a dead server.
+        // THE HOLDER'S OWN WORD, AND THE ITEM'S, before the engine's geometry
+        // (OZS_Ops.Welcome): the screen asks these and this side did not,
+        // which let a client that skips the screen put anything anywhere.
+        string cold;
+        if (!OZS_Ops.Welcome(holder, e, dst.GetType(), dst.GetSlot(), cold))
+        {
+            OZ_Log.Warn("storage: proxy: box " + s.m_Id + " will not take " + e.GetType() + ": " + cold);
+            if (dst.GetType() == InventoryLocationType.ATTACHMENT)
+                w.No(0, "#STR_OZS_NOT_A_HOOK", s.m_Version);
+            else
+                w.No(0, "#STR_OZS_NOT_WELCOME", s.m_Version);
+            return;
+        }
         if (!holder.GetInventory().LocationCanAddEntity(dst))
         {
             OZ_Log.Warn("storage: proxy: box " + s.m_Id + " will not take " + e.GetType() + " at " + OZS_Ops.Spot(dst) + "; the engine says that is not a place");
@@ -791,6 +804,12 @@ class OZS_Boundary
         else if (row >= 0 && col >= 0)
             dst.SetCargo(into, e, 0, row, col, flip == 1);
         else
+            return false;
+        // The container's own word on the item, and the item's on it
+        // (OZS_Ops.Welcome); a no here means the fallback runs, as for any
+        // place the engine will not take.
+        string cold;
+        if (!OZS_Ops.Welcome(into, e, lt, slot, cold))
             return false;
         return player.GetInventory().LocationCanAddEntity(dst);
     }

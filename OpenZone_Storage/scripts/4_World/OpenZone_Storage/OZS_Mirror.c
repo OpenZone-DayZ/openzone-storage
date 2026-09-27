@@ -1373,6 +1373,13 @@ class OZS_Mirror
             dst.SetCargo(target, item, 0, row, col, false);
         else if (!target.GetInventory().FindFreeLocationFor(item, FindInventoryLocationType.ANY, dst))
             return false;
+        // What the vanilla screen asks before any drop -- the holder's and
+        // the item's own script gates (OZS_Ops.Welcome) -- asked on this side
+        // too, so a drag inside the box refuses at once, as vanilla's own
+        // containers do; the authority asks again for itself.
+        string cold;
+        if (!OZS_Ops.Welcome(target, item, dst.GetType(), dst.GetSlot(), cold))
+            return false;
         return Drag(src, dst);
     }
 

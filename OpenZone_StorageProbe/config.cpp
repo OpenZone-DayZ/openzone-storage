@@ -13,7 +13,7 @@ class CfgPatches
 {
     class OpenZone_StorageProbe
     {
-        units[] = {"OZ_ProbeCrate", "OZ_ProbeCrateSmall", "OZ_ProbeCrateWide", "OZ_ProbeCrateHuge", "OZ_ProbeCrateSquare"};
+        units[] = {"OZ_ProbeCrate", "OZ_ProbeCrateSmall", "OZ_ProbeCrateWide", "OZ_ProbeCrateHuge", "OZ_ProbeCrateSquare", "OZ_ProbeBandageBag"};
         weapons[] = {};
         requiredVersion = 0.1;
         requiredAddons[] =
@@ -22,6 +22,7 @@ class CfgPatches
             "DZ_Scripts",
             "DZ_Gear_Camping",
             "DZ_Gear_Consumables",
+            "DZ_Characters_Backpacks",
             "OpenZone_Storage"
         };
     };
@@ -52,6 +53,19 @@ class CfgVehicles
 {
     class SeaChest;
     class Paper;
+    class TaloonBag_Blue;
+
+    // A TEST BAG THAT TAKES ONLY BANDAGES (owner, 2026-09-27): the vanilla
+    // blue Taloon bag under another name, no model of its own, its cargo
+    // gated in script (OZ_ProbeBandageBag.c). It exists to ask how the boxes
+    // treat a container that refuses some items -- the mirror's drag, the
+    // server's boundary, the record's restore.
+    class OZ_ProbeBandageBag: TaloonBag_Blue
+    {
+        scope = 2;
+        displayName = "Bandage bag (probe)";
+        descriptionShort = "A test bag whose cargo takes bandages and nothing else";
+    };
 
     // An item only this stand pbo declares: closed into a box and then booted
     // without the probe, it is the "vanished mod" of the design (section 3.3).

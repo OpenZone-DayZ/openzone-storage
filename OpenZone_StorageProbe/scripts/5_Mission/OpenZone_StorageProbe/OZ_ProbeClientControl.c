@@ -933,15 +933,21 @@ class OZ_ProbeClientControl
             return;
         }
         bool gate = into.GetInventory().CanAddEntityInCargo(mine, mine.GetInventory().GetFlipCargo());
+        // `force` sends past the screen's gate, so the server's boundary
+        // answers for itself -- what a modified client could send.
+        bool force = parts.Count() > 3 && parts.Get(3) == "force";
         bool sent = false;
-        if (gate)
+        if (gate || force)
             sent = me.PredictiveTakeEntityToTargetInventory(into, FindInventoryLocationType.CARGO, mine);
         string hung = "";
         InventoryLocation intoIl = new InventoryLocation();
         if (into.GetInventory().GetCurrentInventoryLocation(intoIl))
             hung = "lt " + intoIl.GetType().ToString() + " slot " + intoIl.GetSlot().ToString();
         string told = "=== " + line + ": " + mine.GetType() + " into #" + parts.Get(2) + " " + into.GetType() + " (" + hung + ")";
-        told = told + ": the screen's gate CanAddEntityInCargo " + gate.ToString() + " -> sent " + sent.ToString() + " via " + OZS_Mirrors.s_Via;
+        told = told + ": the screen's gate CanAddEntityInCargo " + gate.ToString();
+        if (force)
+            told = told + " (forced past it)";
+        told = told + " -> sent " + sent.ToString() + " via " + OZS_Mirrors.s_Via;
         Note(told);
     }
 

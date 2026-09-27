@@ -136,6 +136,15 @@ class OZS_Ops
             w.No(handle, "an item cannot go inside itself", s.m_Version);
             return;
         }
+        // The receiver's own word on its guest, and the guest's on the
+        // receiver (Welcome): what the screen asks and this side did not.
+        string cold;
+        if (!Welcome(parent, e, lt, slot, cold))
+        {
+            OZ_Log.Dbg("storage: proxy: #" + handle.ToString() + " " + e.GetType() + " is not welcome in " + parent.GetType() + ": " + cold);
+            w.No(handle, "#STR_OZS_NOT_WELCOME", s.m_Version);
+            return;
+        }
         // A CELL SOMETHING ELSE IS STANDING ON IS NOT A PLACE, AND THE ENGINE
         // WILL NOT SAY SO.
         //
@@ -720,6 +729,17 @@ class OZS_Ops
         if (!a.CanSwapEntities(b, dstB, dstA) || !b.CanSwapEntities(a, dstA, dstB))
         {
             w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
+            return;
+        }
+        // AND EACH RECEIVER'S OWN WORD ON ITS NEW GUEST (Welcome): a swap is
+        // two moves, and a rag traded for the bandage inside a bag that takes
+        // bandages alone is one move too many.
+        string coldA;
+        string coldB;
+        if (!Welcome(srcB.GetParent(), a, srcB.GetType(), srcB.GetSlot(), coldA) || !Welcome(srcA.GetParent(), b, srcA.GetType(), srcA.GetSlot(), coldB))
+        {
+            OZ_Log.Dbg("storage: proxy: swap #" + handle.ToString() + " refused by a receiver: " + coldA + " " + coldB);
+            w.No(handle, "#STR_OZS_NOT_WELCOME", s.m_Version);
             return;
         }
         // AND HOW MUCH IS IN THEM. A place has a cap on quantity of its own --
@@ -1978,6 +1998,43 @@ class OZS_Ops
             return sitting;
         }
         return null;
+    }
+
+    // THE HOLDER'S OWN WORD, AND THE ITEM'S. `Fits`, `Clear` and
+    // `LocationCanAddEntity` are the engine's geometry. The gates a container
+    // or an item may override in script -- a pot refusing a stove, the
+    // pouches refusing a filled case, a mod's bag taking bandages alone --
+    // are what the vanilla screen asks before any drop, and nothing on this
+    // side asked them: a move sent past the screen put a rag into a bag
+    // whose script refuses everything but bandages (measured 2026-09-27, the
+    // probe's OZ_ProbeBandageBag). Asked here as vanilla asks them, the item
+    // first, then the holder, and only when the item is ENTERING the holder
+    // or changing the kind of place it holds: within the same cargo it was
+    // welcome the day it came in. `why` says which of the two refused.
+    static bool Welcome(EntityAI holder, EntityAI e, int lt, int slot, out string why)
+    {
+        why = "";
+        if (!holder || !e)
+        {
+            why = "no holder or no item";
+            return false;
+        }
+        InventoryLocation now = new InventoryLocation();
+        if (e.GetInventory() && e.GetInventory().GetCurrentInventoryLocation(now) && now.GetParent() == holder && now.GetType() == lt)
+            return true;
+        if (lt == InventoryLocationType.ATTACHMENT)
+        {
+            if (!e.CanPutAsAttachment(holder))
+                why = e.GetType() + " will not hang on " + holder.GetType();
+            else if (!holder.CanReceiveAttachment(e, slot))
+                why = holder.GetType() + " will not take " + e.GetType() + " on slot " + InventorySlots.GetSlotName(slot);
+            return why == "";
+        }
+        if (!e.CanPutInCargo(holder))
+            why = e.GetType() + " will not go into the cargo of " + holder.GetType();
+        else if (!holder.CanReceiveItemIntoCargo(e))
+            why = holder.GetType() + " will not take " + e.GetType() + " into its cargo";
+        return why == "";
     }
 
     // Is this a place at all? Asked of the engine's own cargo and slot

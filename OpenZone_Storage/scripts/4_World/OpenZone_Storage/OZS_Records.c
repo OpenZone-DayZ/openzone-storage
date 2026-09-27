@@ -555,6 +555,27 @@ class OZS_Records
             if (!e)
                 e = parent.GetInventory().CreateEntityInCargo(n.cls);
         }
+        // A CONTAINER THAT REFUSES ITS OWN CONTENTS ON RESTORE. The engine
+        // asks the container's script gate when it creates an item inside
+        // it (measured 2026-09-27: a rag inside a bag whose script takes
+        // bandages alone was refused, and a stand-in lost it at the next
+        // close). A record may hold such a pair: written before the box
+        // asked the gate itself (OZS_Ops.Welcome), or under a mod whose
+        // rules were looser then. The box's own grid keeps the item, as a
+        // root of its own, which is what the hook fallback above does too.
+        if (!e && parent && parent != box && box && box.GetInventory() && n.lt != InventoryLocationType.ATTACHMENT)
+        {
+            InventoryLocation aside = new InventoryLocation();
+            if (box.GetInventory().FindFirstFreeLocationForNewEntity(n.cls, FindInventoryLocationType.CARGO, aside))
+            {
+                if (parentLocal)
+                    e = GameInventory.LocationCreateLocalEntity(aside, n.cls, ECE_IN_INVENTORY, RF_DEFAULT);
+                else
+                    e = GameInventory.LocationCreateEntity(aside, n.cls, ECE_IN_INVENTORY, RF_DEFAULT);
+            }
+            if (e)
+                OZ_Log.Warn("storage: " + parent.GetType() + " refused " + n.cls + " at " + n.row.ToString() + "," + n.col.ToString() + " on restore; it lies in the grid instead");
+        }
         if (!e)
         {
             s_Missed++;

@@ -973,3 +973,30 @@ advance -- refusing the exchange before anything moves when the item
 cannot hang on the other's hook, and holding a drop on an occupied hook
 where it was -- was written and taken out the same day on the owner's
 word: surplus.
+
+## The script gates of containers (2026-09-27)
+
+A test bag in the probe pbo, `OZ_ProbeBandageBag` (the vanilla blue Taloon bag
+under another name, no model of its own), overrides `CanReceiveItemIntoCargo`
+to take `BandageDressing` and nothing else -- the vanilla pattern of `Pot` and
+`PlateCarrierPouches`. Given into a box and tried on the stand:
+
+- The screen's own gate held: `pxputin BandageDressing` into the bag passed
+  (`CanAddEntityInCargo` true, sent, the bandage inside the bag); `pxputin Rag`
+  was refused by the screen, and forced past it the engine's predictive call
+  refused on the client, so the server never heard of it.
+- A move INSIDE the box did not hold: `pxmove` of the rag from the grid into the
+  bag was accepted by the authority (`move #23 Rag to 2,2 of OZ_ProbeBandageBag`),
+  because `Fits`, `Clear` and `LocationCanAddEntity` are the engine's geometry
+  and none of them asks the container's script. The record then held the rag
+  inside the bag and the next open restored it there.
+
+Fixed by `OZS_Ops.Welcome`: the item's `CanPutInCargo` / `CanPutAsAttachment`
+and the holder's `CanReceiveItemIntoCargo` / `CanReceiveAttachment`, asked as
+the vanilla screen asks them, on every in-box move and swap, on the boundary in
+both directions and on the mirror's own drag; a refusal answers
+`#STR_OZS_NOT_WELCOME`. Within the same cargo nothing is asked -- the item was
+welcome the day it came in. The RESTORE is not gated on purpose: the record is
+the truth, and vanilla's own load gate (`CanLoadItemIntoCargo`) is likewise left
+open, because what a load gate refuses is lost.
+
