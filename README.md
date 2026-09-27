@@ -133,6 +133,8 @@ bridge sets `ADMIN_URL`. See openzone-bridge's own README.
   [openzone-bridge](https://github.com/OpenZone-DayZ/openzone-bridge) **0.7.0 or newer**,
   reachable and configured with `STORAGE_XCHG_DIR` pointed at this server's
   `profiles/OpenZone/Storage/xchg` (this repo's `$profile:OpenZone/Storage/xchg`).
+  0.8.1 or newer lists the lockers by their engine id on the admin page; an older one
+  ignores that part of the boot letter and shows lockers by their keys alone.
   An older bridge cannot hand out the rest of a record after a parked root, so a box
   with one unreadable item stays closed ("an admin is needed"); one older than 0.6.0 has
   no route for a session's turns either: a box opens and its session ends at the first
