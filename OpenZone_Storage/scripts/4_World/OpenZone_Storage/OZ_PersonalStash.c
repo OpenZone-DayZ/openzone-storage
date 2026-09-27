@@ -99,6 +99,15 @@ class OZ_PersonalStash : OZ_StorageBox
         OZS_SetOwner(OZS_Const.StashOwnerOf(id));
     }
 
+    // THE PLAYERS' NAME FOR IT. The config's displayName is the admin's
+    // warning ("do not place"), because that is what a spawner lists; the
+    // screen's headers ask this instead, and to a player the thing is a
+    // personal stash (owner, 2026-09-27).
+    override string GetDisplayName()
+    {
+        return Widget.TranslateString("#STR_OZS_STASH");
+    }
+
     override string OZS_GetId()
     {
         string uid = OZS_OwnerUid();

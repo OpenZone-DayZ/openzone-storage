@@ -269,12 +269,14 @@ class CfgVehicles
     class OZ_PersonalStash: SeaChest
     {
         scope = 2;
-        displayName = "$STR_OZS_STASH";
-        // THE DESCRIPTION IS A WARNING TO ADMINS (owner, 2026-09-27): an
-        // admin spawner lists this class under the same name as the locker,
-        // and two of these were put into the world as sea chests that
-        // nothing can open. Only the locker is placed; this class exists as
-        // a session's authority and mirror.
+        // THE NAME AND THE DESCRIPTION ARE A WARNING TO ADMINS (owner,
+        // 2026-09-27): an admin spawner listed this class under the same
+        // name as the locker, and two of these were put into the world as
+        // sea chests that nothing can open. Only the locker is placed; this
+        // class exists as a session's authority and mirror, and the players'
+        // screen keeps calling it a personal stash (OZ_PersonalStash.
+        // GetDisplayName).
+        displayName = "$STR_OZS_STASH_CONTAINER";
         descriptionShort = "$STR_OZS_STASH_CONTAINER_DESC";
         // SeaChest like the boxes, because the script class beside this
         // one is OZ_StorageBox: a stash IS a box, with a pair for a key.

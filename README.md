@@ -33,6 +33,8 @@ An admin places a **locker** (`OZ_StashAnchor`) -- a placed item like a box, sav
 world and renewed to 45 days of lifetime on every boot, wearing the vanilla locker model.
 The boot letter lists every locker with the engine's id of the item, and one placed or
 removed later is announced as a box is, so the bridge's admin page names lockers by that id.
+The stash's container class, `OZ_PersonalStash`, is never placed: spawners list it as
+"Stash (session, do not place)", and one put into the world is a chest nothing can open.
 A player presses F on it and is shown a
 record of their own, keyed by which locker and whose -- the same player at two lockers has
 two stashes, and one locker holds one per player. It carries the character's own slots
