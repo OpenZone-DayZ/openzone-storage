@@ -64,17 +64,19 @@ modded class Icon
         super.MouseClick(w, x, y, button);
     }
 
-    // A LOOSE ITEM DROPPED ON AN ITEM IN THE BOX. The screen asks its own
-    // swap test about the pair and that test does not pass a ground item, so
-    // the drop arrives here with nothing chosen and vanilla would do nothing
-    // (owner, 2026-09-26: "a swap between the ground and the box"). The
-    // exchange the drop means is sent as what it is; see OZS_Mirrors.
-    // GroundSwap. Every pair the screen DID choose something for -- two
-    // stacks, a magazine on a rifle, an item into a bag in the box -- goes
-    // on to vanilla, whose choice reaches this mod by its own hooks.
+    // A DROP ON AN ITEM THE SCREEN FOUND NOTHING TO DO WITH, one end of it
+    // in the box: a loose item on a box item (owner, 2026-09-26: "a swap
+    // between the ground and the box"), the box's hook item on the hands
+    // (2026-09-27). The screen asks its own swap test about the pair, and
+    // that test does not pass a ground item -- nor, as it pleases, a box
+    // item -- so the drop arrives here with nothing chosen and vanilla would
+    // do nothing. The exchange the drop means is sent as what it is; see
+    // OZS_Mirrors.SwapAnyway. Every pair the screen DID choose something for
+    // -- two stacks, a magazine on a rifle, an item into a bag in the box --
+    // goes on to vanilla, whose choice reaches this mod by its own hooks.
     override bool PerformCombination(EntityAI selectedEntity, EntityAI targetEntity, int combinationFlag, InventoryLocation ilSwapDst = null)
     {
-        if (combinationFlag == InventoryCombinationFlags.NONE && OZS_Mirrors.GroundSwap(selectedEntity, targetEntity))
+        if (combinationFlag == InventoryCombinationFlags.NONE && OZS_Mirrors.SwapAnyway(selectedEntity, targetEntity))
             return true;
         return super.PerformCombination(selectedEntity, targetEntity, combinationFlag, ilSwapDst);
     }

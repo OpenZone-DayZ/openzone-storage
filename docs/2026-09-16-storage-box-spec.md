@@ -816,9 +816,14 @@ wire between them, because an `OnStoreSave` body leaves the script VM through
   to come back unplaced once the class exists again; the check waits for the
   boot closes, because the bridge returns a root only into a closed box;
 - a root the engine cannot read (a refused `OnStoreLoad`, a marker out of
-  step, no room for a returned root) is deleted with everything the open
-  created, parked, and the open asked again -- a degraded state is never
-  written back;
+  step, no room for a returned root) is parked alone: the reader removes what
+  it made of that root, the bridge sets it aside, and the open goes on with
+  the rest of the record, handed out as a file of its own from the root after
+  the parked one (`from` in the open letter, echoed in the answer; a bridge
+  that does not echo it fails the open rather than double the roots already
+  built) -- a degraded state is never written back, and one unreadable item
+  never closes a box (until 2026-09-27 every park deleted the open's work and
+  asked again, three times at most);
 - the bridge is mandatory: Open, Close and Sort are refused with the core's
   `#STR_OZ_ERR_NO_BRIDGE` while it is down or the boot exchange is unanswered,
   the idle close waits, mission finish never closes a box (a close needs the

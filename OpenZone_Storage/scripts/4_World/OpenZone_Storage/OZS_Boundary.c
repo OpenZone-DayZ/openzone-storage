@@ -273,24 +273,44 @@ class OZS_Boundary
             w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
             return;
         }
-        // A weapon slot in the box has no cell to step aside from, and an item
-        // in one is not in anybody's way: that pair is a plain move each way.
-        if (there.GetType() != InventoryLocationType.CARGO)
+        // ON A HOOK OR IN THE GRID: both are places a box item trades from
+        // (owner, 2026-09-27: the weapon in the hands for the one on the
+        // rack, the worn helmet for the one on the box's Headgear hook, the
+        // pocket's item for the hung one). Until then a hook was refused --
+        // "no cell to step aside from" -- and it has the grid to step down
+        // into, or a spare hook beside it.
+        bool hung = there.GetType() == InventoryLocationType.ATTACHMENT;
+        if (!hung && there.GetType() != InventoryLocationType.CARGO)
         {
             w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
             return;
         }
 
         // 1. THE BOX ITEM STEPS ASIDE, still inside the box.
-        int tw;
-        int th;
-        if (!OZS_Ops.SizeOf(inside, tw, th))
-        {
-            w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
-            return;
-        }
         InventoryLocation park = new InventoryLocation();
-        if (!OZS_Ops.Somewhere(s.m_Auth, inside, there.GetRow(), there.GetCol(), tw, th, park))
+        bool parked = false;
+        if (hung)
+        {
+            // Off the hook into a free corner of the grid, either way round,
+            // asked of the engine cell by cell (FreeSpot: an item on a hook
+            // is not in the cargo, so the cargo cannot measure it); a spare
+            // hook of the same rack when the grid is full.
+            parked = OZS_Ops.FreeSpot(s.m_Auth, inside, park);
+            if (!parked)
+                parked = s.m_Auth.GetInventory().FindFreeLocationFor(inside, FindInventoryLocationType.ATTACHMENT, park);
+        }
+        else
+        {
+            int tw;
+            int th;
+            if (!OZS_Ops.SizeOf(inside, tw, th))
+            {
+                w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
+                return;
+            }
+            parked = OZS_Ops.Somewhere(s.m_Auth, inside, there.GetRow(), there.GetCol(), tw, th, park);
+        }
+        if (!parked)
         {
             w.No(handle, "#STR_OZS_NO_ROOM", s.m_Version);
             return;
@@ -301,22 +321,23 @@ class OZS_Boundary
         int thereFlip = 0;
         if (there.GetFlip())
             thereFlip = 1;
-        OZS_Ops.Move(s, w, handle, 0, InventoryLocationType.CARGO, -1, park.GetRow(), park.GetCol(), parkFlip);
+        OZS_Ops.Move(s, w, handle, 0, park.GetType(), park.GetSlot(), park.GetRow(), park.GetCol(), parkFlip);
         if (!OZS_Ops.Sits(inside, park))
         {
-            // It never left its cell, so there is nothing to undo.
+            // It never left its place, so there is nothing to undo.
             w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
             return;
         }
 
-        // 2. THE PLAYER'S ITEM COMES IN, to the cell just vacated.
-        In(s, w, netLow, netHigh, 0, InventoryLocationType.CARGO, -1, there.GetRow(), there.GetCol(), thereFlip);
+        // 2. THE PLAYER'S ITEM COMES IN, to the place just vacated: the cell,
+        //    or the hook.
+        In(s, w, netLow, netHigh, 0, there.GetType(), there.GetSlot(), there.GetRow(), there.GetCol(), thereFlip);
         if (mine.GetHierarchyParent() != s.m_Auth)
         {
             // The box would not take it, and `In` has already said why. The
-            // one that stepped aside goes back to its own cell, which nothing
+            // one that stepped aside goes back to its own place, which nothing
             // has taken in the meantime.
-            OZS_Ops.Move(s, w, handle, 0, InventoryLocationType.CARGO, -1, there.GetRow(), there.GetCol(), thereFlip);
+            OZS_Ops.Move(s, w, handle, 0, there.GetType(), there.GetSlot(), there.GetRow(), there.GetCol(), thereFlip);
             return;
         }
 
@@ -458,7 +479,17 @@ class OZS_Boundary
         // witness a move that ends the process leaves behind, and it has
         // earned its keep twice in one night (2026-09-25).
         OZ_Log.Dbg("storage: proxy: moving " + e.GetType() + " in from " + inSrc + " to " + OZS_Ops.Spot(dst));
-        bool moved = e.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
+        // A HOOK IS NAMED WITH THE CALL THAT TAKES A HOOK (see OZS_Ops.Put):
+        // `TakeToDst` hangs the item on the first slot that will take it,
+        // whatever slot the location says, and a weapon dropped on the third
+        // hook landed on the first. An exchange promises the OTHER item's
+        // exact hook, so the slot is named to the engine; the old call stays
+        // as the fallback for a hook the named call would not take.
+        bool moved = false;
+        if (lt == InventoryLocationType.ATTACHMENT)
+            moved = holder.GetInventory().TakeEntityAsAttachmentEx(InventoryMode.LOCAL, e, slot);
+        if (!moved)
+            moved = e.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
         // WHERE IT ACTUALLY IS, NOT WHAT THE CALL SAID. A move that returns
         // true and leaves the item where it was has been seen before in this
         // engine, and here it costs more than a wrong cell: the item is

@@ -46,6 +46,19 @@
 //                          the receiver's own CombineItemsClient
 //     inv [n]         -- the player's inventory and every proxy's items with
 //                        their quantities, into scan.txt
+//     swap [a] [b] [n]  -- two box items (by handle; the first two roots when
+//                          unnamed) through the screen's own swap call
+//     xswap <handle> <cls> [n] -- the player's own <cls> (hands first, then
+//                          worn, then a pocket) traded for the box item with
+//                          that handle, by the call a drop onto an occupied
+//                          slot or icon makes (PredictiveSwapEntities)
+//     wear <cls> [n]    -- the <cls> in the hands, or the nearest loose one,
+//                          onto the player's own slot
+//     pxhang <handle> <slot> [n] -- a box item onto the box's own slot, by the
+//                          slot's name (OZ_Weapon_1, Headgear, Back ...)
+//     pxputin <cls> <into> [n] -- the player's own <cls> into the cargo of the
+//                          box container with that handle, past the screen's
+//                          own gate (CanAddEntityInCargo, noted)
 #ifndef NO_GUI
 class OZ_ProbeClientControl
 {
@@ -179,6 +192,14 @@ class OZ_ProbeClientControl
         {
             GroundSwap(line);
         }
+        else if (line.IndexOf("xswap ") == 0)
+        {
+            CrossSwap(line);
+        }
+        else if (line.IndexOf("wear ") == 0)
+        {
+            Wear(line);
+        }
         else if (line.IndexOf("swap") == 0)
         {
             // The vanilla screen's own swap call, made by hand: two items of
@@ -215,6 +236,14 @@ class OZ_ProbeClientControl
         {
             // pxsplit <handle> [here] [n] -- the right-click split by hand
             PxSplit(line);
+        }
+        else if (line.IndexOf("pxhang ") == 0)
+        {
+            PxHang(line);
+        }
+        else if (line.IndexOf("pxputin ") == 0)
+        {
+            PxPutIn(line);
         }
         else if (line == "inv" || line.IndexOf("inv ") == 0)
         {
@@ -733,15 +762,34 @@ class OZ_ProbeClientControl
             Note("swap: no player or no box open");
             return;
         }
-        array<EntityAI> roots = new array<EntityAI>();
-        m.Roots(roots);
-        if (roots.Count() < 2)
+        array<string> named = new array<string>();
+        line.Split(" ", named);
+        EntityAI a = null;
+        EntityAI b = null;
+        if (named.Count() >= 3)
         {
-            Note("swap: the box needs two items");
-            return;
+            // swap <a> <b>: two items of the box by handle, a hook among them
+            // or not (2026-09-27).
+            a = m.ByHandle(named.Get(1).ToInt());
+            b = m.ByHandle(named.Get(2).ToInt());
+            if (!a || !b)
+            {
+                Note("swap: no such handle(s)");
+                return;
+            }
         }
-        EntityAI a = roots.Get(0);
-        EntityAI b = roots.Get(1);
+        else
+        {
+            array<EntityAI> roots = new array<EntityAI>();
+            m.Roots(roots);
+            if (roots.Count() < 2)
+            {
+                Note("swap: the box needs two items");
+                return;
+            }
+            a = roots.Get(0);
+            b = roots.Get(1);
+        }
         // WHICH of the checks inside CanSwapEntitiesEx says no. It is three
         // tests in a row and they fail for very different reasons; the
         // difference decides whether this is ours to fix at all.
@@ -768,6 +816,133 @@ class OZ_ProbeClientControl
         bool force = me.GetInventory().CanForceSwapEntitiesEx(a, il2, b, il1);
         bool ok = me.PredictiveSwapEntities(a, b);
         Note("swap: " + a.GetType() + " #" + m.HandleOf(a).ToString() + " with " + b.GetType() + " #" + m.HandleOf(b).ToString() + ": CanSwapEntitiesEx " + can.ToString() + ", CanForceSwapEntitiesEx " + force.ToString() + ", Predictive " + ok.ToString() + " ->" + why);
+    }
+
+    // xswap <handle> <cls>: the player's own item for the box's, by the call
+    // the screen makes for a drop onto an occupied slot or icon. Both orders
+    // of the native's verdict are noted, so the record says whether the
+    // vanilla screen would have offered the swap at all -- when it would
+    // not, OZS_SlotSwap sends the same exchange from the slot handlers.
+    protected void CrossSwap(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        OZS_Mirror m = OZS_Mirrors.Get().Newest();
+        if (!me || !m || parts.Count() < 3)
+        {
+            Note("=== " + line + ": xswap <handle> <cls>");
+            return;
+        }
+        EntityAI inside = m.ByHandle(parts.Get(1).ToInt());
+        EntityAI mine = Mine(me, parts.Get(2));
+        if (!inside || !mine)
+        {
+            Note("=== " + line + ": no such handle, or no " + parts.Get(2) + " of the player's");
+            return;
+        }
+        string where = "";
+        InventoryLocation whereIl = new InventoryLocation();
+        if (mine.GetInventory().GetCurrentInventoryLocation(whereIl))
+            where = "lt " + whereIl.GetType().ToString() + " slot " + whereIl.GetSlot().ToString() + " at " + whereIl.GetRow().ToString() + "," + whereIl.GetCol().ToString();
+        string there = "";
+        InventoryLocation thereIl = new InventoryLocation();
+        if (inside.GetInventory().GetCurrentInventoryLocation(thereIl))
+            there = "lt " + thereIl.GetType().ToString() + " slot " + thereIl.GetSlot().ToString() + " at " + thereIl.GetRow().ToString() + "," + thereIl.GetCol().ToString();
+        bool canA = GameInventory.CanSwapEntitiesEx(inside, mine);
+        bool canB = GameInventory.CanSwapEntitiesEx(mine, inside);
+        bool sent = me.PredictiveSwapEntities(inside, mine);
+        string told = "=== " + line + ": " + mine.GetType() + " (" + where + ") for #" + parts.Get(1) + " " + inside.GetType() + " (" + there + ")";
+        told = told + ": CanSwapEntitiesEx(inside, mine) " + canA.ToString() + ", (mine, inside) " + canB.ToString();
+        told = told + " -> Predictive " + sent.ToString() + " via " + OZS_Mirrors.s_Via;
+        Note(told);
+    }
+
+    // wear <cls>: onto the player's own slot, the screen's call for a drag
+    // onto a worn slot.
+    protected void Wear(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        if (!me || parts.Count() < 2)
+        {
+            Note("=== " + line + ": wear <cls>");
+            return;
+        }
+        EntityAI item = me.GetHumanInventory().GetEntityInHands();
+        if (!item || !item.IsKindOf(parts.Get(1)))
+            item = NearestLoose(me.GetPosition(), parts.Get(1));
+        if (!item)
+        {
+            Note("=== " + line + ": no " + parts.Get(1) + " in the hands or loose within 4 m");
+            return;
+        }
+        bool ok = me.PredictiveTakeEntityAsAttachment(item);
+        Note("=== " + line + ": " + item.GetType() + " -> PredictiveTakeEntityAsAttachment " + ok.ToString());
+    }
+
+    // pxhang <handle> <slot>: a box item onto the box's own slot by name,
+    // the mirror's own DragTo -- what a drag onto an empty hook makes.
+    protected void PxHang(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        OZS_Mirror m = OZS_Mirrors.Get().Newest();
+        if (!m || !m.m_Box || parts.Count() < 3)
+        {
+            Note("=== " + line + ": pxhang <handle> <slot>");
+            return;
+        }
+        EntityAI e = m.ByHandle(parts.Get(1).ToInt());
+        if (!e)
+        {
+            Note("=== " + line + ": no handle " + parts.Get(1));
+            return;
+        }
+        int slot = InventorySlots.GetSlotIdFromString(parts.Get(2));
+        if (slot == InventorySlots.INVALID)
+        {
+            Note("=== " + line + ": no such slot " + parts.Get(2));
+            return;
+        }
+        OZS_Mirrors.s_Via = "pxhang";
+        bool ok = m.DragTo(e, m.m_Box, InventoryLocationType.ATTACHMENT, slot, -1, -1);
+        Note("=== " + line + ": " + e.GetType() + " onto slot " + parts.Get(2) + " (" + slot.ToString() + ") -> DragTo " + ok.ToString());
+    }
+
+    // pxputin <cls> <into>: the player's own item into a box container's
+    // cargo, the screen's way -- its own gate first, which is where vanilla's
+    // clothing rule bites for a bag hung on a hook.
+    protected void PxPutIn(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        OZS_Mirror m = OZS_Mirrors.Get().Newest();
+        if (!me || !m || parts.Count() < 3)
+        {
+            Note("=== " + line + ": pxputin <cls> <into>");
+            return;
+        }
+        EntityAI mine = Mine(me, parts.Get(1));
+        EntityAI into = m.ByHandle(parts.Get(2).ToInt());
+        if (!mine || !into)
+        {
+            Note("=== " + line + ": no " + parts.Get(1) + " of the player's, or no such handle");
+            return;
+        }
+        bool gate = into.GetInventory().CanAddEntityInCargo(mine, mine.GetInventory().GetFlipCargo());
+        bool sent = false;
+        if (gate)
+            sent = me.PredictiveTakeEntityToTargetInventory(into, FindInventoryLocationType.CARGO, mine);
+        string hung = "";
+        InventoryLocation intoIl = new InventoryLocation();
+        if (into.GetInventory().GetCurrentInventoryLocation(intoIl))
+            hung = "lt " + intoIl.GetType().ToString() + " slot " + intoIl.GetSlot().ToString();
+        string told = "=== " + line + ": " + mine.GetType() + " into #" + parts.Get(2) + " " + into.GetType() + " (" + hung + ")";
+        told = told + ": the screen's gate CanAddEntityInCargo " + gate.ToString() + " -> sent " + sent.ToString() + " via " + OZS_Mirrors.s_Via;
+        Note(told);
     }
 
     protected void PxDrag(string line)
@@ -1193,7 +1368,7 @@ class OZ_ProbeClientControl
         int flag = ItemManager.GetChosenCombinationFlag(loose, target, tested, dst);
         bool sent = false;
         if (flag == InventoryCombinationFlags.NONE)
-            sent = OZS_Mirrors.GroundSwap(loose, target);
+            sent = OZS_Mirrors.SwapAnyway(loose, target);
         else if (flag == InventoryCombinationFlags.SWAP)
             sent = me.PredictiveSwapEntities(target, loose);
         else if (flag == InventoryCombinationFlags.FSWAP)

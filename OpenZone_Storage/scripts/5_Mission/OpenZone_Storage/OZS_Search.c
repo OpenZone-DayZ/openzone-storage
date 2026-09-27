@@ -130,6 +130,7 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
     protected TextWidget           m_CountText;
     protected Widget               m_CountPanel;
     protected MultilineTextWidget  m_CountList;
+    protected ScrollWidget         m_CountScroll;
     protected bool                 m_CountOpen;
     // CountInventory() the list was built from; -1 = build on the next frame.
     protected int                  m_CountSeen = -1;
@@ -158,6 +159,7 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
         m_CountText = TextWidget.Cast(m_Root.FindAnyWidget("CountText"));
         m_CountPanel = m_Root.FindAnyWidget("CountPanel");
         m_CountList = MultilineTextWidget.Cast(m_Root.FindAnyWidget("CountList"));
+        m_CountScroll = ScrollWidget.Cast(m_Root.FindAnyWidget("CountScroll"));
         if (m_CountText)
             m_CountText.SetText(Widget.TranslateString("#STR_OZS_COUNT"));
         if (m_Label)
@@ -260,7 +262,7 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
             if (OZS_Search.Active())
                 OZS_Search.Bump();
         }
-        if (!m_CountOpen || !m_CountPanel || !m_CountList)
+        if (!m_CountOpen || !m_CountPanel || !m_CountList || !m_CountScroll)
             return;
         if (now == m_CountSeen)
             return;
@@ -359,13 +361,6 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
             string pieces = Widget.TranslateString("#STR_OZS_COUNT_PIECES");
             for (int r = 0; r < rows.Count(); r++)
             {
-                if (r == OZS_Const.UI_COUNT_LINES)
-                {
-                    int rest = rows.Count() - r;
-                    text = text + "\n" + Widget.TranslateString("#STR_OZS_COUNT_MORE") + " " + rest.ToString();
-                    lines = lines + 1;
-                    break;
-                }
                 OZS_CountRow x = rows.Get(r);
                 string line = x.n.ToString() + " x " + x.name;
                 if (x.stack)
@@ -378,12 +373,19 @@ class OZS_BoxBar : ScriptedWidgetEventHandler
         int tw = 0;
         int th = 0;
         m_CountList.GetTextSize(tw, th);
-        int height = 8 + Math.Max(th, lines * OZS_Const.UI_LINE_PX);
-        m_CountList.SetSize(440, height - 8);
+        // The text gets its whole height; the panel shows UI_COUNT_LINES of
+        // it and the scroll widget carries the rest under the wheel (owner,
+        // 2026-09-27: a scroll instead of "N more classes").
+        int full = Math.Max(th, lines * OZS_Const.UI_LINE_PX);
+        int shown = Math.Min(full, OZS_Const.UI_COUNT_LINES * OZS_Const.UI_LINE_PX);
+        int height = 8 + shown;
+        m_CountList.SetSize(440, full);
+        m_CountScroll.SetSize(452, shown);
         m_CountPanel.SetSize(1, height);
         m_CountPanel.Show(true);
         m_Root.SetSize(1, OZS_Const.UI_BAR_PX + height);
         m_CountList.Update();
+        m_CountScroll.Update();
         m_CountPanel.Update();
         m_Root.Update();
         Widget above = m_Root.GetParent();

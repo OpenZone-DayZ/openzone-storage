@@ -352,25 +352,52 @@ class OZS_Mirrors
         return m.PutInto(item);
     }
 
-    // A LOOSE ITEM DROPPED ON AN ITEM IN THE BOX, when the screen found
-    // nothing to do with the pair: its own swap test (CanSwapEntitiesEx)
-    // does not pass a ground item. The exchange the drop means is asked for
-    // as what it is -- an Across -- and the server decides (owner,
-    // 2026-09-26: "a swap between the ground and the box").
-    static bool GroundSwap(EntityAI selected, EntityAI target)
+    // A DROP THE SCREEN FOUND NOTHING TO DO WITH, one end of it in a box:
+    // its own swap test (CanSwapEntitiesEx) does not pass a ground item,
+    // and answers as it pleases about an item in a container the engine was
+    // never told about. The exchange the drop means is asked for as what it
+    // is -- a swap inside the box, or an Across -- and the server decides
+    // (owner, 2026-09-26: "a swap between the ground and the box";
+    // 2026-09-27: the hands, the worn gear and the grid against the hooks).
+    static bool SwapAnyway(EntityAI selected, EntityAI target)
     {
-        if (None() || !selected || !target)
+        if (None() || !selected || !target || selected == target)
             return false;
-        if (selected.GetHierarchyParent() || Of(selected))
+        OZS_Mirror a = Of(selected);
+        OZS_Mirror b = Of(target);
+        if (!a && !b)
             return false;
-        OZS_Mirror m = Of(target);
+        if (a && b)
+        {
+            // Two items of one box trade inside it; two boxes is not this.
+            if (a != b)
+                return false;
+            s_Via = "SwapAnyway";
+            return a.DragSwap(selected, target);
+        }
+        OZS_Mirror m = a;
+        EntityAI inside = selected;
+        EntityAI mine = target;
         if (!m)
+        {
+            m = b;
+            inside = target;
+            mine = selected;
+        }
+        // The other end is the player's own -- worn, carried, in the hands
+        // -- or lying loose; the server checks the reach.
+        PlayerBase player = PlayerBase.Cast(GetGame().GetPlayer());
+        if (!player)
             return false;
-        int handle = m.HandleOf(target);
+        bool theirs = mine.GetHierarchyRootPlayer() == player;
+        bool loose = !mine.GetHierarchyParent();
+        if (!theirs && !loose)
+            return false;
+        int handle = m.HandleOf(inside);
         if (handle == 0)
             return false;
-        s_Via = "GroundSwap";
-        m.Across(selected, handle);
+        s_Via = "SwapAnyway";
+        m.Across(mine, handle);
         return true;
     }
 

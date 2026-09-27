@@ -815,3 +815,125 @@ Also on the owner's word: the three shared boxes now carry the personal
 stash's character slots (headgear to armband, shoulder and melee) beside
 their weapon hooks, so a whole kit hangs up in a box as it does in a stash.
 
+### 2026-09-27: one unreadable root closed the whole box
+
+The stand's boxes were seeded through the bridge's admin `give` with five
+class names this build does not have (the seeding script had read the
+class dump's first column, which is not the class). The next open of such
+a box found the first unknown root, parked it, deleted everything it had
+built and asked for the record again -- and again, and again: the open
+allowed three parks and then failed, and the player saw "The box's
+contents cannot be read, an admin is needed" for a box that was readable
+apart from a few items. The owner: only the unreadable roots should be
+parked, automatically, and the box should open with the rest.
+
+That is what the open job does now. A root the reader refuses is parked
+alone -- the reader had already removed what it made of it, and the
+containers it had queued for the ground go with it -- and the open asks
+the bridge for the rest of the record from the root after it. The rest
+comes as a file of its own (`<box id>.rest.bin`; bridge 0.7.0), because the
+engine cannot skip a root it failed inside of: a refused `OnStoreLoad`
+leaves the file wherever it stopped and `FileSerializer` cannot seek. The
+open letter carries `from`, the number of roots built so far, and the
+answer echoes it; a bridge that does not echo it handed out the whole
+record, and the job fails the open rather than build the first roots
+twice. Nothing already built is touched at a park, the ground-built
+containers of the roots before it still move into their cells while the
+job waits for the bridge, and the record's numbering and the box's order
+remain one thing: both drop the parked root, and every root before it is
+exactly what the box holds. There is no cap on parks any more: each one
+shortens the record by a root, and a bridge that kept handing the same
+root out fails the open once more roots were parked than the record had.
+A park the bridge refuses still fails the open the old way, with nothing
+left standing, because the root would be in the record and not in the
+box. When the box opens with something set aside, the player who opened
+it is told (`#STR_OZS_OPEN_PARTIAL`); the audit and the shelf name what.
+
+Verified on the stand the same day: a box of 169 roots given an unknown
+class and then six rags opened with all 170 readable roots -- `root 169 of
+the record ... cannot create OZ_NoSuchItem_ParkTest`, then `opened by
+proxy: 170 items (170 entities) ... parked 1, files 2, order 170, in the
+box 170` -- the bridge wrote `<id>.rest.bin` (201 bytes, the rags alone),
+the shelf held the unknown root as `refused`, and the player was told.
+(The same class given BEFORE the boot was parked by the boot's class check
+instead, as it always was.)
+
+### 2026-09-27: the count list scrolls
+
+The owner asked why the count panel ended in "more classes: 19": it printed
+24 class lines and folded the rest into that line. Now the list gets its
+whole height inside a `ScrollWidget` that shows 24 lines and carries the
+rest under the mouse wheel (`UI_COUNT_LINES` is the visible height now,
+`#STR_OZS_COUNT_MORE` is gone). The scroll area is 12 units wider than the
+text, because the engine draws the bar over the content. Seen on the stand
+the same day, on a box of 171 items: the wheel over the list scrolls the
+list, the bar and the header above it stay, the inventory panel behind
+does not move.
+
+### 2026-09-27: a backpack hung in a shared box took nothing into its cargo
+
+The owner, the day the shared boxes got the stash's clothing slots: a
+backpack put into a box's clothing slot cannot be filled. Vanilla's
+`CanReceiveItemIntoCargoClothingConditions` refuses cargo to clothing whose
+parent is not a person, and this mod's widening of it (OZS_ClothingCargo.c)
+was written for the personal stash alone, on purpose -- extending it to the
+published boxes was left as the owner's call. The refusal never reached the
+server: the client's own screen asks that gate before a drop, so the log
+showed the bag hanging and nothing after. The gate now answers yes for any
+`OZ_StorageBox` at the top of the chain, which is the stash, the three shared
+boxes, and their authorities and mirrors. Seen on the stand the same day: a
+bag hung on a shared box's Back hook answered the screen's own gate
+(`CanAddEntityInCargo`) with yes and took three rags from the probe's
+shirt; the panel drew the hung bag with its cargo, rags inside.
+
+### 2026-09-27: trading places with the hooks, every way round
+
+The owner: the weapon in the hands must trade with the one on the rack; the
+grid and the hooks do not trade either; the player's inventory and worn gear
+must trade with the box's slots. Three refusals, two of them the server's
+and one the screen's:
+
+- the cross-boundary swap (`OZS_Boundary.Across`) refused a box item on a
+  hook -- "no cell to step aside from". It now steps down into a free
+  corner of the grid (`FreeSpot`, either way round, since a hook cannot
+  measure what it holds) or onto a spare hook, the player's item takes the
+  hook it left (`In` names the hook to the engine with
+  `TakeEntityAsAttachmentEx`, so it lands on that hook and not on the first
+  free one), and it goes out to wherever the player's item came from: the
+  hands, which are empty by then, a pocket, a worn slot, the ground;
+- the in-box swap (`OZS_Ops.Swap`) measured a hung item as nothing
+  (`SizeOf` reads the cargo) and refused every pair with a hook in it on
+  the geometry. `SizeFor` gives the config's size, and a new branch
+  (`SwapHung`) does the exchange: the hung one stands aside for a step,
+  the other takes its hook, it takes the other's cells -- or hook, when
+  both hang -- and a step that fails puts both back;
+- the screen offers a swap for an occupied slot only when
+  `GameInventory.CanSwapEntitiesEx` agrees, and about a box's item it
+  answers as it pleases. `OZS_SlotSwap` (5_Mission) sits ahead of the two
+  vanilla slot-drop handlers and, once vanilla's own meanings for the drop
+  are exhausted (combine, a swap the native passes, attach onto the sitter,
+  put inside it), sends the exchange itself for an item that could hang on
+  that hook; the hands icon and the grid go through the same door in
+  `Icon.PerformCombination` (`OZS_Mirrors.SwapAnyway`, which the ground
+  swap of 2026-09-26 became a case of).
+
+Verified on the stand the same day, every pair in each other's exact
+place and the client's mirror agreeing with the server's tree:
+
+- hook <-> grid: the beanie on the Headgear hook for the cap at 49,6 --
+  `hook swap: BeanieHat_Red stood aside at 28,0, BaseballCap_Black took
+  slot -1445057555, BeanieHat_Red took 49,6`;
+- hook <-> hook: `AKM stood aside at 28,0, M4A1 took slot -692829678, AKM
+  took slot -692829677`;
+- hands <-> hook: the AKM in the hands for the M4A1 on hook 1: the M4A1
+  stepped down to 28,0, the AKM came in `from type 4` to the hook, the
+  M4A1 went out to the hands (`hands: M4A1` on the server, the rifle in
+  the panel's hands slot);
+- worn <-> hook: the worn beanie for the cap on the Headgear hook: the cap
+  ended on the head, the beanie on the hook;
+- pocket <-> hook: the blue balaclava from the pants' cell 0,0 for the
+  black one on the Mask hook: the black one ended in the pants at 0,0.
+
+On the client every one of these pairs got `CanSwapEntitiesEx` true from
+the native, so vanilla's own slot handlers sent them and `OZS_SlotSwap`
+never had to; it stays for the pairs the native refuses.

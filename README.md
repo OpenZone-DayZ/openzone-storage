@@ -19,11 +19,13 @@ the last of them closes the screen, walks off, leaves or dies -- nothing about i
 timer. The inventory screen carries a **search bar** that shades
 every item whose name does not contain the text and keeps a container lit if anything
 inside it matches, however deep; a **Sort** button that lays the open box out by name; and
-a **Count** button beside it that lists what the open box holds, total and by class. Two
-stacks either side of the box's edge merge the way vanilla's do (drag one onto the other,
-from a pocket or off the ground); a loose item dropped on an item in the box changes places
-with it; and **Alt+click** moves an item from the box into the inventory, or from the
-inventory (the hands included) into the box.
+a **Count** button beside it that lists what the open box holds, total and by class, and
+scrolls once the list runs past two dozen lines. Two stacks either side of the box's edge
+merge the way vanilla's do (drag one onto the other, from a pocket or off the ground); an
+item dropped on an item changes places with it wherever the two are -- grid, hook, hands,
+pocket, worn gear or the ground, either side of the box's edge; and **Alt+click** moves an
+item from the box into the inventory, or from the inventory (the hands included) into the
+box.
 
 ### The personal stash
 
@@ -47,7 +49,8 @@ Still to come: the ten-at-once concurrency run.
 Three boxes -- `OZ_StorageBox_Small` (250 cells, 2 weapon slots, wooden crate model),
 `OZ_StorageBox_Medium` (500 cells, 4 slots, sea chest) and `OZ_StorageBox_Large`
 (1000 cells, 6 slots, sea chest), each with the character's own clothing slots as well, so a
-whole kit hangs up instead of being piled into the grid. One verb on the box, "Show the box (N)": the record is
+whole kit hangs up instead of being piled into the grid, and clothing hung there keeps
+working pockets, as in the stash. One verb on the box, "Show the box (N)": the record is
 read into an unannounced container of the same class at 500 entities per second, 5 ms of a
 frame at most, and streamed to the player's screen in chunks; the container is kept for
 five minutes after the last player leaves and then let go at 50 deletions a frame; every
@@ -107,7 +110,10 @@ the screen had been closed. At boot the engine and the bridge reconcile: a box S
 believes open is a session the last run never ended and is closed on its record, a box
 held open by another server on the same bridge is refused here, and a class the bridge
 remembers that no longer exists in `CfgVehicles`/`CfgWeapons`/`CfgMagazines` gets its
-root parked until the class comes back.
+root parked until the class comes back. A root the engine cannot read at an open -- a
+class it does not have, a stored state its item refuses -- is parked alone, at once: the
+bridge sets it aside for an admin, the box opens with the rest, and the player who opened
+it is told that a part of the contents was set aside (`#STR_OZS_OPEN_PARTIAL`).
 Full protocol: section 24 of [the spec](docs/2026-09-16-storage-box-spec.md).
 
 Admins also get a web page from the bridge itself: box lists, contents, history and a
@@ -120,11 +126,13 @@ bridge sets `ADMIN_URL`. See openzone-bridge's own README.
 - [Community Framework](https://steamcommunity.com/sharedfiles/filedetails/?id=1559212036)
 - [OpenZone Core](https://steamcommunity.com/sharedfiles/filedetails/?id=3798432022)
 - **On the server, as a separate process (not a PBO):**
-  [openzone-bridge](https://github.com/OpenZone-DayZ/openzone-bridge) **0.6.0 or newer**,
+  [openzone-bridge](https://github.com/OpenZone-DayZ/openzone-bridge) **0.7.0 or newer**,
   reachable and configured with `STORAGE_XCHG_DIR` pointed at this server's
   `profiles/OpenZone/Storage/xchg` (this repo's `$profile:OpenZone/Storage/xchg`).
-  An older bridge has no route for a session's turns: a box opens and its session
-  ends at the first drag, with "no link to the bridge" on the screen.
+  An older bridge cannot hand out the rest of a record after a parked root, so a box
+  with one unreadable item stays closed ("an admin is needed"); one older than 0.6.0 has
+  no route for a session's turns either: a box opens and its session ends at the first
+  drag, with "no link to the bridge" on the screen.
 
 ## Build and run
 

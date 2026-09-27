@@ -738,10 +738,12 @@ class OZS_Ops
         int ah;
         int bw;
         int bh;
-        bool sizedA = SizeOf(a, aw, ah);
+        // The config's size for one that hangs (SizeFor): a hook cannot
+        // measure what it holds, and both branches below need both sizes.
+        bool sizedA = SizeFor(a, -1, aw, ah);
         bool sized = sizedA;
         if (sized)
-            sized = SizeOf(b, bw, bh);
+            sized = SizeFor(b, -1, bw, bh);
         // The sizes are still needed -- our own search measures rectangles
         // with them -- but they no longer DECIDE which kind of swap this is.
         // That is the engine's to say, and its rule is not "equal footprints":
@@ -767,6 +769,19 @@ class OZS_Ops
         string verdicts = "natives: CanSwapEntities=" + plain.ToString();
         verdicts = verdicts + " CanForceSwapEntities=" + forced.ToString();
         OZ_Log.Dbg("storage: proxy: " + verdicts);
+        // ONE OF THEM ON A HOOK (owner, 2026-09-27: "between the grid and the
+        // slots they do not trade places either"). A hook is not a rectangle,
+        // so none of the geometry below applies to it, and each one's place
+        // is held by the other: the hung one steps aside for one step, the
+        // other takes its hook, and it takes the other's cells -- or the
+        // other's hook, when both hang.
+        bool aHung = srcA.GetType() == InventoryLocationType.ATTACHMENT;
+        bool bHung = srcB.GetType() == InventoryLocationType.ATTACHMENT;
+        if (aHung || bHung)
+        {
+            SwapHung(s, w, handle, a, b, srcA, srcB, dstA, dstB, wasA, wasB);
+            return;
+        }
         // THE CELL THE PLAYER AIMED AT WINS OVER THE OTHER ITEM'S CORNER.
         //
         // NO CELL DECIDES ANYTHING HERE, AND THAT IS VANILLA'S RULE.
@@ -1081,6 +1096,101 @@ class OZS_Ops
             w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
             return;
         }
+        Swapped(s, w, sitter, mover, wasA, wasB);
+    }
+
+    // TWO ITEMS TRADING PLACES WHEN AT LEAST ONE HANGS ON A HOOK.
+    //
+    // The grid case above moves by rectangles; a hook has none. What a hook
+    // has is one occupant, so the other item cannot go first, and the hung
+    // one cannot either while the other stands on its cells (or on its
+    // hook). So the hung one -- `a` when both hang -- steps aside for one
+    // step: into a free corner of the grid, either way round, or onto a
+    // spare hook when the grid is full. Then the other takes the hook it
+    // left, and it takes the other's place. Nobody sees the corner: the
+    // letter and the client learn the two final places, or everything goes
+    // back where it was.
+    protected static void SwapHung(OZS_Session s, OZS_Watcher w, int handle, EntityAI a, EntityAI b, InventoryLocation srcA, InventoryLocation srcB, InventoryLocation dstA, InventoryLocation dstB, OZS_Was wasA, OZS_Was wasB)
+    {
+        EntityAI mover = a;
+        EntityAI sitter = b;
+        InventoryLocation moverHome = srcA;
+        InventoryLocation sitterHome = srcB;
+        InventoryLocation moverTo = dstA;
+        InventoryLocation sitterTo = dstB;
+        if (srcA.GetType() != InventoryLocationType.ATTACHMENT)
+        {
+            mover = b;
+            sitter = a;
+            moverHome = srcB;
+            sitterHome = srcA;
+            moverTo = dstB;
+            sitterTo = dstA;
+        }
+        // Whichever of the two is going into the GRID must fit where the
+        // other stands, the other's cells counted as free: an exchange is an
+        // exchange, or the box says no (2026-09-25).
+        InventoryLocation gridTo = null;
+        EntityAI gridGoer = null;
+        if (moverTo.GetType() == InventoryLocationType.CARGO)
+        {
+            gridTo = moverTo;
+            gridGoer = mover;
+        }
+        else if (sitterTo.GetType() == InventoryLocationType.CARGO)
+        {
+            gridTo = sitterTo;
+            gridGoer = sitter;
+        }
+        if (gridTo)
+        {
+            int gw;
+            int gh;
+            int gridFlip = 0;
+            if (gridTo.GetFlip())
+                gridFlip = 1;
+            if (!SizeFor(gridGoer, gridFlip, gw, gh))
+            {
+                w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
+                return;
+            }
+            if (!Clear(s.m_Auth, gridTo.GetRow(), gridTo.GetCol(), gw, gh, a, b))
+            {
+                OZ_Log.Dbg("storage: proxy: hook swap: " + gridGoer.GetType() + " (" + gw.ToString() + "x" + gh.ToString() + ") does not fit at " + gridTo.GetRow().ToString() + "," + gridTo.GetCol().ToString() + ", where the other stands");
+                w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
+                return;
+            }
+        }
+        // 1. The hung one stands aside.
+        InventoryLocation aside = new InventoryLocation();
+        bool parked = FreeSpot(s.m_Auth, mover, aside);
+        if (!parked)
+            parked = s.m_Auth.GetInventory().FindFreeLocationFor(mover, FindInventoryLocationType.ATTACHMENT, aside);
+        if (!parked)
+        {
+            w.No(handle, "#STR_OZS_FULL", s.m_Version);
+            return;
+        }
+        if (!Put(mover, aside))
+        {
+            w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
+            return;
+        }
+        // 2. The other takes its hook. 3. It takes the other's place.
+        bool done = Put(sitter, sitterTo);
+        if (done)
+            done = Put(mover, moverTo);
+        if (!done)
+        {
+            OZ_Log.Error("storage: proxy: box " + s.m_Id + ": " + mover.GetType() + " and " + sitter.GetType() + " could not take each other's place after all; both are put back");
+            Put(sitter, sitterHome);
+            Put(mover, moverHome);
+            s.TellMoved(a, "");
+            s.TellMoved(b, "");
+            w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
+            return;
+        }
+        OZ_Log.Dbg("storage: proxy: hook swap: " + mover.GetType() + " stood aside at " + Spot(aside) + ", " + sitter.GetType() + " took " + Spot(sitterTo) + ", " + mover.GetType() + " took " + Spot(moverTo));
         Swapped(s, w, sitter, mover, wasA, wasB);
     }
 

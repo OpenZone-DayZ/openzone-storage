@@ -169,7 +169,7 @@ FrameWidgetClass ozs_search_root {
   }
   PanelWidgetClass CountPanel {
    visible 0
-   ignorepointer 1
+   ignorepointer 0
    position 0 34
    size 1 60
    hexactpos 1
@@ -179,20 +179,32 @@ FrameWidgetClass ozs_search_root {
    color 0 0 0 0
    style rover_sim_colorable
    {
-    MultilineTextWidgetClass CountList {
-     ignorepointer 1
+    ScrollWidgetClass CountScroll {
      position 12 4
-     size 440 52
+     size 452 52
      hexactpos 1
      vexactpos 1
      hexactsize 1
      vexactsize 1
-     color 0.85 0.85 0.85 1
-     text ""
-     font "gui/fonts/sdf_MetronBook24"
-     "exact text" 1
-     "exact text size" 13
-     "text valign" top
+     clipchildren 1
+     "Scrollbar V" 1
+     {
+      MultilineTextWidgetClass CountList {
+       ignorepointer 1
+       position 0 0
+       size 440 52
+       hexactpos 1
+       vexactpos 1
+       hexactsize 1
+       vexactsize 1
+       color 0.85 0.85 0.85 1
+       text ""
+       font "gui/fonts/sdf_MetronBook24"
+       "exact text" 1
+       "exact text size" 13
+       "text valign" top
+      }
+     }
     }
    }
   }

@@ -1,4 +1,4 @@
-// Clothing hung in the stash keeps working pockets.
+// Clothing hung in a storage box keeps working pockets.
 //
 // THE RULE THIS WIDENS. Vanilla clothing refuses cargo unless it is lying
 // loose or worn by a person -- literally:
@@ -27,17 +27,22 @@
 //         return true;
 //
 // So a container that is meant to hold a kit is expected to say so. Ours says
-// so here, for the personal stash and nothing else: every other parent, and
-// every case that is not a stash, falls through to vanilla untouched.
+// so here, for every storage box -- the personal stash and the shared boxes,
+// which hang the same clothing slots since 2026-09-27 -- and nothing else:
+// every other parent, and every case that is not a box, falls through to
+// vanilla untouched.
 //
-// Deliberately NOT extended to OZ_StorageBox: the boxes are published and a
-// player-visible rule change there is the owner's call, not a side effect of
-// this feature.
+// Until 2026-09-27 this was the stash's alone, on purpose: the boxes were
+// published, and a player-visible rule change there was the owner's call.
+// The owner made it the day the boxes got the slots, the first time a
+// backpack hung in one of them: "I put a backpack into the clothing slot,
+// and then I cannot put anything into its cargo". A slot that takes a kit
+// and refuses its pockets is the asymmetry this file exists to remove.
 modded class Clothing
 {
     override bool CanReceiveItemIntoCargoClothingConditions(EntityAI item)
     {
-        if (OZS_HangingInStash())
+        if (OZS_HangingInBox())
             return true;
         return super.CanReceiveItemIntoCargoClothingConditions(item);
     }
@@ -47,12 +52,12 @@ modded class Clothing
     // contents on the next restart, which is the worst of both answers.
     override bool CanLoadItemIntoCargoClothingConditions(EntityAI item)
     {
-        if (OZS_HangingInStash())
+        if (OZS_HangingInBox())
             return true;
         return super.CanLoadItemIntoCargoClothingConditions(item);
     }
 
-    // ANYWHERE above this garment, at any depth. A vest hangs in the stash's
+    // ANYWHERE above this garment, at any depth. A vest hangs in the box's
     // Vest slot, its pouches hang on the vest, and something could hang on
     // those in turn: the pouches' own parent is the vest, which is no more a
     // Man than the stash is, so a check of the DIRECT parent alone would
@@ -64,11 +69,15 @@ modded class Clothing
     // The engine's own limit still applies on top and is not ours to widen:
     // AreChildrenAccessible() (entityai.c:1662) spends a budget of
     // INVENTORY_MAX_REACHABLE_DEPTH_ATT = 2 attachment steps, so
-    // stash -> garment -> pouch is reachable and a fourth level is not -- on
+    // box -> garment -> pouch is reachable and a fourth level is not -- on
     // a player's own body exactly as here. Anything in CARGO cuts the chain
     // outright, at any depth.
-    protected bool OZS_HangingInStash()
+    //
+    // OZ_StorageBox is the stash's parent class, so one cast covers the
+    // stash, the three shared boxes, and their invisible authorities and
+    // client-side mirrors, which are boxes of the same classes.
+    protected bool OZS_HangingInBox()
     {
-        return OZ_PersonalStash.Cast(GetHierarchyRoot()) != null;
+        return OZ_StorageBox.Cast(GetHierarchyRoot()) != null;
     }
 }

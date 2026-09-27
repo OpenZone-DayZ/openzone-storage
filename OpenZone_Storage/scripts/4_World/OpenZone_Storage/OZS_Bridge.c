@@ -51,6 +51,15 @@ class OZS_IdLetter
     int version;
 }
 
+// An open asks for the record from root `from` on: 0 the first time, the
+// count of roots built so far when a parked root made the open go on.
+class OZS_OpenLetter
+{
+    string id;
+    string by;
+    int from;
+}
+
 class OZS_ParkLetter
 {
     string id;
@@ -130,6 +139,9 @@ class OZS_OpenAnswer
     string stamp;
     int roots;
     int entities;
+    // The `from` the open asked with, echoed; a bridge that does not echo it
+    // handed out the whole record, and the job must not build it twice.
+    int from;
 }
 
 class OZS_ParkAnswer

@@ -53,8 +53,6 @@ class OZS_Const
     static const float REPLY_TIMEOUT = 12.0;
     // Seconds between attempts of the boot exchange while the bridge is down.
     static const float BOOT_RETRY    = 5.0;
-    // How many times an open asks again after a parked root.
-    static const int   OPEN_RETRIES  = 3;
     // Events: one batch per second at most, this many per batch, this many
     // waiting before the oldest is dropped.
     static const float EVENT_FLUSH   = 1.0;
@@ -182,8 +180,8 @@ class OZS_Const
     // The search bar's height and one line of the count list, in layout pixels.
     static const int UI_BAR_PX = 34;
     static const int UI_LINE_PX = 17;
-    // How many class lines the count list prints before it switches to
-    // "N more classes" instead of growing without limit.
+    // How many class lines the count list shows at once; a longer list
+    // scrolls under the mouse wheel instead of growing without limit.
     static const int UI_COUNT_LINES = 24;
 
     // ---- the personal stash's key ----------------------------------------
