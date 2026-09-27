@@ -932,7 +932,12 @@ place and the client's mirror agreeing with the server's tree:
 - worn <-> hook: the worn beanie for the cap on the Headgear hook: the cap
   ended on the head, the beanie on the hook;
 - pocket <-> hook: the blue balaclava from the pants' cell 0,0 for the
-  black one on the Mask hook: the black one ended in the pants at 0,0.
+  black one on the Mask hook: the black one ended in the pants at 0,0;
+- ground <-> hook (the owner asked for it while the rest was being
+  checked): a loose ushanka dropped onto the beanie on the Headgear hook
+  went onto the hook and the beanie came out to the player's feet -- the
+  same Across as the ground-to-grid exchange of 2026-09-26, with the hook
+  now a place it trades from.
 
 On the client every one of these pairs got `CanSwapEntitiesEx` true from
 the native, so vanilla's own slot handlers sent them and `OZS_SlotSwap`
