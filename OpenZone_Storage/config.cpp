@@ -270,7 +270,12 @@ class CfgVehicles
     {
         scope = 2;
         displayName = "$STR_OZS_STASH";
-        descriptionShort = "$STR_OZS_STASH_DESC";
+        // THE DESCRIPTION IS A WARNING TO ADMINS (owner, 2026-09-27): an
+        // admin spawner lists this class under the same name as the locker,
+        // and two of these were put into the world as sea chests that
+        // nothing can open. Only the locker is placed; this class exists as
+        // a session's authority and mirror.
+        descriptionShort = "$STR_OZS_STASH_CONTAINER_DESC";
         // SeaChest like the boxes, because the script class beside this
         // one is OZ_StorageBox: a stash IS a box, with a pair for a key.
         // The script side must not skip DeployableContainer_Base, which is
