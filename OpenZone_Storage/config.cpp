@@ -86,7 +86,12 @@ class CfgVehicles
         scope = 2;
         displayName = "$STR_OZS_BOX_SMALL";
         descriptionShort = "$STR_OZS_BOX_SMALL_DESC";
-        attachments[] = {"OZ_Weapon_1", "OZ_Weapon_2"};
+        // THE CHARACTER'S OWN SLOTS AS WELL (owner, 2026-09-27): what the
+        // personal stash hangs up, a shared box hangs up too, so a whole kit
+        // goes onto hooks instead of into the grid, and clothing hung here
+        // keeps working pockets. The slots are the vanilla ones, so the
+        // T148506 trap never arises (see the stash below).
+        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2"};
         class Cargo
         {
             itemsCargoSize[] = {10, 25};
@@ -95,13 +100,21 @@ class CfgVehicles
         };
         class GUIInventoryAttachmentsProps
         {
+            class Gear
+            {
+                name = "$STR_OZS_SLOTS_GEAR";
+                description = "";
+                attachmentSlots[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband"};
+                icon = "set:dayz_inventory image:cat_common_cargo";
+                view_index = 1;
+            };
             class Weapons
             {
                 name = "$STR_OZS_SLOTS_WEAPONS";
                 description = "";
-                attachmentSlots[] = {"OZ_Weapon_1", "OZ_Weapon_2"};
+                attachmentSlots[] = {"Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2"};
                 icon = "set:dayz_inventory image:cat_common_cargo";
-                view_index = 1;
+                view_index = 2;
             };
         };
     };
@@ -112,7 +125,12 @@ class CfgVehicles
         scope = 2;
         displayName = "$STR_OZS_BOX_MEDIUM";
         descriptionShort = "$STR_OZS_BOX_MEDIUM_DESC";
-        attachments[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
+        // THE CHARACTER'S OWN SLOTS AS WELL (owner, 2026-09-27): what the
+        // personal stash hangs up, a shared box hangs up too, so a whole kit
+        // goes onto hooks instead of into the grid, and clothing hung here
+        // keeps working pockets. The slots are the vanilla ones, so the
+        // T148506 trap never arises (see the stash below).
+        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
         class Cargo
         {
             itemsCargoSize[] = {10, 50};
@@ -121,13 +139,21 @@ class CfgVehicles
         };
         class GUIInventoryAttachmentsProps
         {
+            class Gear
+            {
+                name = "$STR_OZS_SLOTS_GEAR";
+                description = "";
+                attachmentSlots[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband"};
+                icon = "set:dayz_inventory image:cat_common_cargo";
+                view_index = 1;
+            };
             class Weapons
             {
                 name = "$STR_OZS_SLOTS_WEAPONS";
                 description = "";
-                attachmentSlots[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
+                attachmentSlots[] = {"Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
                 icon = "set:dayz_inventory image:cat_common_cargo";
-                view_index = 1;
+                view_index = 2;
             };
         };
     };
@@ -139,7 +165,12 @@ class CfgVehicles
         scope = 2;
         displayName = "$STR_OZS_BOX_LARGE";
         descriptionShort = "$STR_OZS_BOX_LARGE_DESC";
-        attachments[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
+        // THE CHARACTER'S OWN SLOTS AS WELL (owner, 2026-09-27): what the
+        // personal stash hangs up, a shared box hangs up too, so a whole kit
+        // goes onto hooks instead of into the grid, and clothing hung here
+        // keeps working pockets. The slots are the vanilla ones, so the
+        // T148506 trap never arises (see the stash below).
+        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
         class Cargo
         {
             itemsCargoSize[] = {10, 100};
@@ -148,13 +179,21 @@ class CfgVehicles
         };
         class GUIInventoryAttachmentsProps
         {
+            class Gear
+            {
+                name = "$STR_OZS_SLOTS_GEAR";
+                description = "";
+                attachmentSlots[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband"};
+                icon = "set:dayz_inventory image:cat_common_cargo";
+                view_index = 1;
+            };
             class Weapons
             {
                 name = "$STR_OZS_SLOTS_WEAPONS";
                 description = "";
-                attachmentSlots[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
+                attachmentSlots[] = {"Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
                 icon = "set:dayz_inventory image:cat_common_cargo";
-                view_index = 1;
+                view_index = 2;
             };
         };
     };

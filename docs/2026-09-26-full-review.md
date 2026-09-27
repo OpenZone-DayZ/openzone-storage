@@ -788,3 +788,30 @@ taken out again (`rewrite 1 drop 0 add 0`, record = box), two stacks merged
 inside the bag, a root merged into a nested stack -- no disagreement, the
 record read back from the bridge equal to the box each time.
 
+### 2026-09-27: a sort duplicated the box
+
+The owner: after Sort nothing changes on the screen, and on reopening the
+box the items look duplicated. The log: `is being emptied for the sort, 2
+entity(ies)` and then nothing -- no `emptied`, no `refilling`. `auth
+do=status` showed `tearing_down=5 ticks=34645`, every job `done true`, none
+ever finished: the driver ticked every frame and never once called a job's
+Finish. The player closed the screen, the session could not end (it waits
+for the emptying), the player opened the box again, and the refill built
+the record's items INTO the authority that still held the old ones --
+`created 2 entities and ended with 4` -- and the drift repair then wrote
+the four into the record. The same for every session's end: no authority
+was ever deleted on this build.
+
+The cause is the engine's, and it is one name: `OZS_Authority.Step` (the
+static driver) called `job.Step(budget)` on an `OZS_Teardown`, whose own
+method was also called `Step`. That call never reached the job. Renamed
+apart (`Drive`, `Take`, `Complete`), the very same code finished the test
+authority at once (`discarded with 0 entity(ies) over 0 frame(s)`) and a
+live sort emptied 11 entities in one frame and refilled 11, none missing.
+Recorded in the skill as an iron rule: never call an instance method that
+shares its name with a static method of the calling class.
+
+Also on the owner's word: the three shared boxes now carry the personal
+stash's character slots (headgear to armband, shoulder and melee) beside
+their weapon hooks, so a whole kit hangs up in a box as it does in a stash.
+

@@ -1017,7 +1017,7 @@ class OZS_Session
     {
         if (m_Emptying)
         {
-            if (!m_Emptying.IsDone())
+            if (!m_Emptying.Complete())
                 return;
             m_Emptying = null;
             if (m_Ended || !m_Auth)
@@ -1056,7 +1056,7 @@ class OZS_Session
         for (int i = 0; i < m_Watchers.Count(); i++)
             m_Watchers.Get(i).Restart();
         // Nothing to delete -- an empty box sorted -- refills at once.
-        if (m_Emptying.IsDone())
+        if (m_Emptying.Complete())
             Resort();
     }
 

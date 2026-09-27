@@ -370,11 +370,14 @@ class OZS_Authority
     // Every frame, from OZS_Proxies.OnFrame. ONE budget for all the
     // teardowns running, not one each: two sessions ending in the same
     // second must not cost the frame twice what the setting allows.
+    protected static int s_Ticks;
+
     static void OnFrame()
     {
         if (!s_Teardowns || s_Teardowns.Count() == 0)
             return;
-        Step(OZS_Settings.Get().ReleaseDeletesPerFrame);
+        s_Ticks++;
+        Drive(OZS_Settings.Get().ReleaseDeletesPerFrame);
     }
 
     // The mission is stopping: everything still listed goes in this frame.
@@ -383,19 +386,28 @@ class OZS_Authority
         if (!s_Teardowns || s_Teardowns.Count() == 0)
             return;
         int left = s_Teardowns.Count();
-        Step(-1);
+        Drive(-1);
         OZ_Log.Info("storage: " + left.ToString() + " teardown(s) finished at once for the stop");
     }
 
     // `budget` is how many deletions this frame may spend; below zero, all.
-    protected static void Step(int budget)
+    //
+    // NAMED APART FROM THE JOB'S OWN STEP ON PURPOSE. As `Step`, calling
+    // `job.Step(budget)` from inside this static `Step` never reached the
+    // job: every teardown stood in the list for ever, `done true`, its
+    // Finish never called, while the frame counter ticked past thirty
+    // thousand (measured 2026-09-27; the stashes were then refilled over
+    // their undeleted contents, and the record took the duplicates). A
+    // method call on an instance whose method shares its name with a static
+    // method of the calling class is not to be trusted in this engine.
+    protected static void Drive(int budget)
     {
         int i = 0;
         while (i < s_Teardowns.Count())
         {
             OZS_Teardown job = s_Teardowns.Get(i);
-            budget = job.Step(budget);
-            if (job.IsDone())
+            budget = job.Take(budget);
+            if (job.Complete())
             {
                 job.Finish();
                 s_Teardowns.RemoveOrdered(i);
@@ -421,7 +433,11 @@ class OZS_Authority
         array<ref OZS_AuthRec> live = Live();
         string s = "authorities=" + live.Count();
         if (TeardownCount() > 0)
-            s = s + " tearing_down=" + TeardownCount().ToString();
+        {
+            s = s + " tearing_down=" + TeardownCount().ToString() + " ticks=" + s_Ticks.ToString();
+            for (int t = 0; t < s_Teardowns.Count(); t++)
+                s = s + " [" + s_Teardowns.Get(t).Describe() + "]";
+        }
         for (int i = 0; i < live.Count(); i++)
         {
             OZS_AuthRec rec = live.Get(i);
@@ -495,18 +511,25 @@ class OZS_Teardown
         return m_Nodes.Count() - 1;
     }
 
-    bool IsDone()
+    bool Complete()
     {
         return m_Next < 1;
     }
 
+    string Describe()
+    {
+        return m_For + " nodes " + m_Nodes.Count().ToString() + " next " + m_Next.ToString() + " gone " + m_Gone.ToString() + " frames " + m_Frames.ToString() + " done " + Complete().ToString();
+    }
+
     // Deletes up to `budget` entities (all of them below zero) and answers
     // with what is left of the budget.
-    int Step(int budget)
+    int Take(int budget)
     {
-        if (IsDone())
+        if (Complete())
             return budget;
         m_Frames++;
+        if (m_Frames == 1)
+            OZ_Log.Dbg("storage: teardown of " + m_For + " starts: " + m_Nodes.Count().ToString() + " node(s), budget " + budget.ToString());
         while (m_Next >= 1)
         {
             if (budget == 0)

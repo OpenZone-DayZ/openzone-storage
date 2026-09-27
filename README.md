@@ -46,7 +46,8 @@ Still to come: the ten-at-once concurrency run.
 
 Three boxes -- `OZ_StorageBox_Small` (250 cells, 2 weapon slots, wooden crate model),
 `OZ_StorageBox_Medium` (500 cells, 4 slots, sea chest) and `OZ_StorageBox_Large`
-(1000 cells, 6 slots, sea chest). One verb on the box, "Show the box (N)": the record is
+(1000 cells, 6 slots, sea chest), each with the character's own clothing slots as well, so a
+whole kit hangs up instead of being piled into the grid. One verb on the box, "Show the box (N)": the record is
 read into an unannounced container of the same class at 500 entities per second, 5 ms of a
 frame at most, and streamed to the player's screen in chunks; the container is kept for
 five minutes after the last player leaves and then let go at 50 deletions a frame; every
