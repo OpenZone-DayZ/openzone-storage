@@ -461,8 +461,12 @@ class OZS_Session
         // long as they stayed on the server (review 2026-09-26, C2).
         if (m_Auth.OZS_GetState() == OZS_Const.STATE_CLOSED)
         {
+            // The fill is signed with the watcher's own name, not the word
+            // "proxy": the bridge's journal names the player who opened the
+            // box, and its admin page shows players by their last name seen
+            // (owner, 2026-09-27).
             string openWhy;
-            if (!OZS_Controller.Get().RequestOpenAs(m_Auth, "proxy", OZS_Controller.UidOfIdentity(who), openWhy))
+            if (!OZS_Controller.Get().RequestOpenAs(m_Auth, who.GetName(), OZS_Controller.UidOfIdentity(who), openWhy))
             {
                 Leave(who, "the box cannot be filled: " + openWhy);
                 // The reason as the controller gave it, which is a

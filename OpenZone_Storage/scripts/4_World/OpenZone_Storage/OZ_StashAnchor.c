@@ -16,6 +16,19 @@
 // same whole metre after being lost finds every stash again.
 class OZ_StashAnchor : ItemBase
 {
+    // The engine's own id of this item, as a box has one: what the bridge's
+    // admin page names the locker by (owner, 2026-09-27), while the stashes
+    // under it stay keyed by where it stands (OZS_AnchorKey). Valid the
+    // frame the item is created and the same after every boot, as a box's.
+    protected string m_OZS_Id;
+
+    string OZS_GetId()
+    {
+        if (m_OZS_Id == "" && GetGame() && GetGame().IsServer())
+            m_OZS_Id = OZS_Store.PersistentIdOf(this);
+        return m_OZS_Id;
+    }
+
     override void EEInit()
     {
         super.EEInit();
@@ -25,6 +38,25 @@ class OZ_StashAnchor : ItemBase
         // Every boot renews the lifetime, so the anchor outlives the central
         // economy's cleanup without an entry in types.xml -- as a box does.
         SetLifetime(OZS_Const.BOX_LIFETIME);
+        OZS_Controller.Get().RegisterAnchor(this);
+    }
+
+    // A locker leaving the world is news to the bridge, as a box is. The
+    // mission teardown deletes everything too, and the controller's
+    // shutdown flag tells the two apart (OZ_StorageBox.EEDelete).
+    override void EEDelete(EntityAI parent)
+    {
+        if (GetGame() && GetGame().IsServer())
+        {
+            string id = OZS_GetId();
+            if (!OZS_Controller.IsShuttingDown() && id != "")
+            {
+                OZ_Log.Warn("storage: locker " + id + " removed from the world at " + GetPosition().ToString(false));
+                OZS_Audit.Log("removed", id, "", "", GetType(), 0, -1, -1, OZS_AnchorKey(), "removed from the world at " + GetPosition().ToString(false));
+            }
+            OZS_Controller.Get().UnregisterAnchor(this);
+        }
+        super.EEDelete(parent);
     }
 
     // Set again after the load, where it is the last word: the engine

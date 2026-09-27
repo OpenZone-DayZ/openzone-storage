@@ -24,6 +24,11 @@ class OZS_Controller
     // Weak references on purpose: a deleted box reads null, and Unregister
     // runs from EEDelete anyway.
     protected ref array<OZ_StorageBox> m_Boxes;
+    // THE LOCKERS OF PERSONAL STASHES. Not boxes -- they hold nothing -- but
+    // the bridge's admin page names each by the engine's id of the item
+    // (owner, 2026-09-27: "show the id of the anchor"), so the boot letter
+    // lists them and one placed into a running world is announced.
+    protected ref array<OZ_StashAnchor> m_Anchors;
     protected ref array<ref OZS_OpenJob> m_OpenJobs;
     // The world's persistent entities load a few frames after
     // OnMissionStart (measured 2026-09-16), so the boot exchange waits.
@@ -63,6 +68,7 @@ class OZS_Controller
     void OZS_Controller()
     {
         m_Boxes = new array<OZ_StorageBox>();
+        m_Anchors = new array<OZ_StashAnchor>();
         m_OpenJobs = new array<ref OZS_OpenJob>();
         m_SummaryDue = -1;
         m_BootDone = false;
@@ -113,6 +119,28 @@ class OZS_Controller
     {
         if (m_Boxes.Find(box) < 0)
             m_Boxes.Insert(box);
+    }
+
+    // A locker, at its EEInit. Before the boot exchange the letter lists it;
+    // after, it is news -- an admin placed a locker into a running world --
+    // and is announced as a box is by its kit.
+    void RegisterAnchor(OZ_StashAnchor a)
+    {
+        if (m_Anchors.Find(a) >= 0)
+            return;
+        m_Anchors.Insert(a);
+        if (!m_BootDone)
+            return;
+        string id = a.OZS_GetId();
+        OZ_Log.Info("storage: locker " + id + " placed at " + a.GetPosition().ToString(false) + " (key " + a.OZS_AnchorKey() + ")");
+        OZS_Audit.Log("placed", id, "", "", a.GetType(), 0, -1, -1, a.OZS_AnchorKey(), a.GetPosition().ToString(false));
+    }
+
+    void UnregisterAnchor(OZ_StashAnchor a)
+    {
+        int at = m_Anchors.Find(a);
+        if (at >= 0)
+            m_Anchors.Remove(at);
     }
 
     void Unregister(OZ_StorageBox box)
@@ -181,6 +209,11 @@ class OZS_Controller
         {
             if (!m_Boxes.Get(i))
                 m_Boxes.RemoveOrdered(i);
+        }
+        for (int k = m_Anchors.Count() - 1; k >= 0; k--)
+        {
+            if (!m_Anchors.Get(k))
+                m_Anchors.RemoveOrdered(k);
         }
     }
 
@@ -543,6 +576,15 @@ class OZS_Controller
             bb.pos = b.GetPosition().ToString(false);
             letter.boxes.Insert(bb);
         }
+        for (int j = 0; j < m_Anchors.Count(); j++)
+        {
+            OZ_StashAnchor an = m_Anchors.Get(j);
+            OZS_BootAnchor ba = new OZS_BootAnchor();
+            ba.id = an.OZS_GetId();
+            ba.key = an.OZS_AnchorKey();
+            ba.pos = an.GetPosition().ToString(false);
+            letter.anchors.Insert(ba);
+        }
         string json;
         string err;
         if (!JsonFileLoader<OZS_BootLetter>.MakeData(letter, json, err, false))
@@ -553,7 +595,7 @@ class OZS_Controller
         }
         m_BootInFlight = true;
         OZS_Bridge.Post(OZS_Const.ROUTE_BOOT, json, new OZS_BootReply());
-        OZ_Log.Info("storage: boot: asking the bridge about " + m_Boxes.Count().ToString() + " box(es)");
+        OZ_Log.Info("storage: boot: asking the bridge about " + m_Boxes.Count().ToString() + " box(es) and " + m_Anchors.Count().ToString() + " locker(s)");
     }
 
     // The bridge's answer, or the reason there is none.

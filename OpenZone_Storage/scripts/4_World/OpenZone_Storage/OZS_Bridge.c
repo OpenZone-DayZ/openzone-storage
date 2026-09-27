@@ -19,13 +19,24 @@ class OZS_BootBox
     string pos;
 }
 
+// A locker of personal stashes, as the boot letter names it: the engine's
+// id of the item, the key its stashes are filed under, where it stands.
+class OZS_BootAnchor
+{
+    string id;
+    string key;
+    string pos;
+}
+
 class OZS_BootLetter
 {
     ref array<ref OZS_BootBox> boxes;
+    ref array<ref OZS_BootAnchor> anchors;
 
     void OZS_BootLetter()
     {
         boxes = new array<ref OZS_BootBox>();
+        anchors = new array<ref OZS_BootAnchor>();
     }
 }
 
