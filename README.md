@@ -75,7 +75,7 @@ Only the first pbo is meant for players; the other three are stand tooling.
 ## Where a closed box lives
 
 A box's contents are never on this server's disk and never in the placed box -- the truth
-is the OpenZone bridge's SQLite ([openzone-bridge](https://github.com/covalschi/openzone-bridge),
+is the OpenZone bridge's SQLite ([openzone-bridge](https://github.com/OpenZone-DayZ/openzone-bridge),
 a separate Node.js process the server must run; not the MCP bridge in the table above).
 While somebody looks into a box its contents stand in an **authority**: a real container of
 the same class that nobody is told about, nothing saves and nothing can damage, written to
