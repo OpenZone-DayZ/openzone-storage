@@ -90,8 +90,12 @@ class CfgVehicles
         // personal stash hangs up, a shared box hangs up too, so a whole kit
         // goes onto hooks instead of into the grid, and clothing hung here
         // keeps working pockets. The slots are the vanilla ones, so the
-        // T148506 trap never arises (see the stash below).
-        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2"};
+        // T148506 trap never arises (see the stash below). NOT the shoulder
+        // and melee slots: a pickaxe hung on one of those beside the weapon
+        // rack and could not trade with the rifles on it, and the owner
+        // called the mix what it was (2026-09-27) -- the rack alone holds
+        // the long things.
+        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "OZ_Weapon_1", "OZ_Weapon_2"};
         class Cargo
         {
             itemsCargoSize[] = {10, 25};
@@ -112,7 +116,7 @@ class CfgVehicles
             {
                 name = "$STR_OZS_SLOTS_WEAPONS";
                 description = "";
-                attachmentSlots[] = {"Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2"};
+                attachmentSlots[] = {"OZ_Weapon_1", "OZ_Weapon_2"};
                 icon = "set:dayz_inventory image:cat_common_cargo";
                 view_index = 2;
             };
@@ -129,8 +133,12 @@ class CfgVehicles
         // personal stash hangs up, a shared box hangs up too, so a whole kit
         // goes onto hooks instead of into the grid, and clothing hung here
         // keeps working pockets. The slots are the vanilla ones, so the
-        // T148506 trap never arises (see the stash below).
-        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
+        // T148506 trap never arises (see the stash below). NOT the shoulder
+        // and melee slots: a pickaxe hung on one of those beside the weapon
+        // rack and could not trade with the rifles on it, and the owner
+        // called the mix what it was (2026-09-27) -- the rack alone holds
+        // the long things.
+        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
         class Cargo
         {
             itemsCargoSize[] = {10, 50};
@@ -151,7 +159,7 @@ class CfgVehicles
             {
                 name = "$STR_OZS_SLOTS_WEAPONS";
                 description = "";
-                attachmentSlots[] = {"Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
+                attachmentSlots[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
                 icon = "set:dayz_inventory image:cat_common_cargo";
                 view_index = 2;
             };
@@ -169,8 +177,12 @@ class CfgVehicles
         // personal stash hangs up, a shared box hangs up too, so a whole kit
         // goes onto hooks instead of into the grid, and clothing hung here
         // keeps working pockets. The slots are the vanilla ones, so the
-        // T148506 trap never arises (see the stash below).
-        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
+        // T148506 trap never arises (see the stash below). NOT the shoulder
+        // and melee slots: a pickaxe hung on one of those beside the weapon
+        // rack and could not trade with the rifles on it, and the owner
+        // called the mix what it was (2026-09-27) -- the rack alone holds
+        // the long things.
+        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
         class Cargo
         {
             itemsCargoSize[] = {10, 100};
@@ -191,7 +203,7 @@ class CfgVehicles
             {
                 name = "$STR_OZS_SLOTS_WEAPONS";
                 description = "";
-                attachmentSlots[] = {"Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
+                attachmentSlots[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
                 icon = "set:dayz_inventory image:cat_common_cargo";
                 view_index = 2;
             };
@@ -269,7 +281,7 @@ class CfgVehicles
         carveNavmesh = 0;
         canBeDigged = 0;
         weight = 0;
-        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
+        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
         class Cargo
         {
             itemsCargoSize[] = {10, 50};
@@ -290,7 +302,7 @@ class CfgVehicles
             {
                 name = "$STR_OZS_SLOTS_WEAPONS";
                 description = "";
-                attachmentSlots[] = {"Shoulder", "Melee", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
+                attachmentSlots[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
                 icon = "set:dayz_inventory image:cat_common_cargo";
                 view_index = 2;
             };

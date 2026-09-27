@@ -513,6 +513,25 @@ class OZS_Records
                 e = GameInventory.LocationCreateLocalEntity(il, n.cls, ECE_IN_INVENTORY, RF_DEFAULT);
             else
                 e = GameInventory.LocationCreateEntity(il, n.cls, ECE_IN_INVENTORY, RF_DEFAULT);
+            // A HOOK THE BOX NO LONGER HAS: the shoulder and melee slots
+            // came off the boxes and the stash on 2026-09-27, and a record
+            // written before that may still hang a rifle or a pickaxe on
+            // one. Such a ROOT goes into the grid instead of onto the shelf;
+            // a nested attachment (a scope on a rifle) has nowhere else to
+            // be and keeps the old path.
+            if (!e && n.parent < 0 && parent.GetInventory())
+            {
+                InventoryLocation gridCell = new InventoryLocation();
+                if (parent.GetInventory().FindFirstFreeLocationForNewEntity(n.cls, FindInventoryLocationType.CARGO, gridCell))
+                {
+                    if (parentLocal)
+                        e = GameInventory.LocationCreateLocalEntity(gridCell, n.cls, ECE_IN_INVENTORY, RF_DEFAULT);
+                    else
+                        e = GameInventory.LocationCreateEntity(gridCell, n.cls, ECE_IN_INVENTORY, RF_DEFAULT);
+                }
+                if (e)
+                    OZ_Log.Warn("storage: " + n.cls + " hung on slot " + n.slot.ToString() + ", which " + parent.GetType() + " no longer has; it lies in the grid instead");
+            }
         }
         else if (parentLocal)
         {

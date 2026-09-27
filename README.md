@@ -34,8 +34,8 @@ world and renewed to 45 days of lifetime on every boot, wearing the vanilla lock
 A player presses F on it and is shown a
 record of their own, keyed by which locker and whose -- the same player at two lockers has
 two stashes, and one locker holds one per player. It carries the character's own slots
-(headgear, mask, eyewear, body, vest, back, hips, legs, feet, gloves, armband, shoulder,
-melee) plus four of the box's weapon slots, so a whole kit can be hung up rather than
+(headgear, mask, eyewear, body, vest, back, hips, legs, feet, gloves, armband) plus four
+of the box's weapon slots, so a whole kit can be hung up rather than
 piled into a grid. Clothing kept in those slots keeps working pockets, which vanilla
 otherwise refuses to anything that is not a person.
 

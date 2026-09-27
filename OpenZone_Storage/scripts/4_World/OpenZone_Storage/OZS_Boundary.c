@@ -285,6 +285,16 @@ class OZS_Boundary
             w.No(handle, "#STR_OZS_NO_SWAP", s.m_Version);
             return;
         }
+        // WHAT THIS EXCHANGE IS, IN ONE LINE, before anything moves: the two
+        // items and where each stands. A refusal is answered to the client
+        // alone (No() writes no log), so without this line an exchange that
+        // did nothing left no trace at all (2026-09-27, a pickaxe for the
+        // rifle on the rack). Whether each may hang where the other does is
+        // the engine's to say, step by step, as before: the owner turned down
+        // an answer given in advance as surplus (2026-09-27).
+        string across = "across: " + mine.GetType() + " (" + OZS_Ops.Spot(here) + ")";
+        across = across + " for #" + handle.ToString() + " " + inside.GetType() + " (" + OZS_Ops.Spot(there) + ")";
+        OZ_Log.Dbg("storage: proxy: " + across);
 
         // 1. THE BOX ITEM STEPS ASIDE, still inside the box.
         InventoryLocation park = new InventoryLocation();
@@ -298,6 +308,12 @@ class OZS_Boundary
             parked = OZS_Ops.FreeSpot(s.m_Auth, inside, park);
             if (!parked)
                 parked = s.m_Auth.GetInventory().FindFreeLocationFor(inside, FindInventoryLocationType.ATTACHMENT, park);
+            // THE HOOK IT ALREADY HANGS ON IS NOT A PLACE TO STEP ASIDE TO.
+            // The engine's finder may answer with the item's own slot; a
+            // "step" there moves nothing, and the other item then finds the
+            // hook taken.
+            if (parked && park.GetType() == InventoryLocationType.ATTACHMENT && park.GetSlot() == there.GetSlot())
+                parked = false;
         }
         else
         {
@@ -310,6 +326,10 @@ class OZS_Boundary
             }
             parked = OZS_Ops.Somewhere(s.m_Auth, inside, there.GetRow(), there.GetCol(), tw, th, park);
         }
+        if (parked)
+            OZ_Log.Dbg("storage: proxy: across: " + inside.GetType() + " steps aside to " + OZS_Ops.Spot(park));
+        else
+            OZ_Log.Dbg("storage: proxy: across: " + inside.GetType() + " has nowhere to step aside to");
         if (!parked)
         {
             w.No(handle, "#STR_OZS_NO_ROOM", s.m_Version);
@@ -334,6 +354,7 @@ class OZS_Boundary
         In(s, w, netLow, netHigh, 0, there.GetType(), there.GetSlot(), there.GetRow(), there.GetCol(), thereFlip);
         if (mine.GetHierarchyParent() != s.m_Auth)
         {
+            OZ_Log.Dbg("storage: proxy: across: the box did not take " + mine.GetType() + "; " + inside.GetType() + " goes back");
             // The box would not take it, and `In` has already said why. The
             // one that stepped aside goes back to its own place, which nothing
             // has taken in the meantime.
@@ -458,7 +479,13 @@ class OZS_Boundary
         if (!holder.GetInventory().LocationCanAddEntity(dst))
         {
             OZ_Log.Warn("storage: proxy: box " + s.m_Id + " will not take " + e.GetType() + " at " + OZS_Ops.Spot(dst) + "; the engine says that is not a place");
-            w.No(0, "#STR_OZS_FULL", s.m_Version);
+            // A hook that will not take the item is not a full box, and
+            // saying so sent a player looking for room that was there
+            // (2026-09-27, a pickaxe on the weapon rack).
+            if (lt == InventoryLocationType.ATTACHMENT)
+                w.No(0, "#STR_OZS_NOT_A_HOOK", s.m_Version);
+            else
+                w.No(0, "#STR_OZS_FULL", s.m_Version);
             return;
         }
 

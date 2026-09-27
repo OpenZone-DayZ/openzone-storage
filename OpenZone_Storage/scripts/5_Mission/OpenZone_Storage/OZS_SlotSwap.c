@@ -21,6 +21,13 @@
 // scope dropped on the hung rifle attaches to it, a can dropped on the hung
 // bag goes inside it. Only a drop none of those claim, of an item that could
 // hang on that very hook, is the exchange.
+//
+// A drop on the box's occupied hook that cannot be an exchange goes on to
+// vanilla, which puts the item into the container's cargo wherever it fits
+// (in a box a hundred rows tall that can be far below the panel: a pickaxe
+// dropped on the rifle's hook was found at row 28, 2026-09-27). Holding it
+// where it was and saying why was written and taken out the same day on
+// the owner's word: surplus.
 #ifndef NO_GUI
 class OZS_SlotSwap
 {
@@ -60,8 +67,8 @@ class OZS_SlotSwap
         if (inside)
             return false;
         // An item that could never hang on this hook is not asking to trade
-        // with the one that does: a can dropped on a hung vest goes on to
-        // vanilla, which puts it where it can.
+        // with the one that does: it goes on to vanilla, which puts it where
+        // it can.
         if (!item.GetInventory().HasInventorySlot(icon.GetSlotID()))
             return false;
         if (!OZS_Mirrors.SwapAnyway(item, sitter))

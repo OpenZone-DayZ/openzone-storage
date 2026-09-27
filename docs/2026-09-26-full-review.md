@@ -942,3 +942,34 @@ place and the client's mirror agreeing with the server's tree:
 On the client every one of these pairs got `CanSwapEntitiesEx` true from
 the native, so vanilla's own slot handlers sent them and `OZS_SlotSwap`
 never had to; it stays for the pairs the native refuses.
+
+### 2026-09-27: the pickaxe, and the shoulder and melee slots
+
+The owner: a pickaxe fits a weapon slot of the box, would not trade with
+the rifle or the AKM, and then vanished. The log: the pickaxe hung on the
+box's MELEE slot (the character's own, listed beside the weapon rack);
+the exchange with a rifle on an `OZ_Weapon` hook was offered by the
+screen (`CanSwapEntitiesEx` true) and refused by the engine on the hook
+(a pickaxe is not a weapon), after the rifle had already stepped aside
+and was put back -- the player saw a flicker and "the box is full"; and
+the last drop, onto the occupied hook, fell through vanilla's handler
+into the box's cargo, first free cell: row 28 of a hundred, off the
+panel. Nothing was lost: authority, record and shelf agreed.
+
+Two things changed. The shoulder and melee slots came off the three
+boxes and the stash -- the rack alone holds the long things -- and a
+record that still hangs a root on one of them restores it into the grid
+(`OZS_Records.Create`), not onto the shelf; verified on the stand: two
+rifles that hung on the removed slots lay in the grid after the open,
+`parked 0`. And the inbound move's refusal for a hook the engine will not
+take says so (`#STR_OZS_NOT_A_HOOK`) instead of "the box is full"; the
+exchange logs what it is about to do (`across: ...`) and never "steps
+aside" onto the hook the item already hangs on. Seen on the stand: a worn
+pickaxe for the SVD on hook 1 logged `across: Pickaxe (slot -761289206)
+for #2 SVD (slot -692829678)`, `SVD steps aside to 0,0`, `the box did not
+take Pickaxe; SVD goes back`, and the rifle was on its hook again with
+the client's mirror agreeing. An answer given in
+advance -- refusing the exchange before anything moves when the item
+cannot hang on the other's hook, and holding a drop on an occupied hook
+where it was -- was written and taken out the same day on the owner's
+word: surplus.
