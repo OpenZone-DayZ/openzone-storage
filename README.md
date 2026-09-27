@@ -117,8 +117,10 @@ it is told that a part of the contents was set aside (`#STR_OZS_OPEN_PARTIAL`).
 Full protocol: section 24 of [the spec](docs/2026-09-16-storage-box-spec.md).
 
 Admins also get a web page from the bridge itself: box lists, contents, history and a
-rollback, all read from SQL or edited in it for the box's next open; three live commands
-to the running game -- close, remove, report. Sign-in is optional, Discord OAuth if the
+rollback, all read from SQL or edited in it for the box's next open; a name and a note on
+where a box or a locker stands, for admins only; a locker is one row of the list and has
+a page of its own, where the players' stashes are picked by name; three live commands to
+the running game -- close, remove, report. Sign-in is optional, Discord OAuth if the
 bridge sets `ADMIN_URL`. See openzone-bridge's own README.
 
 ## Requirements
