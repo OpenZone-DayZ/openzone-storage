@@ -42,6 +42,8 @@
 //                          the item's own container as the holder instead
 //     pxmove <id> <handle> <row> <col> [into] -- a move inside the box, into
 //                          the box's own grid or into the container <into>
+//     pxcombine <into> <from> [n] -- two stacks of the box merged through
+//                          the receiver's own CombineItemsClient
 //     inv [n]         -- the player's inventory and every proxy's items with
 //                        their quantities, into scan.txt
 #ifndef NO_GUI
@@ -202,6 +204,12 @@ class OZ_ProbeClientControl
         {
             // pxmove <id> <handle> <row> <col> [into]
             PxMove(line);
+        }
+        else if (line.IndexOf("pxcombine ") == 0)
+        {
+            // pxcombine <into> <from> [n] -- two stacks of the box merged, the
+            // screen's own call (CombineItemsClient on the receiver)
+            PxCombine(line);
         }
         else if (line.IndexOf("pxsplit ") == 0)
         {
@@ -890,6 +898,31 @@ class OZ_ProbeClientControl
         bool here = m.Place(e, want);
         m.Move(handle, into, InventoryLocationType.CARGO, -1, row, col, 0);
         Note("pxmove #" + handle.ToString() + " to " + row.ToString() + "," + col.ToString() + " of #" + into.ToString() + ": the proxy said " + here.ToString() + ", the server was asked");
+    }
+
+    // Two stacks of the open box merged, by hand: the receiver's
+    // CombineItemsClient with the other, exactly as a drop of one onto the
+    // other makes it (icon.c:531).
+    protected void PxCombine(string line)
+    {
+        array<string> parts = new array<string>();
+        line.Split(" ", parts);
+        OZS_Mirror m = OZS_Mirrors.Get().Newest();
+        if (!m || parts.Count() < 3)
+        {
+            Note("=== " + line + ": pxcombine <into> <from>");
+            return;
+        }
+        ItemBase into = ItemBase.Cast(m.ByHandle(parts.Get(1).ToInt()));
+        ItemBase from = ItemBase.Cast(m.ByHandle(parts.Get(2).ToInt()));
+        if (!into || !from)
+        {
+            Note("=== " + line + ": no such handle(s)");
+            return;
+        }
+        string before = "into " + into.GetQuantity().ToString() + " from " + from.GetQuantity().ToString() + " CanBeCombined " + into.CanBeCombined(from).ToString();
+        into.CombineItemsClient(from);
+        Note("=== " + line + ": " + before + " -> sent via " + OZS_Mirrors.s_Via);
     }
 
     // The right-click split, by hand: the same call OZS_Stacking's

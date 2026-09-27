@@ -632,7 +632,12 @@ class OZS_Ops
             // Told to the watchdog before it happens: this departure is the
             // point of the operation, not the thing it watches for.
             OZS_Watchdog.Expect(from);
-            GetGame().ObjectDelete(from);
+            // EntityAI.Delete, not the game's ObjectDelete: it raises
+            // m_PendingDelete at once, so the letter written next and every
+            // count taken this frame already leave the stack out
+            // (IsSetForDeletion reads that flag; the engine's own pending
+            // flag is not to be relied on within the frame).
+            from.Delete();
         }
         // Both halves in ONE letter (review 2026-09-26, B5).
         OZS_Commit.Combined(s, into, fromRoot, fromWasRoot, fromType, gone);

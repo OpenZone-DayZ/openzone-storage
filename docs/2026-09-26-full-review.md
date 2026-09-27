@@ -762,3 +762,29 @@ wet and cleanness to the copies just made; the three places that announced
 (the take-out, the refused put-in, the restore of a returned root) go
 through it.
 
+### 2026-09-27: "the contents and the record disagree" after work inside a hung container
+
+The owner, an hour later, in the stash with a bag in its slot: every second
+turn ended with `and its record disagree after a turn: the box holds 4
+root(s) and 4 entities, the record says 4 and 5`, three repairs, then the
+session refused further turns. The record held `Rag qty 6` INSIDE the bag,
+the very stack the owner had just taken out of it (`op 2 #3/0`). A
+take-out writes the record FIRST and moves the item after (section 7); for
+a root that is a drop by position and the item's presence is irrelevant,
+but for an item inside a container the container's root is REWRITTEN --
+from the live tree, with the leaving item still in it. The same for a
+nested stack that gave everything to a player's stack and stands emptied
+until the credit is confirmed.
+
+`OZS_Records.Leaving(e)` names the one entity on its way out; `Flatten`
+and `CountTree` leave it out as they leave out an entity set for deletion.
+The take-out and the outbound stacking set it around their letter. And the
+stacks a merge empties are deleted with `EntityAI.Delete()` rather than
+the game's `ObjectDelete`: the former raises `m_PendingDelete` at once,
+which `IsSetForDeletion` reads, so a letter written in the same frame
+already leaves them out (the engine's own pending flag is not to be relied
+on within the frame). Replayed on the stand: a rag put into the bag and
+taken out again (`rewrite 1 drop 0 add 0`, record = box), two stacks merged
+inside the bag, a root merged into a nested stack -- no disagreement, the
+record read back from the bridge equal to the box each time.
+

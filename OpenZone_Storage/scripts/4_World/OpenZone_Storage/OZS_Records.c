@@ -97,9 +97,27 @@ class OZS_Records
     // was still counted, and still written into its container's blob by the
     // letter posted in the same frame -- a stack of nothing in the record,
     // rebuilt by the next open (review 2026-09-26). Both walks skip it.
+    // THE ONE ENTITY THAT IS ON ITS WAY OUT WHILE ITS HOST IS WRITTEN. A
+    // take-out writes the record FIRST (section 7) and moves the item after,
+    // so when the item lies inside a container in the box the host's root is
+    // rewritten while the item is still in it -- and the record kept a rag
+    // inside a bag the player was already holding (owner, 2026-09-27: "the
+    // contents and the record disagree", one entity too many every time a
+    // nested item left). The same for a stack in a container that gave
+    // everything it had to a player's stack and stands emptied until the
+    // credit is confirmed. Set by the operation around the letter, cleared
+    // right after; Flatten and CountTree leave it out as they leave out an
+    // entity already set for deletion.
+    protected static EntityAI s_Leaving;
+
+    static void Leaving(EntityAI e)
+    {
+        s_Leaving = e;
+    }
+
     static int CountTree(EntityAI e)
     {
-        if (!e || e.IsSetForDeletion())
+        if (!e || e.IsSetForDeletion() || e == s_Leaving)
             return 0;
         int n = 1;
         GameInventory inv = e.GetInventory();
@@ -123,7 +141,7 @@ class OZS_Records
     // The subtree in depth-first order: the node, its attachments, its cargo.
     static void Flatten(EntityAI e, int parent, array<EntityAI> nodes, array<int> parents)
     {
-        if (!e || e.IsSetForDeletion())
+        if (!e || e.IsSetForDeletion() || e == s_Leaving)
             return;
         int me = nodes.Count();
         nodes.Insert(e);

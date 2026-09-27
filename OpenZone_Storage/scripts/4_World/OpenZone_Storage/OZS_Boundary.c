@@ -72,7 +72,12 @@ class OZS_Boundary
 
         // 1. SQL FIRST. Until this answers, the item is in the box and
         //    nowhere else; if the server dies now, nothing has happened.
+        //    Written WITHOUT the item: it is still inside its container at
+        //    this moment, and a nested take-out rewrites that container's
+        //    root (OZS_Records.Leaving).
+        OZS_Records.Leaving(e);
         OZS_Commit.Left(s, wasRoot, wasItself, wasType);
+        OZS_Records.Leaving(null);
 
         // AND, IF THE SERVER IS SET TO, WAIT FOR IT TO HAVE ANSWERED.
         //
@@ -543,7 +548,7 @@ class OZS_Boundary
         // no rounds lying where it was -- inside the box that was the
         // artefact of 2026-09-25, and in a pocket it is the same thing.
         if (OZS_Ops.Contents(giver) <= 0 && !giver.IsSetForDeletion())
-            GetGame().ObjectDelete(giver);
+            giver.Delete();
         s.Touch();
         // SQL LAST (section 7), as for anything coming in.
         OZS_Commit.Quantity(s, taker);
@@ -613,9 +618,17 @@ class OZS_Boundary
         //    longer holds. The giver itself stays in the box until the credit
         //    is given -- at nothing, if it gave everything -- see OZS_Credit.
         if (c.m_Gone)
+        {
+            // The emptied giver still stands in the box until the credit is
+            // given, and its container's root must be written without it.
+            OZS_Records.Leaving(giver);
             OZS_Commit.Left(s, wasRoot, wasItself, wasType);
+            OZS_Records.Leaving(null);
+        }
         else
+        {
             OZS_Commit.Quantity(s, giver);
+        }
         s.Touch();
         // 2. AND, IF THE SERVER IS SET TO, WAIT FOR THE ANSWER -- see Out for
         //    why. No turn to wait on means nothing was written, so nothing
@@ -667,7 +680,7 @@ class OZS_Boundary
         if (c.m_Gone && c.m_Giver && !c.m_Giver.IsSetForDeletion())
         {
             OZS_Watchdog.Expect(c.m_Giver);
-            GetGame().ObjectDelete(c.m_Giver);
+            c.m_Giver.Delete();
         }
         if (c.m_Gone)
             s.TellGone(c.m_Handle, by);

@@ -68,7 +68,7 @@ class OZS_Watchdog
         OZS_Session s = OZS_Proxies.Get().Find(box.OZS_GetId());
         if (s)
             s.Compromised(e.GetType() + " left the box without an operation (now in " + now + ")");
-        GetGame().ObjectDelete(e);
+        e.Delete();
     }
 
     static bool InAuthority(EntityAI e)
