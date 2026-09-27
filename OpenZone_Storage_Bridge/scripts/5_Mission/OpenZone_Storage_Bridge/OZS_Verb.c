@@ -998,6 +998,74 @@ modded class DZMCP_BridgeCore
             return false;
         }
 
+        if (op == "bench")
+        {
+            // STAND ONLY (2026-09-27): N authorities filled in the SAME frame,
+            // to see what the shared open budget does under N boxes at once.
+            // Every open is the ordinary one (RequestOpenAs), only the asking
+            // is batched; each job then logs its own work, frames, longest
+            // step and wall time.
+            //   do=open    ids=<a,b,c>   make (if need be) and open every one now
+            //   do=discard ids=<a,b,c>   delete them, writing nothing
+            string benchDo = OZS_Arg(args, "do", "open");
+            string benchIdsText = OZS_Arg(args, "ids", "");
+            array<string> benchIds = new array<string>();
+            benchIdsText.Split(",", benchIds);
+            if (benchIds.Count() == 0)
+            {
+                detail = "bench needs ids=<a,b,c>";
+                return false;
+            }
+            int benchMade = 0;
+            int benchOpened = 0;
+            int benchLost = 0;
+            string benchRefused = "";
+            for (int benchIdx = 0; benchIdx < benchIds.Count(); benchIdx++)
+            {
+                string benchId = benchIds.Get(benchIdx);
+                benchId = benchId.Trim();
+                if (benchId == "")
+                    continue;
+                if (benchDo == "discard")
+                {
+                    benchLost = benchLost + OZS_Authority.Discard(benchId);
+                    continue;
+                }
+                OZ_StorageBox benchAuth = OZS_Authority.Find(benchId);
+                if (!benchAuth)
+                {
+                    OZ_StorageBox benchReal = c.FindById(benchId);
+                    if (!benchReal)
+                    {
+                        benchRefused = benchRefused + " | " + benchId + ": not in the world";
+                        continue;
+                    }
+                    benchAuth = OZS_Authority.Create(benchId, benchReal.GetType(), benchReal.GetPosition());
+                    if (!benchAuth)
+                    {
+                        benchRefused = benchRefused + " | " + benchId + ": no authority";
+                        continue;
+                    }
+                    benchMade++;
+                }
+                string benchWhy;
+                if (!c.RequestOpenAs(benchAuth, "bench", "authority", benchWhy))
+                {
+                    benchRefused = benchRefused + " | " + benchId + ": " + benchWhy;
+                    continue;
+                }
+                benchOpened++;
+            }
+            if (benchDo == "discard")
+            {
+                detail = "bench: " + benchIds.Count().ToString() + " authority(ies) discarded with " + benchLost.ToString() + " entity(ies), nothing written";
+                return true;
+            }
+            OZ_Log.Info("storage: bench: " + benchOpened.ToString() + " open(s) requested in one frame at t=" + GetGame().GetTickTime().ToString());
+            detail = "bench: made " + benchMade.ToString() + ", opens requested " + benchOpened.ToString() + " of " + benchIds.Count().ToString() + benchRefused;
+            return true;
+        }
+
         if (op == "auth")
         {
             // STAND ONLY (proxy design 2026-09-24, stage A): the authoritative
