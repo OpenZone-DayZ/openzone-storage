@@ -1029,6 +1029,18 @@ modded class DZMCP_BridgeCore
                 if (benchDo == "discard")
                 {
                     benchLost = benchLost + OZS_Authority.Discard(benchId);
+                    // THE BRIDGE MARKED THE BOX OPEN AT THE FILL, and a discard
+                    // writes nothing: without a "closed" of its own the admin
+                    // page showed ten boxes open on an empty server until the
+                    // next boot (owner, 2026-09-27).
+                    OZS_IdLetter benchAck = new OZS_IdLetter();
+                    benchAck.id = benchId;
+                    benchAck.by = "bench";
+                    benchAck.version = 0;
+                    string benchJson;
+                    string benchErr;
+                    if (JsonFileLoader<OZS_IdLetter>.MakeData(benchAck, benchJson, benchErr, false))
+                        OZS_Bridge.Post(OZS_Const.ROUTE_CLOSED, benchJson, new OZS_AckReply("closed by the bench"));
                     continue;
                 }
                 OZ_StorageBox benchAuth = OZS_Authority.Find(benchId);
@@ -1242,7 +1254,17 @@ modded class DZMCP_BridgeCore
             if (what == "discard")
             {
                 int lost = OZS_Authority.Discard(aid);
-                detail = "the authority of " + aid + " is gone with " + lost.ToString() + " entity(ies); nothing was written";
+                // The same "closed" the bench sends: the fill marked the box
+                // open on the bridge and nothing else would unmark it.
+                OZS_IdLetter authAck = new OZS_IdLetter();
+                authAck.id = aid;
+                authAck.by = "stand";
+                authAck.version = 0;
+                string authJson;
+                string authErr;
+                if (JsonFileLoader<OZS_IdLetter>.MakeData(authAck, authJson, authErr, false))
+                    OZS_Bridge.Post(OZS_Const.ROUTE_CLOSED, authJson, new OZS_AckReply("closed by the stand"));
+                detail = "the authority of " + aid + " is gone with " + lost.ToString() + " entity(ies); nothing was written, the bridge is told it is closed";
                 return true;
             }
             detail = "auth: unknown do=" + what;
