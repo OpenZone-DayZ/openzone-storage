@@ -239,6 +239,33 @@ class OZ_Probe
             detail = OZ_ProbeState.Pid(Arg(args, "pos", "0 0 0").ToVector(), Arg(args, "class", "Paper"), Arg(args, "mode", "spawn"));
             return true;
         }
+        // A vanilla barrel takes cargo only while open (Barrel_ColorBase.
+        // CanReceiveItemIntoCargo), so the selected one is opened here before a
+        // fill -- the replication measurement of 2026-09-30.
+        if (op == "open")
+        {
+            if (!RequireCrate(detail))
+                return false;
+            Barrel_ColorBase barrel = Barrel_ColorBase.Cast(m_Crate);
+            if (barrel)
+            {
+                barrel.Open();
+                detail = m_Crate.GetType() + " opened: IsOpen=" + barrel.IsOpen().ToString() + "; cargo grid " + GridText(m_Crate);
+                return true;
+            }
+            // A packed tent keeps its inventory locked away from script (500
+            // creations into a packed CarTent all failed, 2026-09-30); pitched,
+            // it is the vanilla 500-cell container.
+            TentBase tent = TentBase.Cast(m_Crate);
+            if (tent)
+            {
+                tent.Pitch(true, true);
+                detail = m_Crate.GetType() + " pitched: state " + tent.GetState().ToString() + "; cargo grid " + GridText(m_Crate);
+                return true;
+            }
+            detail = m_Crate.GetType() + " is neither a barrel nor a tent";
+            return false;
+        }
 
         // Immediate research ops (items 2-4 of the brief); all need a crate.
         if (op == "stock" || op == "inspect" || op == "blob_save" || op == "blob_load" || op == "blobtime" || op == "nest" || op == "give" || op == "chain" || op == "put" || op == "hands" || op == "tree" || op == "out" || op == "deltree")

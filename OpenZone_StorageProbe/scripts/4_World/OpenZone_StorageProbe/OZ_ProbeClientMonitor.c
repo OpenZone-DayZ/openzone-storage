@@ -23,6 +23,10 @@ class OZ_ProbeClientMonitor
     protected int   m_BurstCargoAtEnd;
     protected bool  m_Started;
     protected float m_LastFrameAt;
+    // A line EVERY second, bursts or not: the frame cost of standing at a
+    // distance from full containers is only visible between bursts
+    // (2026-09-30). Switched by the control file, `frames on|off`.
+    static bool s_EverySecond = false;
 
     void OZ_ProbeClientMonitor()
     {
@@ -75,6 +79,14 @@ class OZ_ProbeClientMonitor
         int cargo = -1;
         float dist = -1;
         NearestCrateInfo(cargo, dist);
+        if (s_EverySecond)
+        {
+            string every = "sec t=" + OZ_ProbeFrameStats.R1(GetGame().GetTickTime()) + " d_inits=" + dInits + " d_deletes=" + dDeletes;
+            Man me = GetGame().GetPlayer();
+            if (me)
+                every = every + " at=" + me.GetPosition().ToString(false);
+            Append(every + " " + m_Second.Text());
+        }
 
         if (dInits > 0 || dDeletes > 0)
         {

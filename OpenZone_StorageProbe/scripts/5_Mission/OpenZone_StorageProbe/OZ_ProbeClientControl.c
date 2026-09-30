@@ -5,6 +5,8 @@
 //   $profile:OpenZone_StorageProbe/control.txt, first line:
 //     search <text>   -- as if typed into the storage search bar
 //     clear           -- empty the search
+//     frames on|off [n] -- a client frame-statistics line every second in
+//                        client.log, bursts or not (2026-09-30)
 //     sort [n]        -- press the Sort button (change n to press again)
 //     inventory [n]   -- open the inventory screen
 //     take <cls> [n]  -- the nearest loose <cls> into the hands (predictive,
@@ -101,6 +103,12 @@ class OZ_ProbeClientControl
         {
             OZS_Search.Set("");
             ErrorEx("[OpenZone] probe control: search cleared", ErrorExSeverity.WARNING);
+        }
+        else if (line.IndexOf("frames ") == 0)
+        {
+            string framesWord = line.Substring(7, line.Length() - 7);
+            OZ_ProbeClientMonitor.s_EverySecond = framesWord.IndexOf("on") == 0;
+            Note("=== " + line + " -> a client frame line every second: " + OZ_ProbeClientMonitor.s_EverySecond.ToString());
         }
         else if (line.IndexOf("sort") == 0)
         {
