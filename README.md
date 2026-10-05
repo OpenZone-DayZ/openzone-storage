@@ -54,14 +54,15 @@ Still to come: the ten-at-once concurrency run.
 
 **The boxes and the locker have models of their own** since 2026-10-05, contributed by
 Crystal: a plank weapons case, a painted crate with steel fittings, a 128 cm plastic hard
-case and the locker, each with an opening animation. A box's lid is up while anybody is
-looking into it, for every player around. The models, their looks (two colours of the small
-case, three states of wear of the crate), how they are built and the alternate large box
-that is not shipped are in [models/](models/README.md).
+case, an old fridge as the large box's second shell, and the locker, each with an opening
+animation. A box's lid is up while anybody is looking into it, for every player around. The
+models, their looks (two colours of the small case, three states of wear of the crate) and
+how they are built are in [models/](models/README.md).
 
 Three boxes -- `OZ_StorageBox_Small` (250 cells, 2 weapon slots, the plank case),
 `OZ_StorageBox_Medium` (500 cells, 4 slots, the crate) and `OZ_StorageBox_Large`
-(1000 cells, 6 slots, the hard case), each with the character's own clothing slots as well, so a
+(1000 cells, 6 slots, the hard case; `OZ_StorageBox_Fridge` is the same box in the shell of an
+old fridge, with a kit of its own), each with the character's own clothing slots as well, so a
 whole kit hangs up instead of being piled into the grid, and clothing hung there keeps
 working pockets, as in the stash. One verb on the box, "Show the box (N)": the record is
 read into an unannounced container of the same class at 500 entities per second, 5 ms of a

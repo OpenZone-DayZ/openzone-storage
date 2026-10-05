@@ -34,8 +34,8 @@ class CfgPatches
     {
         units[] =
         {
-            "OZ_StorageBox_Small", "OZ_StorageBox_Medium", "OZ_StorageBox_Large",
-            "OZ_StorageBoxKit_Small", "OZ_StorageBoxKit_Medium", "OZ_StorageBoxKit_Large",
+            "OZ_StorageBox_Small", "OZ_StorageBox_Medium", "OZ_StorageBox_Large", "OZ_StorageBox_Fridge",
+            "OZ_StorageBoxKit_Small", "OZ_StorageBoxKit_Medium", "OZ_StorageBoxKit_Large", "OZ_StorageBoxKit_Fridge",
             "OZ_StashAnchor", "OZ_PersonalStash"
         };
         weapons[] = {};
@@ -237,9 +237,8 @@ class CfgVehicles
         descriptionShort = "$STR_OZS_BOX_LARGE_DESC";
         // A plastic military hard case, 128 cm: 1.27 x 0.47 x 0.64 m, four
         // draw latches that flip down before the lid opens on its back
-        // hinges. (A second large model exists and is not shipped: an old
-        // fridge lying on its back -- models/fridge in the repository, with
-        // what switching to it takes in models/README.md.)
+        // hinges. (The same box in another shell is OZ_StorageBox_Fridge,
+        // below.)
         model = "\OpenZone_Storage\models\hardcase_128\ozs_hardcase_128.p3d";
         hiddenSelections[] = {"camo"};
         hiddenSelectionsTextures[] = {"OpenZone_Storage\models\hardcase_128\data\ozs_hardcase_128_co.paa"};
@@ -292,6 +291,41 @@ class CfgVehicles
             };
         };
     };
+    // THE LARGE BOX IN ANOTHER SHELL (owner, 2026-10-05: "the fridge as an
+    // alternative large box"): an old Soviet fridge lying on its back, door
+    // up, 1.20 x 0.58 x 0.61 m. Everything a large box is -- the grid, the
+    // slots, the script class behind it -- comes from OZ_StorageBox_Large;
+    // only the look, the sound and the opening are its own, and it has a
+    // kit of its own (OZ_StorageBoxKit_Fridge).
+    //
+    // _ca, not _co: the rusted-through holes low on the walls are cut out by
+    // the texture's alpha, and the material carries AlphaTest128 for it --
+    // the two belong together.
+    class OZ_StorageBox_Fridge: OZ_StorageBox_Large
+    {
+        displayName = "$STR_OZS_BOX_FRIDGE";
+        descriptionShort = "$STR_OZS_BOX_FRIDGE_DESC";
+        model = "\OpenZone_Storage\models\fridge\ozs_fridge.p3d";
+        hiddenSelections[] = {"camo"};
+        hiddenSelectionsTextures[] = {"OpenZone_Storage\models\fridge\data\ozs_fridge_ca.paa"};
+        hiddenSelectionsMaterials[] = {"OpenZone_Storage\models\fridge\data\ozs_fridge.rvmat"};
+        hologramMaterial = "ozs_fridge";
+        hologramMaterialPath = "OpenZone_Storage\models\fridge\data";
+        soundImpactType = "metal";
+        //   door_a  smooth, 2.0 s: the lever pulled and let go, the door rises
+        //                          and rests at 100 degrees
+        //   door_b  snap,   1.2 s: the lever yanked, the door flung open past
+        //                          upright, it hits the stop at 110 degrees,
+        //                          bounces and settles
+        // Its own block on purpose: it replaces the hard case's sources,
+        // which this model does not have.
+        class AnimationSources
+        {
+            class door_a { source = "user"; initPhase = 0; animPeriod = 2.0; };
+            class door_b { source = "user"; initPhase = 0; animPeriod = 1.2; };
+        };
+    };
+
     // The anchor: the locker players walk up to.
     //
     // A PLACED THING, NOT A PIECE OF THE MAP (owner, 2026-09-26 evening: "give
@@ -486,6 +520,21 @@ class CfgVehicles
         scope = 1;
         displayName = "This is a hologram";
         model = "\OpenZone_Storage\models\hardcase_128\ozs_hardcase_128.p3d";
+        hiddenSelections[] = {"camo"};
+    };
+    // The large kit under another name: it becomes the fridge.
+    class OZ_StorageBoxKit_Fridge: OZ_StorageBoxKit_Large
+    {
+        displayName = "$STR_OZS_KIT_FRIDGE";
+        descriptionShort = "$STR_OZS_KIT_FRIDGE_DESC";
+        hologramMaterial = "ozs_fridge";
+        hologramMaterialPath = "OpenZone_Storage\models\fridge\data";
+    };
+    class OZ_StorageBoxKit_FridgePlacing: OZ_StorageBoxKit_Fridge
+    {
+        scope = 1;
+        displayName = "This is a hologram";
+        model = "\OpenZone_Storage\models\fridge\ozs_fridge.p3d";
         hiddenSelections[] = {"camo"};
     };
 };

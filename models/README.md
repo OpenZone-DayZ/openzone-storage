@@ -1,8 +1,9 @@
 # The box and locker models
 
 Models, textures and opening animations for OpenZone Storage, by Crystal, contributed on
-2026-10-05: the small, medium and large box and the personal locker, in place of the vanilla
-wooden crate, sea chest and locker the mod wore until then.
+2026-10-05: the small, medium and large box, the large box's second shell (an old fridge) and
+the personal locker, in place of the vanilla wooden crate, sea chest and locker the mod wore
+until then.
 
 ## What is where
 
@@ -10,7 +11,6 @@ wooden crate, sea chest and locker the mod wore until then.
 |---|---|
 | `OpenZone_Storage/models/<model>/` | what the mod ships: the binarized `.p3d`, its `model.cfg` (bones and animations) and `data/` (`.paa` textures, `.rvmat` materials) |
 | `models/<model>/<name>.p3d` | the MLOD source the shipped model is built from |
-| `models/fridge/` | the alternate large box, complete (MLOD, `model.cfg`, `data/`) and not shipped |
 | `models/prepare_model_root.py` | lays out the binarize root under `build/model-root` |
 
 Every path inside the models and materials is `OpenZone_Storage\models\<model>\data\...`. The
@@ -28,7 +28,7 @@ axes and the bounding box.
 | `small_case` | `OZ_StorageBox_Small` | 0.80 x 0.28 x 0.41 | 332 / 216 / 80 | `lid_a` 1.8 s: the hasp lowered, the lid rises; `lid_b` 1.1 s: the hasp drops, the lid flung open, bounces |
 | `medium_crate` | `OZ_StorageBox_Medium` | 1.03 x 0.35 x 0.52 | 872 / 784 / 320 | `case_a` 2.4 s: the hasp tongues lifted off one by one, the lid onto its stop; `case_b` 1.4 s: the tongues knocked off at once, the lid flung open |
 | `hardcase_128` | `OZ_StorageBox_Large` | 1.27 x 0.47 x 0.64 | 3716 / 2300 / 528 | `case_a` 2.8 s: four latches one by one, the lid lifted; `case_b` 1.5 s: the latches torn down at once, the lid flung open |
-| `fridge` | (alternate large box) | 1.20 x 0.58 x 0.61 | 2408 / 1088 / 450 | `door_a` 2.0 s: the lever, the door smoothly to 100 degrees; `door_b` 1.2 s: the door flung to 110 degrees, bounces |
+| `fridge` | `OZ_StorageBox_Fridge` | 1.20 x 0.58 x 0.61 | 2408 / 1088 / 450 | `door_a` 2.0 s: the lever, the door smoothly to 100 degrees; `door_b` 1.2 s: the door flung to 110 degrees, bounces |
 | `locker` | `OZ_StashAnchor` | 1.00 x 1.90 x 0.52 | 736 / 524 / 218 | `locker_a` 2.0 s: the lever turned, the right door opens; `locker_b` 1.2 s: both doors flung open, they bounce on the stop |
 
 Both openings live in one model, each on its own animation source in `model.cfg`. The config
@@ -92,25 +92,21 @@ that root, judges what came out and copies it into the mod.
 One run takes minutes whatever the model: 510 to 540 s each for these (2026-10-05). Before
 it reads anything, binarize walks the whole drive its working directory is on.
 
-## The alternate large box
+## The fridge
 
-`models/fridge` is an old Soviet fridge lying on its back, door up, with rusted-through
-holes low on the walls cut out by alpha (`ozs_fridge_ca.paa` with `AlphaTest128` in its
-material -- keep the two together) and glass wool behind them. To ship it instead of the
-hard case:
+The large box comes in a second shell since 2026-10-05 (the owner: "the fridge as an
+alternative large box"): an old Soviet fridge lying on its back, door up, with
+rusted-through holes low on the walls cut out by alpha (`ozs_fridge_ca.paa` with
+`AlphaTest128` in its material -- keep the two together) and glass wool behind them.
 
-1. move `models/fridge/data` and `models/fridge/model.cfg` to
-   `OpenZone_Storage/models/fridge/`, then stage and build it as above;
-2. in `config.cpp`, point `OZ_StorageBox_Large` and `OZ_StorageBoxKit_LargePlacing` at
-   `\OpenZone_Storage\models\fridge\ozs_fridge.p3d`, the texture at `ozs_fridge_ca.paa`, the
-   materials at `ozs_fridge` (hologram: `ozs_fridge` in `OpenZone_Storage\models\fridge\data`),
-   `soundImpactType = "metal"`, and name the sources `door_a` / `door_b` in
-   `AnimationSources`;
-3. return `"door_b"` (or `"door_a"`) from `OZ_StorageBox_Large.OZS_LidSource`.
+It is a class of its own, `OZ_StorageBox_Fridge`, inheriting everything a large box is from
+`OZ_StorageBox_Large` -- the 1000 cells, the slots, the script behind them -- with its own
+model, sound and opening, and a kit of its own, `OZ_StorageBoxKit_Fridge`, beside the large
+one. What opens is the door: the lid's bit drives `door_b`.
 
 ## Checked on the stand (2026-10-05)
 
-Retail server and client, the four shipped models:
+Retail server and client, the five shipped models:
 
 - they load with their textures and shadows, and neither log names a model, texture or
   material that was not found (`dayz-mcp.toml` forbids those lines);
@@ -121,7 +117,7 @@ Retail server and client, the four shipped models:
   holds 0, and they shut with the screen;
 - **kits**: each "<kit>Placing" projects the box's own model, white where it can stand and
   nearly clear where it cannot (the vanilla sea chest's hologram looks the same there), and
-  all three deploy into a box standing where the hologram stood, its face to the player who
+  all four deploy into a box standing where the hologram stood, its face to the player who
   placed it;
 - the locker faces the way the vanilla `locker_closed_v1` did (doors at -Z), so a locker
   placed before the models keeps its direction. It is 1.00 m wide against about 0.4 m
@@ -129,7 +125,9 @@ Retail server and client, the four shipped models:
   now overlap.
 
 Not checked: a second client watching somebody else's locker (the server's phase staying 0
-is what stands for it), and the fridge, which was not built.
+is what stands for it), and the fridge's door -- its model built clean, its kit's hologram
+projected it and deployed into an `OZ_StorageBox_Fridge`, and the owner took the stand over
+from there.
 
 ## Author and licence
 

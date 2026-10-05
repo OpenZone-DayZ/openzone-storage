@@ -100,6 +100,15 @@ class OZ_StorageBoxKit_Large : OZ_StorageBoxKit_Base
     }
 }
 
+// The large kit that becomes the fridge instead of the hard case.
+class OZ_StorageBoxKit_Fridge : OZ_StorageBoxKit_Large
+{
+    override string OZS_BoxType()
+    {
+        return "OZ_StorageBox_Fridge";
+    }
+}
+
 // The hologram projections: the box's look, a kit's behaviour, no box logic.
 class OZ_StorageBoxKit_SmallPlacing : OZ_StorageBoxKit_Small
 {
@@ -110,5 +119,9 @@ class OZ_StorageBoxKit_MediumPlacing : OZ_StorageBoxKit_Medium
 }
 
 class OZ_StorageBoxKit_LargePlacing : OZ_StorageBoxKit_Large
+{
+}
+
+class OZ_StorageBoxKit_FridgePlacing : OZ_StorageBoxKit_Fridge
 {
 }

@@ -627,3 +627,12 @@ class OZ_StorageBox_Large : OZ_StorageBox
         return "case_b";
     }
 }
+
+// The large box in the shell of an old fridge: what opens is its door.
+class OZ_StorageBox_Fridge : OZ_StorageBox_Large
+{
+    override string OZS_LidSource()
+    {
+        return "door_b";
+    }
+}

@@ -16,8 +16,7 @@ Then one model is built and put into the mod by
 asset_build(mod="OpenZone_Storage", source="models/<model>").
 
 Only the models the mod ships are staged: a source folder with no
-OpenZone_Storage/models/<model>/ beside it (the alternate large box, models/fridge)
-is left alone.
+OpenZone_Storage/models/<model>/model.cfg beside it is left alone.
 
 The vanilla tree is found at OZ_VANILLA_DZ, or at the first of the usual places.
 Windows only: the links are NTFS junctions, which need no elevation.

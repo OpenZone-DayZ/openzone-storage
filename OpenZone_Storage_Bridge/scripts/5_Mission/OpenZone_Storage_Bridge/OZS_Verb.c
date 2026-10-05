@@ -151,6 +151,8 @@ modded class DZMCP_BridgeCore
                 type = "OZ_StorageBox_Small";
             else if (size == "medium")
                 type = "OZ_StorageBox_Medium";
+            else if (size == "fridge")
+                type = "OZ_StorageBox_Fridge";
             vector pos;
             string posText = OZS_Arg(args, "pos", "");
             if (posText == "")
