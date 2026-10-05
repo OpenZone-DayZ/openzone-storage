@@ -5,6 +5,9 @@
 //   $profile:OpenZone_StorageProbe/control.txt, first line:
 //     search <text>   -- as if typed into the storage search bar
 //     clear           -- empty the search
+//     walkto <x> <z> [speed] [stop] [n] -- the character turns toward the
+//                        point and walks there by itself (speed 1 walk, 2 jog),
+//                        stopping within `stop` metres; walkstop [n] ends it
 //     frames on|off [n] -- a client frame-statistics line every second in
 //                        client.log, bursts or not (2026-09-30)
 //     sort [n]        -- press the Sort button (change n to press again)
@@ -70,8 +73,24 @@ class OZ_ProbeClientControl
     protected float  m_Timer;
     protected string m_Last;
 
+    // A SCRIPTED WALK TO A POINT (2026-09-30), for measurements that must be
+    // repeated exactly: the character turns toward the point and walks there
+    // through its own input controller, as vanilla's debug walk and bots do
+    // (OverrideMovementSpeed 1 = walk, OverrideAimChangeX = radians per
+    // tick). A gamepad could not hold a heading over 100 m.
+    protected bool   m_Walking;
+    protected vector m_WalkTo;
+    protected float  m_WalkSpeed;
+    protected float  m_WalkStop;
+    protected float  m_WalkStarted;
+    protected float  m_TurnSign = 1;
+    protected float  m_ErrAtCheck;
+    protected int    m_TurnFrames;
+
     void OnFrame(float timeslice)
     {
+        if (m_Walking)
+            WalkTick(timeslice);
         m_Timer = m_Timer + timeslice;
         if (m_Timer < 1.0)
             return;
@@ -103,6 +122,68 @@ class OZ_ProbeClientControl
         {
             OZS_Search.Set("");
             ErrorEx("[OpenZone] probe control: search cleared", ErrorExSeverity.WARNING);
+        }
+        else if (line.IndexOf("walkto ") == 0)
+        {
+            // walkto <x> <z> [speed 1 walk|2 jog] [stop metres] [n]
+            array<string> walkParts = new array<string>();
+            line.Split(" ", walkParts);
+            if (walkParts.Count() < 3)
+            {
+                Note("=== " + line + ": walkto <x> <z> [speed] [stop]");
+                return;
+            }
+            m_WalkTo = Vector(walkParts.Get(1).ToFloat(), 0, walkParts.Get(2).ToFloat());
+            m_WalkSpeed = 1;
+            if (walkParts.Count() > 3)
+                m_WalkSpeed = walkParts.Get(3).ToFloat();
+            m_WalkStop = 1;
+            if (walkParts.Count() > 4)
+                m_WalkStop = walkParts.Get(4).ToFloat();
+            m_Walking = true;
+            m_WalkStarted = GetGame().GetTickTime();
+            m_TurnFrames = 0;
+            m_TurnTime = 0;
+            m_ErrAtCheck = -1;
+            Man walker = GetGame().GetPlayer();
+            string walkFrom = "";
+            if (walker)
+                walkFrom = walker.GetPosition().ToString(false);
+            Note("=== " + line + ": walking from " + walkFrom + " to " + m_WalkTo.ToString(false) + " at speed " + m_WalkSpeed.ToString() + ", t=" + GetGame().GetTickTime().ToString());
+        }
+        else if (line == "walkstop" || line.IndexOf("walkstop ") == 0)
+        {
+            WalkEnd("stopped by the control file");
+        }
+        else if (line.IndexOf("heading") == 0)
+        {
+            Note("=== " + line + ": " + HeadingText());
+        }
+        else if (line.IndexOf("face ") == 0)
+        {
+            // face <x> <z> <sign> [n]: one frame of aim change equal to the
+            // whole error toward the point, with the sign given (the sign
+            // of OverrideAimChangeX is not documented; `heading` a second
+            // later tells whether it was right).
+            array<string> faceParts = new array<string>();
+            line.Split(" ", faceParts);
+            PlayerBase facer = PlayerBase.Cast(GetGame().GetPlayer());
+            if (faceParts.Count() < 4 || !facer)
+            {
+                Note("=== " + line + ": face <x> <z> <sign>");
+                return;
+            }
+            vector fpos = facer.GetPosition();
+            float fwant = Math.Atan2(faceParts.Get(1).ToFloat() - fpos[0], faceParts.Get(2).ToFloat() - fpos[2]);
+            float fhave = -facer.GetInputController().GetHeadingAngle();
+            float ferr = fwant - fhave;
+            while (ferr > Math.PI)
+                ferr -= 2 * Math.PI;
+            while (ferr < -Math.PI)
+                ferr += 2 * Math.PI;
+            float fsign = faceParts.Get(3).ToFloat();
+            facer.GetInputController().OverrideAimChangeX(HumanInputControllerOverrideType.ONE_FRAME, fsign * ferr);
+            Note("=== " + line + ": error " + (ferr * Math.RAD2DEG).ToString() + " deg, one frame of " + (fsign * ferr).ToString() + " rad; before: " + HeadingText());
         }
         else if (line.IndexOf("frames ") == 0)
         {
@@ -1393,6 +1474,106 @@ class OZ_ProbeClientControl
         told = told + ": CanSwapEntitiesEx " + can.ToString() + ", CanForceSwapEntitiesEx " + force.ToString();
         told = told + ", chosen flag " + flag.ToString() + " -> sent " + sent.ToString() + " via " + OZS_Mirrors.s_Via;
         Note(told);
+    }
+
+    // One frame of the scripted walk: turn toward the point, walk while the
+    // heading is within 10 degrees of it, stop within `m_WalkStop` metres.
+    // The sign of the aim change is not documented; if turning makes the
+    // error grow over half a second, the sign is flipped and noted.
+    protected void WalkTick(float dt)
+    {
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        if (!me)
+            return;
+        HumanInputController hic = me.GetInputController();
+        if (!hic)
+            return;
+        vector pos = me.GetPosition();
+        float dx = m_WalkTo[0] - pos[0];
+        float dz = m_WalkTo[2] - pos[2];
+        float dist = Math.Sqrt(dx * dx + dz * dz);
+        if (dist <= m_WalkStop)
+        {
+            WalkEnd("arrived");
+            return;
+        }
+        if (GetGame().GetTickTime() - m_WalkStarted > 300)
+        {
+            WalkEnd("gave up after 300 s");
+            return;
+        }
+        // Both angles clockwise from north (+z). The heading angle runs the
+        // other way: vanilla turns it into a direction as (-sin h, cos h)
+        // (MiscGameplayFunctions, EntityPlacementCallback), so it is negated.
+        float want = Math.Atan2(dx, dz);
+        float have = -hic.GetHeadingAngle();
+        float err = want - have;
+        while (err > Math.PI)
+            err -= 2 * Math.PI;
+        while (err < -Math.PI)
+            err += 2 * Math.PI;
+        float absErr = Math.AbsFloat(err);
+        // A RATE, not a step: the aim change is applied per frame, and at
+        // 230 frames a second a fixed step spun the character round and round
+        // (measured 2026-09-30). At most 1.2 rad/s, proportional below that.
+        float rate = err * 2.0;
+        if (rate > 1.2)
+            rate = 1.2;
+        if (rate < -1.2)
+            rate = -1.2;
+        hic.OverrideAimChangeX(HumanInputControllerOverrideType.ENABLED, m_TurnSign * rate * dt);
+        if (absErr < 0.17)
+            hic.OverrideMovementSpeed(HumanInputControllerOverrideType.ENABLED, m_WalkSpeed);
+        else
+            hic.OverrideMovementSpeed(HumanInputControllerOverrideType.ENABLED, 0);
+        m_TurnFrames++;
+        if (m_ErrAtCheck < 0)
+            m_ErrAtCheck = absErr;
+        m_TurnTime += dt;
+        if (m_TurnTime >= 0.5)
+        {
+            m_TurnTime = 0;
+            if (absErr > 0.3 && absErr > m_ErrAtCheck + 0.05)
+            {
+                m_TurnSign = -m_TurnSign;
+                Note("walk: heading error grew from " + m_ErrAtCheck.ToString() + " to " + absErr.ToString() + " rad; turning the other way (sign " + m_TurnSign.ToString() + ")");
+            }
+            m_TurnFrames = 0;
+            m_ErrAtCheck = absErr;
+        }
+    }
+
+    protected float m_TurnTime;
+
+    // The camera's heading and the body's direction, both in degrees
+    // clockwise from north, and where the player stands.
+    protected string HeadingText()
+    {
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        if (!me)
+            return "no player";
+        float cam = -me.GetInputController().GetHeadingAngle() * Math.RAD2DEG;
+        vector dir = me.GetDirection();
+        float body = Math.Atan2(dir[0], dir[2]) * Math.RAD2DEG;
+        return "camera " + cam.ToString() + " deg, body " + body.ToString() + " deg, at " + me.GetPosition().ToString(false);
+    }
+
+    protected void WalkEnd(string why)
+    {
+        m_Walking = false;
+        PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
+        string at = "";
+        if (me)
+        {
+            HumanInputController hic = me.GetInputController();
+            if (hic)
+            {
+                hic.OverrideMovementSpeed(HumanInputControllerOverrideType.DISABLED, 0);
+                hic.OverrideAimChangeX(HumanInputControllerOverrideType.DISABLED, 0);
+            }
+            at = me.GetPosition().ToString(false);
+        }
+        Note("walk: " + why + " at " + at + ", t=" + GetGame().GetTickTime().ToString() + ", " + (GetGame().GetTickTime() - m_WalkStarted).ToString() + " s after the start");
     }
 
     protected void Note(string text)

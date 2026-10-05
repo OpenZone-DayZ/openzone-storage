@@ -10,6 +10,9 @@ class OZ_ProbeFrameStats
     float sumMs;
     float maxMs;
     int   over100;
+    // Frames longer than a 60 fps frame: what a player would feel on a server
+    // that normally keeps up (2026-09-30).
+    int   over16;
     int   over150;
     int   over500;
 
@@ -24,6 +27,7 @@ class OZ_ProbeFrameStats
         sumMs   = 0;
         maxMs   = 0;
         over100 = 0;
+        over16  = 0;
         over150 = 0;
         over500 = 0;
     }
@@ -34,6 +38,8 @@ class OZ_ProbeFrameStats
         sumMs += dtMs;
         if (dtMs > maxMs)
             maxMs = dtMs;
+        if (dtMs > 16.7)
+            over16++;
         if (dtMs > 100)
             over100++;
         if (dtMs > 150)

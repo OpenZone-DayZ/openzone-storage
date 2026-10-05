@@ -125,6 +125,14 @@ class OZ_Probe
     protected int      m_ChildMiss;
     protected ref OZ_ProbeFrameStats   m_Frame;
     protected ref OZ_ProbeFrameStats   m_Idle;
+    // ONE LINE PER SECOND of the server's frames, with where the player is
+    // (op=frames state=on|off, 2026-09-30): the measurement of what a client
+    // walking up to full containers costs the server, second by second,
+    // beside the client's own per-second line.
+    protected ref OZ_ProbeFrameStats   m_Sec;
+    protected bool     m_SecOn;
+    protected float    m_SecAcc;
+    static const string SERVER_FRAMES = "$profile:OpenZone_StorageProbe/server_frames.log";
     protected ref array<EntityAI>      m_Items;
     protected ref OZ_ProbeSnapshot     m_Snapshot;
     protected string   m_LastResult;
@@ -137,6 +145,9 @@ class OZ_Probe
         m_JobId = 0;
         m_Frame = new OZ_ProbeFrameStats();
         m_Idle = new OZ_ProbeFrameStats();
+        m_Sec = new OZ_ProbeFrameStats();
+        m_SecOn = false;
+        m_SecAcc = 0;
         m_Items = new array<EntityAI>();
         m_Attach = new array<string>();
         m_Cargo = new array<string>();
@@ -184,6 +195,8 @@ class OZ_Probe
         float dtMs = (now - m_LastFrameAt) * 1000;
         m_LastFrameAt = now;
         m_Idle.Add(dtMs);
+        if (m_SecOn)
+            SecondTick(now, dtMs);
 
         if (m_Op == "")
             return;
@@ -228,6 +241,16 @@ class OZ_Probe
                 detail = "idle frames since last baseline: " + m_Idle.Text();
             detail = detail + "; inits=" + OZ_ProbeCounters.s_ItemInits + " deletes=" + OZ_ProbeCounters.s_ItemDeletes;
             m_Idle.Reset();
+            return true;
+        }
+        if (op == "frames")
+        {
+            m_SecOn = Arg(args, "state", "on") == "on";
+            m_Sec.Reset();
+            m_SecAcc = 0;
+            if (m_SecOn)
+                AppendLine(SERVER_FRAMES, "=== frames on at t=" + OZ_ProbeFrameStats.R1(GetGame().GetTickTime()) + " " + Arg(args, "note", ""));
+            detail = "server frame line every second: " + m_SecOn.ToString() + " -> " + SERVER_FRAMES;
             return true;
         }
         if (op == "crate")
@@ -1195,6 +1218,30 @@ class OZ_Probe
         r.Replace("\"", "'");
         r.Replace("\n", " ");
         return r;
+    }
+
+    // The per-second server line: frames in that second (an idle server has no
+    // frame cap, so this is its FPS and falls with every millisecond of extra
+    // work), the mean frame in microseconds, the longest frame, and where the
+    // first player stands.
+    protected void SecondTick(float now, float dtMs)
+    {
+        m_Sec.Add(dtMs);
+        m_SecAcc += dtMs;
+        if (m_SecAcc < 1000)
+            return;
+        int meanUs = 0;
+        if (m_Sec.frames > 0)
+            meanUs = Math.Round(m_Sec.sumMs * 1000 / m_Sec.frames);
+        string line = "sec t=" + OZ_ProbeFrameStats.R1(now) + " fps=" + m_Sec.frames.ToString() + " mean_us=" + meanUs.ToString();
+        line = line + " max_ms=" + OZ_ProbeFrameStats.R1(m_Sec.maxMs) + " over16=" + m_Sec.over16.ToString();
+        array<Man> men = new array<Man>();
+        GetGame().GetPlayers(men);
+        if (men.Count() > 0)
+            line = line + " at=" + men.Get(0).GetPosition().ToString(false);
+        AppendLine(SERVER_FRAMES, line);
+        m_Sec.Reset();
+        m_SecAcc = 0;
     }
 
     protected void AppendLine(string path, string line)

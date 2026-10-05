@@ -122,6 +122,32 @@ modded class DZMCP_BridgeCore
             GetGame().ObjectDelete(mBox);
             return true;
         }
+        if (op == "place")
+        {
+            // A TELEPORT THAT ALSO SETS THE BODY'S HEADING (2026-09-30). The
+            // plain teleport moves the player and leaves the server's own idea
+            // of where the body faces, which the client then adopts: a walk
+            // started after it went off at a different heading from the
+            // camera's. Measurements that walk the same line every run need
+            // both. `yaw` in degrees clockwise from north.
+            array<Man> pmen = new array<Man>();
+            GetGame().GetPlayers(pmen);
+            if (pmen.Count() == 0)
+            {
+                detail = "nobody is connected";
+                return false;
+            }
+            Man pman = pmen.Get(0);
+            vector ppos = GhostArg(args, "pos", "0 0 0").ToVector();
+            float pyaw = GhostArg(args, "yaw", "0").ToFloat();
+            float prad = pyaw * Math.DEG2RAD;
+            vector pdir = Vector(Math.Sin(prad), 0, Math.Cos(prad));
+            pman.SetPosition(ppos);
+            pman.SetDirection(pdir);
+            vector pgot = pman.GetDirection();
+            detail = "placed at " + pman.GetPosition().ToString(false) + " facing " + (Math.Atan2(pgot[0], pgot[2]) * Math.RAD2DEG).ToString() + " deg";
+            return true;
+        }
         if (op == "unpublish")
         {
             // THE CALL THE DESIGN'S "put an item INTO the box" PATH STANDS ON.

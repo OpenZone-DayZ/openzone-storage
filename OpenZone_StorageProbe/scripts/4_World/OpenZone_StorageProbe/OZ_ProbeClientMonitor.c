@@ -85,7 +85,7 @@ class OZ_ProbeClientMonitor
             Man me = GetGame().GetPlayer();
             if (me)
                 every = every + " at=" + me.GetPosition().ToString(false);
-            Append(every + " " + m_Second.Text());
+            Append(every + " " + m_Second.Text() + " over16=" + m_Second.over16.ToString());
         }
 
         if (dInits > 0 || dDeletes > 0)
