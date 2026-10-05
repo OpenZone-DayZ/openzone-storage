@@ -60,8 +60,16 @@ class OZ_StorageBox : DeployableContainer_Base
     override void EEInit()
     {
         super.EEInit();
-        if (!GetGame() || !GetGame().IsServer())
+        if (!GetGame())
             return;
+        if (!GetGame().IsServer())
+        {
+            // On a client, a box that came over the network is a placed one;
+            // the proxy the mirror builds is local and has no network id.
+            if (HasNetworkID())
+                OZS_MakeSolid();
+            return;
+        }
         // An authority is not a box in the world and must not be treated as
         // one: no id of its own (it will be told whose contents it holds), no
         // place in the controller's register, no lifetime, no audit when it
@@ -87,6 +95,31 @@ class OZ_StorageBox : DeployableContainer_Base
         // economy's cleanup without an entry in types.xml.
         SetLifetime(OZS_Const.BOX_LIFETIME);
         OZS_Controller.Get().Register(this);
+        OZS_MakeSolid();
+    }
+
+    // A PLACED BOX IS SOLID (owner, 2026-10-05: "the boxes have no
+    // collision"). It never was: SeaChest and WoodenCrate, the config
+    // parents, inherit Inventory_Base's physLayer "item_small", the layer a
+    // character walks through -- in vanilla only tents, fences and the like
+    // declare "item_large" -- and with the series' own models, a metre-long
+    // hard case one walks through looks wrong.
+    //
+    // SET HERE AND NOT IN THE CONFIG, because the class has two more kinds of
+    // instance that must stay as they are: the AUTHORITY, an unannounced
+    // container standing on the placed box's own spot at an angle of its
+    // own, and the client's PROXY, an invisible one beside the player's
+    // feet. Solid, the first would be an obstacle only the server knows and
+    // the second one only the player bumps into. So the layer is raised on
+    // the placed box alone: on the server where it registers, on a client
+    // where it arrives over the network, and again whenever its lid moves,
+    // in case the engine rebuilds the body with the moved geometry.
+    void OZS_MakeSolid()
+    {
+        if (m_OZS_Authority)
+            return;
+        if (dBodyIsSet(this))
+            dBodySetInteractionLayer(this, PhxInteractionLayers.ITEM_LARGE);
     }
 
     // A box leaving the world is worth a line and an event: the bridge marks
@@ -190,6 +223,7 @@ class OZ_StorageBox : DeployableContainer_Base
             OZ_Log.Info("storage: box " + m_OZS_Id + " comes back with " + GetLifetime().ToString() + " s of lifetime left of " + GetLifetimeMax().ToString() + "; renewing it");
             SetLifetime(OZS_Const.BOX_LIFETIME);
             OZS_Controller.Get().Reconcile(this);
+            OZS_MakeSolid();
         }
     }
 
@@ -321,13 +355,17 @@ class OZ_StorageBox : DeployableContainer_Base
         if (m_OZS_LidOpen)
             phase = 1;
         SetAnimationPhase(source, phase);
+        OZS_MakeSolid();
     }
 
-    // The clients, a client the box streams in to later included.
+    // The clients, a client the box streams in to later included. Only a
+    // placed box is ever synchronised, so this is also where a client makes
+    // it solid (OZS_MakeSolid).
     override void OnVariablesSynchronized()
     {
         super.OnVariablesSynchronized();
         OZS_ApplyLid();
+        OZS_MakeSolid();
     }
 
     bool OZS_IsRestoring()

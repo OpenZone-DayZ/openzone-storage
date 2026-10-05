@@ -40,6 +40,14 @@ with the snap opening everywhere.
 it: the server sets one synchronised bit from the session's watcher list and each client
 plays the opening.
 
+**A placed box is solid**: a character is stopped by it and can stand on it. That is the
+mod's doing, not the models': the config parents (`SeaChest`, `WoodenCrate`) are on the
+"item_small" physics layer a character walks through, as every vanilla chest and barrel is,
+so the placed box raises its own body to `ITEM_LARGE` on the server and on each client
+(`OZ_StorageBox.OZS_MakeSolid`). The session's two stand-ins of the same class -- the
+unannounced container on the server and the invisible one beside the player -- stay as they
+were.
+
 **Looks.** The small case comes in two colours on one model: green-teal
 (`ozs_case_small_co.paa`, the one in the config) and the paint of the vanilla
 `StaticObj_ammoboxes_single` (`ozs_case_small_vanilla_co.paa`). The medium crate has three
@@ -119,6 +127,8 @@ Retail server and client, the five shipped models:
   nearly clear where it cannot (the vanilla sea chest's hologram looks the same there), and
   all four deploy into a box standing where the hologram stood, its face to the player who
   placed it;
+- **collision**: every placed box reads the layer `ITEM_LARGE` on the server and on the
+  client, and the owner walked into them and stood on one;
 - the locker faces the way the vanilla `locker_closed_v1` did (doors at -Z), so a locker
   placed before the models keeps its direction. It is 1.00 m wide against about 0.4 m
   (measured off a picture of the two side by side), so lockers that stood in a row may

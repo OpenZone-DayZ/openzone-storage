@@ -1694,6 +1694,12 @@ class OZ_ProbeClientControl
             // CLIENT DRAWS IT (2026-10-05); the server's side of the same is
             // `oz_ghost pose`.
             string pose = " ypr " + it.GetOrientation().ToString(false);
+            // The physics layer on this client: item_small lets a character
+            // through, item_large stops one (2026-10-05).
+            if (dBodyIsSet(it))
+                pose = pose + " layer=" + dBodyGetInteractionLayer(it).ToString();
+            else
+                pose = pose + " body=none";
             OZ_StorageBox scanBox = OZ_StorageBox.Cast(it);
             if (scanBox && scanBox.OZS_LidSource() != "")
                 pose = pose + " " + scanBox.OZS_LidSource() + "=" + it.GetAnimationPhase(scanBox.OZS_LidSource()).ToString();

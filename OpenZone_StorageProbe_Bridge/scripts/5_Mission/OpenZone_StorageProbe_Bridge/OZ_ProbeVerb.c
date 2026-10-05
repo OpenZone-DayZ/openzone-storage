@@ -58,6 +58,15 @@ modded class DZMCP_BridgeCore
             FinishCommand(DZMCP_STATUS_FAILED, detail);
     }
 
+    // Whether an object has a physics body and on which interaction layer:
+    // what decides if a character is stopped by it (2026-10-05).
+    protected string GhostBody(Object o)
+    {
+        if (!o || !dBodyIsSet(o))
+            return "body=none";
+        return "layer=" + dBodyGetInteractionLayer(o).ToString();
+    }
+
     // oz_ghost: the zombie watcher (OZ_GhostWatch.c).
     protected bool GhostCommand(string op, map<string, string> args, out string detail)
     {
@@ -171,7 +180,7 @@ modded class DZMCP_BridgeCore
                 {
                     if (pany && pany.IsKindOf(poseClass))
                     {
-                        detail = detail + pany.GetType() + " at " + pany.GetPosition().ToString(false) + " ypr " + pany.GetOrientation().ToString(false) + " | ";
+                        detail = detail + pany.GetType() + " at " + pany.GetPosition().ToString(false) + " ypr " + pany.GetOrientation().ToString(false) + " " + GhostBody(pany) + " | ";
                         posed++;
                     }
                     continue;
@@ -189,10 +198,14 @@ modded class DZMCP_BridgeCore
                 string phase = "none";
                 if (source != "")
                     phase = pe.GetAnimationPhase(source).ToString();
-                detail = detail + pe.GetType() + " at " + pe.GetPosition().ToString(false) + " ypr " + pe.GetOrientation().ToString(false) + " " + source + "=" + phase + " | ";
+                detail = detail + pe.GetType() + " at " + pe.GetPosition().ToString(false) + " ypr " + pe.GetOrientation().ToString(false) + " " + source + "=" + phase + " " + GhostBody(pe) + " | ";
                 posed++;
             }
-            detail = posed.ToString() + " within " + radius.ToString() + " m: " + detail;
+            // The two layers by number, to read the list against: a character
+            // walks through the first and is stopped by the second.
+            int layerSmall = PhxInteractionLayers.ITEM_SMALL;
+            int layerLarge = PhxInteractionLayers.ITEM_LARGE;
+            detail = posed.ToString() + " within " + radius.ToString() + " m (item_small=" + layerSmall.ToString() + " item_large=" + layerLarge.ToString() + "): " + detail;
             return true;
         }
         if (op == "unpublish")
