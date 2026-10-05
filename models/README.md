@@ -124,8 +124,9 @@ Retail server and client, the four shipped models:
   all three deploy into a box standing where the hologram stood, its face to the player who
   placed it;
 - the locker faces the way the vanilla `locker_closed_v1` did (doors at -Z), so a locker
-  placed before the models keeps its direction. It is about three times as wide, 1.00 m, so
-  lockers that stood side by side may now overlap.
+  placed before the models keeps its direction. It is 1.00 m wide against about 0.4 m
+  (measured off a picture of the two side by side), so lockers that stood in a row may
+  now overlap.
 
 Not checked: a second client watching somebody else's locker (the server's phase staying 0
 is what stands for it), and the fridge, which was not built.
