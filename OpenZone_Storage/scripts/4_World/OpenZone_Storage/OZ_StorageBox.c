@@ -36,6 +36,12 @@ class OZ_StorageBox : DeployableContainer_Base
     protected ref array<EntityAI> m_OZS_RootOrder;
     // Server only: the time of the last sort, for its cooldown.
     protected float  m_OZS_LastSort;
+    // THE LID OF A PLACED BOX: up while anybody is looking into it, and every
+    // player around sees it. The server sets it from the session's watcher
+    // list (OZS_Session.SyncLid) and each client plays the model's opening
+    // when the bit arrives. Not saved on purpose: after a restart nobody is
+    // looking, so the lid starts closed.
+    protected bool   m_OZS_LidOpen;
 
     override void InitItemVariables()
     {
@@ -45,8 +51,10 @@ class OZ_StorageBox : DeployableContainer_Base
         m_OZS_Id = "";
         m_OZS_Restoring = false;
         m_OZS_Releasing = false;
+        m_OZS_LidOpen = false;
         RegisterNetSyncVariableInt("m_OZS_State", 0, 3);
         RegisterNetSyncVariableInt("m_OZS_StoredCount", 0, 100000);
+        RegisterNetSyncVariableBool("m_OZS_LidOpen");
     }
 
     override void EEInit()
@@ -278,6 +286,48 @@ class OZ_StorageBox : DeployableContainer_Base
     void OZS_SetRestoring(bool on)
     {
         m_OZS_Restoring = on;
+    }
+
+    // ---- the lid ---------------------------------------------------------
+
+    // The animation source of the model's opening this box drives -- one of
+    // the two its config keeps in AnimationSources -- or "" for a box whose
+    // model has no moving lid. Each size answers for its own model below.
+    string OZS_LidSource()
+    {
+        return "";
+    }
+
+    // Server only, and a no-op when nothing changes.
+    void OZS_SetLidOpen(bool open)
+    {
+        if (!GetGame() || !GetGame().IsServer())
+            return;
+        if (m_OZS_LidOpen == open)
+            return;
+        m_OZS_LidOpen = open;
+        SetSynchDirty();
+        OZS_ApplyLid();
+    }
+
+    // Phase 0 is closed and 1 open; the engine plays the travel between them
+    // over the source's animPeriod.
+    protected void OZS_ApplyLid()
+    {
+        string source = OZS_LidSource();
+        if (source == "")
+            return;
+        float phase = 0;
+        if (m_OZS_LidOpen)
+            phase = 1;
+        SetAnimationPhase(source, phase);
+    }
+
+    // The clients, a client the box streams in to later included.
+    override void OnVariablesSynchronized()
+    {
+        super.OnVariablesSynchronized();
+        OZS_ApplyLid();
     }
 
     bool OZS_IsRestoring()
@@ -551,14 +601,29 @@ class OZ_StorageBox : DeployableContainer_Base
     }
 }
 
+// THE OPENING EACH SIZE PLAYS. Every model carries two, "_a" smooth and "_b"
+// snap, on two animation sources (config.cpp names them with their timing);
+// the one returned here is the one the lid follows.
 class OZ_StorageBox_Small : OZ_StorageBox
 {
+    override string OZS_LidSource()
+    {
+        return "lid_b";
+    }
 }
 
 class OZ_StorageBox_Medium : OZ_StorageBox
 {
+    override string OZS_LidSource()
+    {
+        return "case_b";
+    }
 }
 
 class OZ_StorageBox_Large : OZ_StorageBox
 {
+    override string OZS_LidSource()
+    {
+        return "case_b";
+    }
 }

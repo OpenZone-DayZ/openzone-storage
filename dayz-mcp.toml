@@ -18,12 +18,29 @@ name = "openzone-storage"
 # OpenZone_Storage_Bridge -- server only: the `oz_storage` verb for the MCP
 #                            bridge (world_exec). Requires @DZMCP_Bridge.
 mods = ["OpenZone_Storage", "OpenZone_Storage_Bridge", "OpenZone_StorageProbe", "OpenZone_StorageProbe_Bridge"]
+# The box and locker models are part of OpenZone_Storage (OpenZone_Storage/models/<model>):
+# the binarized .p3d, its model.cfg and data/ are committed there. Their MLOD sources
+# are in models/<model>/.
+#
+# binarize has no root switch: the root is its working directory, and every path baked
+# into a model resolves against it. The models name OpenZone_Storage\models\... and the
+# vanilla dz\data\data\penetration\..., so the root holds both trees:
+# models/prepare_model_root.py stages the MLODs under build/model-root and links the
+# mod's data\ and the unpacked vanilla dz\ into it. One model is then built and put
+# into the mod by asset_build(mod="OpenZone_Storage", source="models/<model>").
+project_root = "build/model-root"
 
 [expect]
 # Printed by OZS_Mission at OnMissionStart with the box counts.
 ready_line   = "storage loaded"
 max_warnings = 0
-forbid       = ["Bad type", "Can't compile", "NULL pointer to instance"]
+forbid       = ["Bad type", "Can't compile", "NULL pointer to instance",
+                # a model, texture or material that was not found: the path baked into the
+                # p3d or the rvmat is not where the files landed ([build] project_root)
+                "No components in openzone_storage\\models",
+                "Cannot open object openzone_storage\\models",
+                "Cannot load texture openzone_storage\\models",
+                "Cannot load material file openzone_storage\\models"]
 error_regex  = ["SCRIPT\\s+\\(E\\).*OZ_", "SCRIPT\\s+\\(E\\).*OZS_", "\\[OpenZone\\] ERROR"]
 # The core warns on every boot of the stand that the bridge URL is http and
 # that the PDA's optional radio module and faction page are absent -- state,

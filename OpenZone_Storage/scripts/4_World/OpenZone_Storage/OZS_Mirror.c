@@ -608,6 +608,16 @@ class OZS_Mirror
 
     void Begin()
     {
+        // THE LOCKER'S DOORS FOLLOW THIS MIRROR, which lives exactly as long
+        // as the screen that needs it: open here, shut in Destroy. For a
+        // box the anchor is the box itself, the cast fails and nothing
+        // happens -- its lid is the server's business (OZS_Session.SyncLid).
+        // A resynchronisation drops the mirror and builds the next in one
+        // message, so shut and open land in the same frame and the doors
+        // do not move.
+        OZ_StashAnchor locker = OZ_StashAnchor.Cast(m_Anchor);
+        if (locker)
+            locker.OZS_ShowOpen(true);
         // The box is about to be built from nothing. Whatever the screen has
         // remembered of the player's place stands until it is whole again.
         OZS_Mirrors.Changed();
@@ -1621,6 +1631,9 @@ class OZS_Mirror
 
     void Destroy()
     {
+        OZ_StashAnchor locker = OZ_StashAnchor.Cast(m_Anchor);
+        if (locker)
+            locker.OZS_ShowOpen(false);
         for (int i = m_Items.Count() - 1; i >= 0; i--)
         {
             if (m_Items.Get(i))

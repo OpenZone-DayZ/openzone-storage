@@ -27,3 +27,7 @@ restrictions; it does not prevent the licensor from granting more than the
 licence itself grants.
 
 If the two texts are read as differing, the English text governs.
+
+The box and locker models (OpenZone_Storage/models, MLOD sources in models/) are the work
+of Crystal, contributed on 2026-10-05 under the same licence and the same additional
+permission; what each was modelled after is in models/README.md.

@@ -4,6 +4,12 @@ keys/*.biprivatekey
 
 # build output
 build/out/
+# The binarize root of the models: staged MLODs and links to the mod's data\ and the
+# vanilla dz\ (dayz-mcp.toml, [build] project_root). Derived by
+# models/prepare_model_root.py; only the folder itself is kept, because project_open
+# refuses a declared root that does not exist.
+build/model-root/*
+!build/model-root/.gitkeep
 # every built mod folder, the file-patching junction inside it included
 @OpenZone_*/
 *.pbo

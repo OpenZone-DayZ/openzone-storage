@@ -339,6 +339,8 @@ class OZS_Session
     // the wait can be short (§11).
     float m_Empty;
     bool m_Ended;
+    // What the placed box's lid was last told (SyncLid).
+    protected bool m_LidOpen;
     // Turns posted to the bridge that have not answered yet, and what the
     // bridge last said about the record. A session with turns in flight is not
     // finished, however quiet it has gone.
@@ -539,12 +541,34 @@ class OZS_Session
         return m_Spot;
     }
 
+    // THE LID OF THE PLACED BOX FOLLOWS THE WATCHERS: up while anybody is
+    // looking in, down the moment nobody is -- not when the session idles
+    // out minutes later. Watchers come and go in six places (Join, Leave, a
+    // failed fill, Close, the leash and the disconnect of OnFrame, the end),
+    // so the list is not chased: it is compared once a frame and at the end,
+    // and the box is looked up only when the answer has changed.
+    //
+    // A stash session finds no placed box under its id -- a stash is never
+    // placed -- and does nothing here; the locker's doors belong to the
+    // opening player's client alone (OZ_StashAnchor.OZS_ShowOpen).
+    protected void SyncLid()
+    {
+        bool open = !m_Ended && m_Watchers.Count() > 0;
+        if (open == m_LidOpen)
+            return;
+        m_LidOpen = open;
+        OZ_StorageBox placed = OZS_Controller.Get().FindById(m_Id);
+        if (placed)
+            placed.OZS_SetLidOpen(open);
+    }
+
     // ---- the frame -------------------------------------------------------
 
     void OnFrame(float timeslice)
     {
         if (m_Ended)
             return;
+        SyncLid();
         // A box that lost items outside the mod ends at once, writing
         // nothing; End waits for a turn still on the wire, and OnCommitted
         // brings it back here.
@@ -707,6 +731,7 @@ class OZS_Session
         for (int i = 0; i < m_Watchers.Count(); i++)
             m_Watchers.Get(i).Gone();
         m_Watchers.Clear();
+        SyncLid();
         if (m_Auth)
         {
             int gone = OZS_Authority.Discard(m_Id);

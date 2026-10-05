@@ -30,7 +30,9 @@ box.
 ### The personal stash
 
 An admin places a **locker** (`OZ_StashAnchor`) -- a placed item like a box, saved with the
-world and renewed to 45 days of lifetime on every boot, wearing the vanilla locker model.
+world and renewed to 45 days of lifetime on every boot: a steel cabinet with two mesh doors,
+which open only on the screen of the player whose stash is open -- everybody else sees a
+closed locker and a player gesturing at it.
 The boot letter lists every locker with the engine's id of the item, and one placed or
 removed later is announced as a box is, so the bridge's admin page names lockers by that id.
 The stash's container class, `OZ_PersonalStash`, is never placed: spawners list it as
@@ -50,9 +52,16 @@ with it is written to the database turn by turn, like a box.
 
 Still to come: the ten-at-once concurrency run.
 
-Three boxes -- `OZ_StorageBox_Small` (250 cells, 2 weapon slots, wooden crate model),
-`OZ_StorageBox_Medium` (500 cells, 4 slots, sea chest) and `OZ_StorageBox_Large`
-(1000 cells, 6 slots, sea chest), each with the character's own clothing slots as well, so a
+**The boxes and the locker have models of their own** since 2026-10-05, contributed by
+Crystal: a plank weapons case, a painted crate with steel fittings, a 128 cm plastic hard
+case and the locker, each with an opening animation. A box's lid is up while anybody is
+looking into it, for every player around. The models, their looks (two colours of the small
+case, three states of wear of the crate), how they are built and the alternate large box
+that is not shipped are in [models/](models/README.md).
+
+Three boxes -- `OZ_StorageBox_Small` (250 cells, 2 weapon slots, the plank case),
+`OZ_StorageBox_Medium` (500 cells, 4 slots, the crate) and `OZ_StorageBox_Large`
+(1000 cells, 6 slots, the hard case), each with the character's own clothing slots as well, so a
 whole kit hangs up instead of being piled into the grid, and clothing hung there keeps
 working pockets, as in the stash. One verb on the box, "Show the box (N)": the record is
 read into an unannounced container of the same class at 500 entities per second, 5 ms of a

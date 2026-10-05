@@ -29,6 +29,29 @@ class OZ_StashAnchor : ItemBase
         return m_OZS_Id;
     }
 
+    // The opening the doors play, one of the two the model carries
+    // (config.cpp, AnimationSources):
+    //   "locker_a"  smooth: the lever turned, the right door opens
+    //   "locker_b"  snap:   both doors flung open, they bounce on the stop
+    static const string OZS_DOOR_SOURCE = "locker_b";
+
+    // THE DOORS, ON THIS CLIENT ONLY AND NEVER SYNCHRONISED: what the player
+    // whose stash is open sees. The server never calls this, so the phase
+    // every other client holds stays 0 and they go on seeing a closed locker
+    // with a player gesturing at it -- nobody walks up to their locker to
+    // find somebody else's doors standing open. Vanilla moves an item's
+    // animation on the client alone the same way (PowerGenerator.
+    // UpdateFuelMeter). A locker that streams in again starts closed.
+    void OZS_ShowOpen(bool open)
+    {
+        if (!GetGame() || GetGame().IsDedicatedServer())
+            return;
+        float phase = 0;
+        if (open)
+            phase = 1;
+        SetAnimationPhase(OZS_DOOR_SOURCE, phase);
+    }
+
     override void EEInit()
     {
         super.EEInit();

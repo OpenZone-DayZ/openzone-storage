@@ -5,8 +5,28 @@
 // on the box, vanilla cargo while open, files while closed.
 //
 // Depends HARD on OpenZone_Core (logger, config service) and, through it, on
-// CF. The donor models are the vanilla wooden crate and the sea chest until
-// the series has its own art.
+// CF.
+//
+// THE SERIES' OWN ART SINCE 2026-10-05 (models, textures and animation by
+// Crystal): every box and the locker wear a model of their own from
+// OpenZone_Storage\models\<model>, built from the MLOD in models/<model>/ of
+// the repository (models/README.md). The vanilla wooden crate and sea chest
+// remain only as the config parents and as what a carried KIT looks like.
+//
+// What every box model shares:
+//   - one whole-LOD selection, "camo". It is hidden selection 0, which is the
+//     one the placement hologram repaints (Hologram.RefreshVisual asks for
+//     "inventory" and falls back to index 0), and redeclaring the array
+//     drops the parents' "camoGround" with the vanilla texture on it;
+//   - two openings in one model.cfg, each on its own animation source: "_a"
+//     smooth, "_b" snap. Phase 0 is closed, 1 open, animPeriod the whole
+//     travel in seconds. The script drives ONE of them (OZ_StorageBox.
+//     OZS_LidSource); the other costs nothing and stays for comparison.
+//
+// DamageSystem is inherited as it is, on purpose: the parents' healthLevels
+// name the vanilla materials, which these models do not carry, so damage
+// changes no look -- and a block of our own with only healthLevels in it
+// would REPLACE the parents' class and lose their hitpoints and armour.
 
 class CfgPatches
 {
@@ -86,6 +106,26 @@ class CfgVehicles
         scope = 2;
         displayName = "$STR_OZS_BOX_SMALL";
         descriptionShort = "$STR_OZS_BOX_SMALL_DESC";
+        // A green plank weapons case with a hinged lid and a drop hasp,
+        // 0.80 x 0.28 x 0.41 m (width, height, depth). Two colours ship and
+        // the model is the same:
+        //   ozs_case_small_co.paa          green-teal
+        //   ozs_case_small_vanilla_co.paa  the paint of the vanilla
+        //                                  StaticObj_ammoboxes_single
+        model = "\OpenZone_Storage\models\small_case\ozs_case_small.p3d";
+        hiddenSelections[] = {"camo"};
+        hiddenSelectionsTextures[] = {"OpenZone_Storage\models\small_case\data\ozs_case_small_co.paa"};
+        hiddenSelectionsMaterials[] = {"OpenZone_Storage\models\small_case\data\ozs_case_small.rvmat"};
+        hologramMaterial = "ozs_case_small";
+        hologramMaterialPath = "OpenZone_Storage\models\small_case\data";
+        //   lid_a  smooth, 1.8 s: the hasp lowered, a pause, the lid rises
+        //   lid_b  snap,   1.1 s: the hasp drops and swings, the lid is flung
+        //                         open, bounces and settles
+        class AnimationSources
+        {
+            class lid_a { source = "user"; initPhase = 0; animPeriod = 1.8; };
+            class lid_b { source = "user"; initPhase = 0; animPeriod = 1.1; };
+        };
         // THE CHARACTER'S OWN SLOTS AS WELL (owner, 2026-09-27): what the
         // personal stash hangs up, a shared box hangs up too, so a whole kit
         // goes onto hooks instead of into the grid, and clothing hung here
@@ -129,6 +169,28 @@ class CfgVehicles
         scope = 2;
         displayName = "$STR_OZS_BOX_MEDIUM";
         descriptionShort = "$STR_OZS_BOX_MEDIUM_DESC";
+        // A painted plank crate with steel fittings and two hasp tongues,
+        // 1.03 x 0.35 x 0.52 m. Three looks of the same model, each a texture
+        // AND its material (own _nohq and _smdi), with hologram materials to
+        // match (<material>_deployable.rvmat):
+        //   ozs_crate_medium_co.paa        + ozs_crate_medium.rvmat        light wear
+        //   ozs_crate_medium_worn_co.paa   + ozs_crate_medium_worn.rvmat   worn
+        //   ozs_crate_medium_heavy_co.paa  + ozs_crate_medium_heavy.rvmat  beaten up
+        model = "\OpenZone_Storage\models\medium_crate\ozs_crate_medium.p3d";
+        hiddenSelections[] = {"camo"};
+        hiddenSelectionsTextures[] = {"OpenZone_Storage\models\medium_crate\data\ozs_crate_medium_co.paa"};
+        hiddenSelectionsMaterials[] = {"OpenZone_Storage\models\medium_crate\data\ozs_crate_medium.rvmat"};
+        hologramMaterial = "ozs_crate_medium";
+        hologramMaterialPath = "OpenZone_Storage\models\medium_crate\data";
+        //   case_a  smooth, 2.4 s: the two tongues lifted off one by one, the
+        //                          lid raised onto the hinge stop
+        //   case_b  snap,   1.4 s: the tongues knocked off at once, the lid
+        //                          flung open onto the stop
+        class AnimationSources
+        {
+            class case_a { source = "user"; initPhase = 0; animPeriod = 2.4; };
+            class case_b { source = "user"; initPhase = 0; animPeriod = 1.4; };
+        };
         // THE CHARACTER'S OWN SLOTS AS WELL (owner, 2026-09-27): what the
         // personal stash hangs up, a shared box hangs up too, so a whole kit
         // goes onto hooks instead of into the grid, and clothing hung here
@@ -173,6 +235,27 @@ class CfgVehicles
         scope = 2;
         displayName = "$STR_OZS_BOX_LARGE";
         descriptionShort = "$STR_OZS_BOX_LARGE_DESC";
+        // A plastic military hard case, 128 cm: 1.27 x 0.47 x 0.64 m, four
+        // draw latches that flip down before the lid opens on its back
+        // hinges. (A second large model exists and is not shipped: an old
+        // fridge lying on its back -- models/fridge in the repository, with
+        // what switching to it takes in models/README.md.)
+        model = "\OpenZone_Storage\models\hardcase_128\ozs_hardcase_128.p3d";
+        hiddenSelections[] = {"camo"};
+        hiddenSelectionsTextures[] = {"OpenZone_Storage\models\hardcase_128\data\ozs_hardcase_128_co.paa"};
+        hiddenSelectionsMaterials[] = {"OpenZone_Storage\models\hardcase_128\data\ozs_hardcase_128.rvmat"};
+        hologramMaterial = "ozs_hardcase_128";
+        hologramMaterialPath = "OpenZone_Storage\models\hardcase_128\data";
+        soundImpactType = "plastic";
+        //   case_a  smooth, 2.8 s: the four latches undone one by one, the
+        //                          lid lifted
+        //   case_b  snap,   1.5 s: the latches torn down at once and
+        //                          bouncing, the lid flung open
+        class AnimationSources
+        {
+            class case_a { source = "user"; initPhase = 0; animPeriod = 2.8; };
+            class case_b { source = "user"; initPhase = 0; animPeriod = 1.5; };
+        };
         // THE CHARACTER'S OWN SLOTS AS WELL (owner, 2026-09-27): what the
         // personal stash hangs up, a shared box hangs up too, so a whole kit
         // goes onto hooks instead of into the grid, and clothing hung here
@@ -218,10 +301,24 @@ class CfgVehicles
     // buildings, so every restart lost the anchor and with it the way to every
     // stash keyed at that spot. It is an item now, exactly like a placed box:
     // saved with the world, its lifetime renewed to 45 days on every boot
-    // (OZ_StashAnchor.EEOnAfterLoad), and it wears the same grey locker by the
-    // model's path, because the model lives in CfgVehicles only under a House
-    // class this can no longer inherit. _v2/_v3 and the blue set are one word
-    // away in that path.
+    // (OZ_StashAnchor.EEOnAfterLoad).
+    //
+    // ITS OWN MODEL SINCE 2026-10-05: a steel cabinet with two mesh doors,
+    // 1.00 x 1.90 x 0.52 m -- the height of the vanilla locker_closed_v1 it
+    // wore until then. No hiddenSelections: an admin places the anchor, no
+    // kit's hologram ever projects it, and the mesh doors carry a second,
+    // tiled and alpha-cut texture that a whole-LOD "camo" would paint over.
+    //
+    // THE DOORS OPEN ON THE OPENING PLAYER'S CLIENT ONLY (OZ_StashAnchor.
+    // OZS_ShowOpen, called by that client's own mirror): the server never
+    // sets the phase, so everybody else keeps seeing the locker closed, and
+    // nobody walks up to their locker to find somebody else's doors standing
+    // open. The collision is one solid box of the closed cabinet for the
+    // same reason -- a door only one client draws must not collide.
+    //   locker_a  smooth, 2.0 s: the lever turned a quarter, the right door
+    //                            opens to 105 degrees
+    //   locker_b  snap,   1.2 s: the lever yanked, both doors flung open,
+    //                            they hit the stop, bounce and settle
     //
     // Heavy, huge and hitpoint-rich on purpose: nothing carries it, nothing
     // pockets it, and a magazine emptied into it changes nothing.
@@ -230,7 +327,13 @@ class CfgVehicles
         scope = 2;
         displayName = "$STR_OZS_STASH";
         descriptionShort = "$STR_OZS_STASH_DESC";
-        model = "\DZ\structures\Furniture\Cases\locker\locker_closed_v1.p3d";
+        model = "\OpenZone_Storage\models\locker\ozs_locker.p3d";
+        soundImpactType = "metal";
+        class AnimationSources
+        {
+            class locker_a { source = "user"; initPhase = 0; animPeriod = 2.0; };
+            class locker_b { source = "user"; initPhase = 0; animPeriod = 1.2; };
+        };
         weight = 60000;
         itemSize[] = {10, 10};
         physLayer = "item_large";
@@ -319,6 +422,9 @@ class CfgVehicles
     // The kits a player carries and deploys into a box (OZS_Kit.c). Each has a
     // "<kit>Placing" twin: the class the hologram projects, with the box's model
     // and hologram material (Hologram reads them from the projection's class).
+    // The CARRIED kit keeps a vanilla model -- a packed box is not the box --
+    // and the twin wears the box's own, with its "camo" for the hologram to
+    // repaint with <hologramMaterial>_deployable / _undeployable.rvmat.
     class OZ_StorageBoxKit_Small: Inventory_Base
     {
         scope = 2;
@@ -329,8 +435,8 @@ class CfgVehicles
         itemSize[] = {5, 4};
         weight = 5000;
         itemBehaviour = 0;
-        hologramMaterial = "wooden_case";
-        hologramMaterialPath = "dz\gear\camping\data";
+        hologramMaterial = "ozs_case_small";
+        hologramMaterialPath = "OpenZone_Storage\models\small_case\data";
         class DamageSystem
         {
             class GlobalHealth
@@ -346,6 +452,8 @@ class CfgVehicles
     {
         scope = 1;
         displayName = "This is a hologram";
+        model = "\OpenZone_Storage\models\small_case\ozs_case_small.p3d";
+        hiddenSelections[] = {"camo"};
     };
     class OZ_StorageBoxKit_Medium: OZ_StorageBoxKit_Small
     {
@@ -354,12 +462,15 @@ class CfgVehicles
         model = "\DZ\gear\camping\sea_chest.p3d";
         itemSize[] = {6, 5};
         weight = 7000;
-        hologramMaterial = "sea_chest";
+        hologramMaterial = "ozs_crate_medium";
+        hologramMaterialPath = "OpenZone_Storage\models\medium_crate\data";
     };
     class OZ_StorageBoxKit_MediumPlacing: OZ_StorageBoxKit_Medium
     {
         scope = 1;
         displayName = "This is a hologram";
+        model = "\OpenZone_Storage\models\medium_crate\ozs_crate_medium.p3d";
+        hiddenSelections[] = {"camo"};
     };
     class OZ_StorageBoxKit_Large: OZ_StorageBoxKit_Medium
     {
@@ -367,11 +478,15 @@ class CfgVehicles
         descriptionShort = "$STR_OZS_KIT_LARGE_DESC";
         itemSize[] = {8, 5};
         weight = 9000;
+        hologramMaterial = "ozs_hardcase_128";
+        hologramMaterialPath = "OpenZone_Storage\models\hardcase_128\data";
     };
     class OZ_StorageBoxKit_LargePlacing: OZ_StorageBoxKit_Large
     {
         scope = 1;
         displayName = "This is a hologram";
+        model = "\OpenZone_Storage\models\hardcase_128\ozs_hardcase_128.p3d";
+        hiddenSelections[] = {"camo"};
     };
 };
 
