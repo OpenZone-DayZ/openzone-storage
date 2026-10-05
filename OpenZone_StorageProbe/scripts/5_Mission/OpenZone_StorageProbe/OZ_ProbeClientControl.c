@@ -221,6 +221,28 @@ class OZ_ProbeClientControl
         {
             ClientTree(line);
         }
+        else if (line.IndexOf("placing") == 0)
+        {
+            // The kit in hands goes into (or out of) placement, as the
+            // "toggle placing" action does: the hologram of its "<kit>Placing"
+            // class appears where the player looks, and the hologram
+            // diagnostic (OZ_ProbeHologram.c) starts reporting.
+            PlayerBase placer = PlayerBase.Cast(GetGame().GetPlayer());
+            if (!placer || !placer.GetItemInHands())
+            {
+                Note("=== " + line + ": no player, or nothing in hands");
+                return;
+            }
+            placer.TogglePlacingLocal();
+            Note("=== " + line + ": " + placer.GetItemInHands().GetType() + " placing=" + placer.IsPlacingLocal().ToString());
+        }
+        else if (line.IndexOf("stashask") == 0)
+        {
+            // The stash through the nearest locker WITHOUT the panel: what
+            // the locker's doors do while a stash is open, with nothing over
+            // the picture. `pxshut <id>` ends it.
+            StashOpen(false);
+        }
         else if (line.IndexOf("stashopen") == 0)
         {
             // The stash's screen over the nearest locker, as F does.
@@ -247,8 +269,9 @@ class OZ_ProbeClientControl
         {
             // The CLIENT asks for a box, which is what a screen does: through
             // the ANCHOR in front of the player, because a box id belongs to
-            // the server and this side is never told it.
-            PxAsk();
+            // the server and this side is never told it. `pxopen OZ_<class>`
+            // picks the nearest box of that class.
+            PxAsk(line);
         }
         else if (line.IndexOf("screen") == 0)
         {
@@ -776,7 +799,7 @@ class OZ_ProbeClientControl
         return best;
     }
 
-    protected void StashOpen()
+    protected void StashOpen(bool show = true)
     {
         PlayerBase me = PlayerBase.Cast(GetGame().GetPlayer());
         if (!me)
@@ -806,13 +829,23 @@ class OZ_ProbeClientControl
             return;
         }
         OZS_Mirror.Ask(best);
+        if (!show)
+        {
+            Note("=== stashask: asked through " + best.GetType() + " netid " + best.GetNetworkIDString() + ", no panel");
+            return;
+        }
         OZS_Mirrors.Get().ShowWhenReady();
         Note("=== stashopen: asked through " + best.GetType() + " netid " + best.GetNetworkIDString() + ", the panel opens when it is whole");
     }
 
-    protected void PxAsk()
+    protected void PxAsk(string line)
     {
-        OZ_StorageBox anchor = PxAnchor();
+        array<string> asked = new array<string>();
+        line.Split(" ", asked);
+        string wanted = "";
+        if (asked.Count() > 1 && asked.Get(1).IndexOf("OZ_") == 0)
+            wanted = asked.Get(1);
+        OZ_StorageBox anchor = PxAnchor(wanted);
         if (!anchor)
         {
             Note("=== pxopen: no box within 12 m");
@@ -1657,8 +1690,17 @@ class OZ_ProbeClientControl
             string row = "[OpenZone] probe scan: loose " + it.GetType() + " at " + it.GetPosition().ToString(false);
             row = row + " netid " + it.GetNetworkIDString();
             ErrorEx(row, ErrorExSeverity.WARNING);
+            // How it stands and how far its lid or doors are open AS THIS
+            // CLIENT DRAWS IT (2026-10-05); the server's side of the same is
+            // `oz_ghost pose`.
+            string pose = " ypr " + it.GetOrientation().ToString(false);
+            OZ_StorageBox scanBox = OZ_StorageBox.Cast(it);
+            if (scanBox && scanBox.OZS_LidSource() != "")
+                pose = pose + " " + scanBox.OZS_LidSource() + "=" + it.GetAnimationPhase(scanBox.OZS_LidSource()).ToString();
+            if (it.IsInherited(OZ_StashAnchor))
+                pose = pose + " " + OZ_StashAnchor.OZS_DOOR_SOURCE + "=" + it.GetAnimationPhase(OZ_StashAnchor.OZS_DOOR_SOURCE).ToString();
             if (scanFile != 0)
-                FPrintln(scanFile, "loose " + it.GetType() + " at " + it.GetPosition().ToString(false) + " netid " + it.GetNetworkIDString());
+                FPrintln(scanFile, "loose " + it.GetType() + " at " + it.GetPosition().ToString(false) + " netid " + it.GetNetworkIDString() + pose);
         }
         ErrorEx("[OpenZone] probe scan: " + loose + " loose item(s) within " + radius + " m of " + me.GetPosition().ToString(false), ErrorExSeverity.WARNING);
         if (scanFile != 0)

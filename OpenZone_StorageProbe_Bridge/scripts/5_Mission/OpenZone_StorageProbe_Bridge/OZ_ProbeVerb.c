@@ -148,6 +148,53 @@ modded class DZMCP_BridgeCore
             detail = "placed at " + pman.GetPosition().ToString(false) + " facing " + (Math.Atan2(pgot[0], pgot[2]) * Math.RAD2DEG).ToString() + " deg";
             return true;
         }
+        if (op == "pose")
+        {
+            // HOW THE BOXES AND LOCKERS AROUND A SPOT STAND, AS THE SERVER
+            // HOLDS THEM (2026-10-05, the models with lids and doors): the
+            // orientation, and the phase of the opening each drives. The
+            // client's own picture of the same things is the control file's
+            // `scan`; the two differ on purpose for a locker, whose doors
+            // only the opening player's client moves.
+            array<Object> around = new array<Object>();
+            GetGame().GetObjectsAtPosition(pos, radius, around, null);
+            int posed = 0;
+            detail = "";
+            // `class=<any class>` asks about anything else that stands there
+            // -- a vanilla static beside ours, to compare which way two
+            // models face -- and answers with where and how it stands alone.
+            string poseClass = GhostArg(args, "class", "");
+            for (int po = 0; po < around.Count(); po++)
+            {
+                Object pany = around.Get(po);
+                if (poseClass != "")
+                {
+                    if (pany && pany.IsKindOf(poseClass))
+                    {
+                        detail = detail + pany.GetType() + " at " + pany.GetPosition().ToString(false) + " ypr " + pany.GetOrientation().ToString(false) + " | ";
+                        posed++;
+                    }
+                    continue;
+                }
+                EntityAI pe = EntityAI.Cast(pany);
+                if (!pe || pe.GetHierarchyParent())
+                    continue;
+                OZ_StorageBox pbox = OZ_StorageBox.Cast(pe);
+                OZ_StashAnchor panchor = OZ_StashAnchor.Cast(pe);
+                if (!pbox && !panchor)
+                    continue;
+                string source = OZ_StashAnchor.OZS_DOOR_SOURCE;
+                if (pbox)
+                    source = pbox.OZS_LidSource();
+                string phase = "none";
+                if (source != "")
+                    phase = pe.GetAnimationPhase(source).ToString();
+                detail = detail + pe.GetType() + " at " + pe.GetPosition().ToString(false) + " ypr " + pe.GetOrientation().ToString(false) + " " + source + "=" + phase + " | ";
+                posed++;
+            }
+            detail = posed.ToString() + " within " + radius.ToString() + " m: " + detail;
+            return true;
+        }
         if (op == "unpublish")
         {
             // THE CALL THE DESIGN'S "put an item INTO the box" PATH STANDS ON.
