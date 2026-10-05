@@ -100,7 +100,7 @@ class CfgVehicles
     class Container_Base;
     class StaticObj_Furniture_locker_closed_v1;
 
-    // 500 cells at the vanilla width of 10, two weapon slots.
+    // 250 cells at the vanilla width of 10, two weapon slots.
     class OZ_StorageBox_Small: WoodenCrate
     {
         scope = 2;
@@ -126,16 +126,13 @@ class CfgVehicles
             class lid_a { source = "user"; initPhase = 0; animPeriod = 1.8; };
             class lid_b { source = "user"; initPhase = 0; animPeriod = 1.1; };
         };
-        // THE CHARACTER'S OWN SLOTS AS WELL (owner, 2026-09-27): what the
-        // personal stash hangs up, a shared box hangs up too, so a whole kit
-        // goes onto hooks instead of into the grid, and clothing hung here
-        // keeps working pockets. The slots are the vanilla ones, so the
-        // T148506 trap never arises (see the stash below). NOT the shoulder
-        // and melee slots: a pickaxe hung on one of those beside the weapon
-        // rack and could not trade with the rifles on it, and the owner
-        // called the mix what it was (2026-09-27) -- the rack alone holds
-        // the long things.
-        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "OZ_Weapon_1", "OZ_Weapon_2"};
+        // THE WEAPON RACK AND NOTHING ELSE (owner, 2026-10-05): a box keeps
+        // its weapon slots -- two, four and six by size -- and loses every
+        // other. From 2026-09-27 a shared box also had the character's own
+        // clothing slots; hanging a kit up is the personal stash's business
+        // alone now. A record written before this may still name a hook the
+        // box has lost: OZS_Records.Create lays such a root in the grid.
+        attachments[] = {"OZ_Weapon_1", "OZ_Weapon_2"};
         class Cargo
         {
             itemsCargoSize[] = {10, 25};
@@ -144,26 +141,18 @@ class CfgVehicles
         };
         class GUIInventoryAttachmentsProps
         {
-            class Gear
-            {
-                name = "$STR_OZS_SLOTS_GEAR";
-                description = "";
-                attachmentSlots[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband"};
-                icon = "set:dayz_inventory image:cat_common_cargo";
-                view_index = 1;
-            };
             class Weapons
             {
                 name = "$STR_OZS_SLOTS_WEAPONS";
                 description = "";
                 attachmentSlots[] = {"OZ_Weapon_1", "OZ_Weapon_2"};
                 icon = "set:dayz_inventory image:cat_common_cargo";
-                view_index = 2;
+                view_index = 1;
             };
         };
     };
 
-    // 1000 cells, four weapon slots.
+    // 500 cells, four weapon slots.
     class OZ_StorageBox_Medium: SeaChest
     {
         scope = 2;
@@ -191,16 +180,8 @@ class CfgVehicles
             class case_a { source = "user"; initPhase = 0; animPeriod = 2.4; };
             class case_b { source = "user"; initPhase = 0; animPeriod = 1.4; };
         };
-        // THE CHARACTER'S OWN SLOTS AS WELL (owner, 2026-09-27): what the
-        // personal stash hangs up, a shared box hangs up too, so a whole kit
-        // goes onto hooks instead of into the grid, and clothing hung here
-        // keeps working pockets. The slots are the vanilla ones, so the
-        // T148506 trap never arises (see the stash below). NOT the shoulder
-        // and melee slots: a pickaxe hung on one of those beside the weapon
-        // rack and could not trade with the rifles on it, and the owner
-        // called the mix what it was (2026-09-27) -- the rack alone holds
-        // the long things.
-        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
+        // The weapon rack and nothing else, as on the small box.
+        attachments[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
         class Cargo
         {
             itemsCargoSize[] = {10, 50};
@@ -209,26 +190,18 @@ class CfgVehicles
         };
         class GUIInventoryAttachmentsProps
         {
-            class Gear
-            {
-                name = "$STR_OZS_SLOTS_GEAR";
-                description = "";
-                attachmentSlots[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband"};
-                icon = "set:dayz_inventory image:cat_common_cargo";
-                view_index = 1;
-            };
             class Weapons
             {
                 name = "$STR_OZS_SLOTS_WEAPONS";
                 description = "";
                 attachmentSlots[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4"};
                 icon = "set:dayz_inventory image:cat_common_cargo";
-                view_index = 2;
+                view_index = 1;
             };
         };
     };
 
-    // 1500 cells, six weapon slots. 150 rows is well inside the engine's
+    // 1000 cells, six weapon slots. 100 rows is well inside the engine's
     // ceiling of 256 rows per cargo grid (measured 2026-09-16).
     class OZ_StorageBox_Large: SeaChest
     {
@@ -255,16 +228,8 @@ class CfgVehicles
             class case_a { source = "user"; initPhase = 0; animPeriod = 2.8; };
             class case_b { source = "user"; initPhase = 0; animPeriod = 1.5; };
         };
-        // THE CHARACTER'S OWN SLOTS AS WELL (owner, 2026-09-27): what the
-        // personal stash hangs up, a shared box hangs up too, so a whole kit
-        // goes onto hooks instead of into the grid, and clothing hung here
-        // keeps working pockets. The slots are the vanilla ones, so the
-        // T148506 trap never arises (see the stash below). NOT the shoulder
-        // and melee slots: a pickaxe hung on one of those beside the weapon
-        // rack and could not trade with the rifles on it, and the owner
-        // called the mix what it was (2026-09-27) -- the rack alone holds
-        // the long things.
-        attachments[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband", "OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
+        // The weapon rack and nothing else, as on the small box.
+        attachments[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
         class Cargo
         {
             itemsCargoSize[] = {10, 100};
@@ -273,21 +238,13 @@ class CfgVehicles
         };
         class GUIInventoryAttachmentsProps
         {
-            class Gear
-            {
-                name = "$STR_OZS_SLOTS_GEAR";
-                description = "";
-                attachmentSlots[] = {"Headgear", "Mask", "Eyewear", "Body", "Vest", "Back", "Hips", "Legs", "Feet", "Gloves", "Armband"};
-                icon = "set:dayz_inventory image:cat_common_cargo";
-                view_index = 1;
-            };
             class Weapons
             {
                 name = "$STR_OZS_SLOTS_WEAPONS";
                 description = "";
                 attachmentSlots[] = {"OZ_Weapon_1", "OZ_Weapon_2", "OZ_Weapon_3", "OZ_Weapon_4", "OZ_Weapon_5", "OZ_Weapon_6"};
                 icon = "set:dayz_inventory image:cat_common_cargo";
-                view_index = 2;
+                view_index = 1;
             };
         };
     };

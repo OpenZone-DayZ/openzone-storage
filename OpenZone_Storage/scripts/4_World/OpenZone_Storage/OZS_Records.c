@@ -514,9 +514,11 @@ class OZS_Records
             else
                 e = GameInventory.LocationCreateEntity(il, n.cls, ECE_IN_INVENTORY, RF_DEFAULT);
             // A HOOK THE BOX NO LONGER HAS: the shoulder and melee slots
-            // came off the boxes and the stash on 2026-09-27, and a record
-            // written before that may still hang a rifle or a pickaxe on
-            // one. Such a ROOT goes into the grid instead of onto the shelf;
+            // came off the boxes and the stash on 2026-09-27, the clothing
+            // slots came off the shared boxes on 2026-10-05, and a record
+            // written before that may still hang a rifle, a pickaxe or a
+            // helmet on one. Such a ROOT goes into the grid instead of onto
+            // the shelf;
             // a nested attachment (a scope on a rifle) has nowhere else to
             // be and keeps the old path.
             if (!e && n.parent < 0 && parent.GetInventory())

@@ -62,9 +62,8 @@ how they are built are in [models/](models/README.md).
 Three boxes -- `OZ_StorageBox_Small` (250 cells, 2 weapon slots, the plank case),
 `OZ_StorageBox_Medium` (500 cells, 4 slots, the crate) and `OZ_StorageBox_Large`
 (1000 cells, 6 slots, the hard case; `OZ_StorageBox_Fridge` is the same box in the shell of an
-old fridge, with a kit of its own), each with the character's own clothing slots as well, so a
-whole kit hangs up instead of being piled into the grid, and clothing hung there keeps
-working pockets, as in the stash. One verb on the box, "Show the box (N)": the record is
+old fridge, with a kit of its own). A box has its weapon slots and no others: hanging a
+whole kit up is what the personal stash is for. One verb on the box, "Show the box (N)": the record is
 read into an unannounced container of the same class at 500 entities per second, 5 ms of a
 frame at most, and streamed to the player's screen in chunks; the container is kept for
 five minutes after the last player leaves and then let go at 50 deletions a frame; every
