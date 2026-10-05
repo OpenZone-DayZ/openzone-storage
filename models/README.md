@@ -97,8 +97,11 @@ project_root`) with links to the mod's `data\` and to the vanilla
 vanilla `dz` (`OZ_VANILLA_DZ`, or one of the usual places). The second runs `binarize` from
 that root, judges what came out and copies it into the mod.
 
-One run takes minutes whatever the model: 510 to 540 s each for these (2026-10-05). Before
-it reads anything, binarize walks the whole drive its working directory is on.
+How long a run takes is the size of the disk, not of the model: before it reads anything,
+binarize walks the whole drive its working directory is on. Started from the root folder
+itself that was 510 to 540 s for each of these models (2026-10-05). `asset_build` now maps
+a drive letter onto the root for the run and starts binarize from there, which makes it a
+tenth of a second each; an MCP server from before that change still takes the minutes.
 
 ## The fridge
 

@@ -21,11 +21,14 @@ OpenZone_Storage/models/<model>/model.cfg beside it is left alone.
 The vanilla tree is found at OZ_VANILLA_DZ, or at the first of the usual places.
 Windows only: the links are NTFS junctions, which need no elevation.
 
-ONE RUN IS MINUTES, WHATEVER THE MODEL (measured 2026-10-05: 510 s and 522 s for the
-two smallest). Before it reads anything binarize walks the WHOLE DRIVE its working
-directory is on -- its busy thread sits in FindNextFile with the drive's root open --
-so the time is the size of the disk, not of the model, and linking less of the
-vanilla tree into the root does not shorten it.
+HOW LONG ONE RUN TAKES IS THE SIZE OF THE DISK, NOT OF THE MODEL (measured
+2026-10-05). Before it reads anything binarize walks the WHOLE DRIVE its working
+directory is on -- its busy thread sits in FindNextFile with the drive's root open.
+Started from this folder that was 510 to 540 s a model. asset_build has since learned
+to start it from a drive letter substituted for this root, where the walk has only
+this tree to cover: a tenth of a second a model. The walk goes through the junctions
+too, so the one vanilla folder the models name is linked and not the whole tree
+(with all 103,359 files of it linked in, a run took half a second).
 """
 import _winapi
 import glob
