@@ -569,7 +569,12 @@ class OZ_ProbeState
             dst.SetCargo(parent, e, 0, row, col, flip);
             bool placed = GameInventory.LocationSyncMoveEntity(src, dst);
             if (!placed)
-                placed = parent.GetInventory().TakeEntityToCargoEx(InventoryMode.SERVER, e, 0, row, col);
+            {
+                // 1.29's `TakeEntityToCargoEx`, spelled out since 1.30 retired
+                // it: the same cell, turned the way the item lies now.
+                dst.SetCargo(parent, e, 0, row, col, e.GetInventory().GetFlipCargo());
+                placed = parent.GetInventory().TakeToDst(InventoryMode.SERVER, src, dst);
+            }
             if (!placed)
                 failed++;
         }
@@ -1292,10 +1297,17 @@ class OZ_ProbeState
                     placed = true;
                     viaSync++;
                 }
-                else if (crate.GetInventory().TakeEntityToCargoEx(InventoryMode.SERVER, bag, dst.GetIdx(), dst.GetRow(), dst.GetCol()))
+                else
                 {
-                    placed = true;
-                    viaTake++;
+                    // 1.29's `TakeEntityToCargoEx`, spelled out since 1.30
+                    // retired it: the found cell, turned the way the bag lies.
+                    InventoryLocation cell = new InventoryLocation();
+                    cell.SetCargo(crate, bag, dst.GetIdx(), dst.GetRow(), dst.GetCol(), bag.GetInventory().GetFlipCargo());
+                    if (crate.GetInventory().TakeToDst(InventoryMode.SERVER, src, cell))
+                    {
+                        placed = true;
+                        viaTake++;
+                    }
                 }
             }
             else

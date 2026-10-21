@@ -657,20 +657,25 @@ class OZS_Records
                     dst.SetAttachment(m.parent, m.item, m.slot);
                     placed = m.parent.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
                     if (!placed)
-                        placed = m.parent.GetInventory().TakeEntityAsAttachmentEx(InventoryMode.LOCAL, m.item, m.slot);
+                        placed = m.parent.GetInventory().TakeEntityAsTargetAttachmentEx(InventoryMode.LOCAL, m.parent, m.item, m.slot);
                 }
                 if (!placed && !m.toSlot && m.row >= 0)
                 {
                     dst.SetCargo(m.parent, m.item, 0, m.row, m.col, m.flip);
                     placed = m.parent.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
                 }
+                // The same cell, turned the way the item lies now: what 1.29's
+                // `TakeEntityToCargoEx` did, spelled out since 1.30 retired it.
                 if (!placed && !m.toSlot && m.row >= 0)
-                    placed = m.parent.GetInventory().TakeEntityToCargoEx(InventoryMode.LOCAL, m.item, 0, m.row, m.col);
+                {
+                    dst.SetCargo(m.parent, m.item, 0, m.row, m.col, m.item.GetInventory().GetFlipCargo());
+                    placed = m.parent.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
+                }
                 // A slotted item must NOT fall back into cargo: it would look
                 // restored and be in the wrong place, and the next close would
                 // write that wrong place down as the truth.
                 if (!placed && !m.toSlot)
-                    placed = m.parent.GetInventory().TakeEntityToCargo(InventoryMode.LOCAL, m.item);
+                    placed = m.parent.GetInventory().TakeEntityToTargetCargo(InventoryMode.LOCAL, m.parent, m.item);
             }
             if (!placed)
             {

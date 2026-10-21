@@ -527,7 +527,7 @@ class OZS_Boundary
         // as the fallback for a hook the named call would not take.
         bool moved = false;
         if (lt == InventoryLocationType.ATTACHMENT)
-            moved = holder.GetInventory().TakeEntityAsAttachmentEx(InventoryMode.LOCAL, e, slot);
+            moved = holder.GetInventory().TakeEntityAsTargetAttachmentEx(InventoryMode.LOCAL, holder, e, slot);
         if (!moved)
             moved = e.GetInventory().TakeToDst(InventoryMode.LOCAL, src, dst);
         // WHERE IT ACTUALLY IS, NOT WHAT THE CALL SAID. A move that returns

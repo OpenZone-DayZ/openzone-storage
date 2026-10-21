@@ -313,7 +313,7 @@ modded class DZMCP_BridgeCore
                 return false;
             }
             bool cReach = cNode.GetInventory().AreChildrenAccessible();
-            if (!cNode.GetInventory().TakeEntityToCargo(InventoryMode.SERVER, cItem))
+            if (!cNode.GetInventory().TakeEntityToTargetCargo(InventoryMode.SERVER, cNode, cItem))
             {
                 detail = cPath + ": REFUSED '" + cInner + "' into the cargo of the last link (AreChildrenAccessible=" + cReach.ToString() + ")";
                 return false;
@@ -381,7 +381,7 @@ modded class DZMCP_BridgeCore
                 detail = "'" + innerClass + "' could not be created at all -- is that a class?";
                 return false;
             }
-            bool nestMoved = nestOuter.GetInventory().TakeEntityToCargo(InventoryMode.SERVER, nestInner);
+            bool nestMoved = nestOuter.GetInventory().TakeEntityToTargetCargo(InventoryMode.SERVER, nestOuter, nestInner);
             if (!nestMoved)
             {
                 detail = hostClass + " took '" + outerClass + "', but the MOVE of '" + innerClass + "' into ITS cargo was refused";

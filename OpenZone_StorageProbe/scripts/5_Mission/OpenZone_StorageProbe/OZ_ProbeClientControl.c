@@ -1000,8 +1000,8 @@ class OZ_ProbeClientControl
             Note("=== " + line + ": no " + parts.Get(1) + " in the hands or loose within 4 m");
             return;
         }
-        bool ok = me.PredictiveTakeEntityAsAttachment(item);
-        Note("=== " + line + ": " + item.GetType() + " -> PredictiveTakeEntityAsAttachment " + ok.ToString());
+        bool ok = me.PredictiveTakeEntityToTargetAttachment(me, item);
+        Note("=== " + line + ": " + item.GetType() + " -> PredictiveTakeEntityToTargetAttachment " + ok.ToString());
     }
 
     // pxhang <handle> <slot>: a box item onto the box's own slot by name,

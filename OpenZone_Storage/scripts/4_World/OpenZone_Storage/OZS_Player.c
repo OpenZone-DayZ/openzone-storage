@@ -188,27 +188,12 @@ modded class PlayerBase
         return super.PredictiveDropEntity(item);
     }
 
-    override bool PredictiveTakeEntityAsAttachment(notnull EntityAI item)
-    {
-        OZS_Mirror m = OZS_Box(this, item);
-        if (m)
-        {
-            OZS_Mirrors.s_Via = "AsAttachment";
-            return m.DragTo(item, this, InventoryLocationType.ATTACHMENT, InventorySlots.INVALID, -1, -1);
-        }
-        return super.PredictiveTakeEntityAsAttachment(item);
-    }
-
-    override bool PredictiveTakeEntityAsAttachmentEx(notnull EntityAI item, int slot)
-    {
-        OZS_Mirror m = OZS_Box(this, item);
-        if (m)
-        {
-            OZS_Mirrors.s_Via = "AsAttachmentEx";
-            return m.DragTo(item, this, InventoryLocationType.ATTACHMENT, slot, -1, -1);
-        }
-        return super.PredictiveTakeEntityAsAttachmentEx(item, slot);
-    }
+    // `PredictiveTakeEntityAsAttachment(Ex)` -- the player's own slots, named
+    // without a target -- were overridden here as well until 2026-10-21. DayZ
+    // 1.30 marks both obsolete, the compiler warns at every mention, and
+    // nothing in 1.30 calls them: the inventory screen asks the ToTarget forms
+    // above with the player as the target, and a debug bot is the last vanilla
+    // caller.
 
     // "INTO MY INVENTORY, WHEREVER IT FITS" -- the screen's quick take
     // (cargocontainer.c:829, attachments.c:279) and what Alt+click on a box

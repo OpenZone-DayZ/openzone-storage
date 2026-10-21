@@ -1752,10 +1752,10 @@ class OZS_Ops
         // it. Measured against the owner 2026-09-25 -- dropping on the third
         // slot put the weapon in the first, the fourth put it in the second,
         // which is that rule exactly as the earlier slots filled up.
-        // `TakeEntityAsAttachmentEx` is the one that is told which slot.
+        // `TakeEntityAsTargetAttachmentEx` is the one that is told which slot.
         bool took = false;
         if (dst.GetType() == InventoryLocationType.ATTACHMENT && dst.GetParent())
-            took = dst.GetParent().GetInventory().TakeEntityAsAttachmentEx(InventoryMode.LOCAL, e, dst.GetSlot());
+            took = dst.GetParent().GetInventory().TakeEntityAsTargetAttachmentEx(InventoryMode.LOCAL, dst.GetParent(), e, dst.GetSlot());
         else
             took = e.GetInventory().TakeToDst(InventoryMode.LOCAL, now, dst);
         if (took)
