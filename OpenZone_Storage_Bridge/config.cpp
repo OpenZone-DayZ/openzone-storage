@@ -26,7 +26,7 @@ class CfgMods
     {
         dir = "OpenZone_Storage_Bridge";
         name = "OpenZone Storage Bridge";
-        author = "Zone Protocol";
+        author = "OpenZone";
         version = "0.1.0";
         type = "mod";
 

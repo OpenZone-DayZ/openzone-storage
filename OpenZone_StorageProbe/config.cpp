@@ -34,7 +34,7 @@ class CfgMods
     {
         dir = "OpenZone_StorageProbe";
         name = "OpenZone Storage Probe";
-        author = "Zone Protocol";
+        author = "OpenZone";
         version = "0.1.0";
         type = "mod";
 

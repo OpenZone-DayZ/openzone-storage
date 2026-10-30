@@ -4,7 +4,7 @@
 // texture and says nothing, so a wrong path is worse than none.
 
 name        = "OpenZone Storage";
-author      = "Zone Protocol";
+author      = "OpenZone";
 authorID    = "";
 version     = "0.3";
 description = "Virtual storage boxes of the OpenZone series: three sizes of crate deployed from a kit, weapon slots, a search bar, a sort and a count button. New in 0.3: the personal stash -- a locker an admin places, where every player opens their own container with the character's own slots. A closed box lives in the server's bridge database; the game only sees an open one. Needs Community Framework and OpenZone Core, and the OpenZone bridge on the server. github.com/OpenZone-DayZ/openzone-storage";
