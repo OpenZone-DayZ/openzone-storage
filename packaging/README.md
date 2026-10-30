@@ -3,7 +3,7 @@
 What goes into a `@Mod` folder besides the packed pbo.
 
 The `@Mod` folders are **build output and are not in git**. `mod_build` writes
-`addons/` into them and signs it with the series key (`keys/ZoneProtocol.biprivatekey`,
+`addons/` into them and signs it with the series key (`keys/OpenZone.biprivatekey`,
 never committed); everything else a published mod needs lives here and is copied in by
 [`package.ps1`](../package.ps1).
 

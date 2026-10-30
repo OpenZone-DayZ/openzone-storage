@@ -78,6 +78,19 @@ foreach ($dir in Get-ChildItem $src -Directory) {
                 $copied++
             }
         }
+        # A key the repository no longer carries must not ship: the series key was
+        # renamed 2026-10-30, and mod_build adds the new .bikey beside the old one.
+        $stale = @(Get-ChildItem $kdst -Filter *.bikey -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne $bikey.Name })
+        foreach ($old in $stale) {
+            if ($Check) {
+                Write-Host "  $mod : keys/$($old.Name) is not the repository's key" -ForegroundColor Yellow
+                $problems++
+            } else {
+                Remove-Item $old.FullName -Force
+                Write-Host "  $mod : keys/$($old.Name) removed, not the repository's key" -ForegroundColor Green
+            }
+        }
     } else {
         Write-Host "  $mod : no .bikey in keys/ -- the pbo will be unsigned" -ForegroundColor Yellow
         $problems++
