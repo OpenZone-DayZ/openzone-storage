@@ -17,7 +17,9 @@ class OZS_Search
     // The query in the four spellings a name may use (typed, lower,
     // Capitalized, UPPER): the names are never case-folded themselves, so a
     // match costs a few IndexOf per icon and no engine casing touches
-    // Cyrillic (see OZS_Case).
+    // Cyrillic (see OZS_Case). All four are the exact spellings: UPPER is
+    // UpperExact(), with the Cyrillic І of a name written in capitals, not
+    // the Latin I that Upper() draws in a header.
     protected static string s_Q0;
     protected static string s_Q1;
     protected static string s_Q2;
@@ -32,7 +34,7 @@ class OZS_Search
         s_Q0 = t;
         s_Q1 = OZS_Case.Lower(t);
         s_Q2 = OZS_Case.Capitalize(s_Q1);
-        s_Q3 = OZS_Case.Upper(t);
+        s_Q3 = OZS_Case.UpperExact(t);
         s_Version++;
     }
 

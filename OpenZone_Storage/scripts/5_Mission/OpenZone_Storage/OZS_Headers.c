@@ -7,6 +7,10 @@
 // alphabets; the headers themselves fold the same way, so a name that
 // reaches them intact stays intact. Nothing here is specific to the box:
 // every container on the screen gets its name back.
+//
+// The capital comes from OZS_Case.Upper(), which writes the Latin I for the
+// Cyrillic і and І: the vanilla faces draw the Cyrillic capital І (U+0406)
+// as a box (2026-10-31; see OZS_Case).
 #ifndef NO_GUI
 modded class Header
 {

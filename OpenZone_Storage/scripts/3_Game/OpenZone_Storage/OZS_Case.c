@@ -2,6 +2,18 @@
 // were seen to turn non-ASCII bytes into spaces (stand, 2026-09-16), so the
 // search and the sort fold case through replacement tables instead: ASCII
 // A..Z and the Ukrainian and Russian alphabets, in place, no engine casing.
+//
+// Two kinds of capitals, because a name is MATCHED and a header is DRAWN:
+//  - Lower(), Capitalize() and UpperExact() are exact: every letter goes to its
+//    own small or capital, so a query can be compared with a name as the
+//    stringtable spells it (the Cyrillic і U+0456 has the Cyrillic І U+0406 for its
+//    capital there).
+//  - Upper() is for text drawn in a vanilla face. Those faces (the Metron fonts of
+//    the inventory headers) have no U+0406 and draw a box for it, so Upper()
+//    writes the Latin I U+0049 for і and І alike; it looks the same. It goes
+//    one way only: Lower() still sends the Cyrillic І back to і, and the
+//    Latin I to the Latin i. Never compare a name with Upper() output. The
+//    research mod's OZL_Text.Upper makes the same choice (2026-10-31).
 class OZS_Case
 {
     protected static ref array<string> s_Upper;
@@ -42,12 +54,29 @@ class OZS_Case
         return r;
     }
 
-    static string Upper(string s)
+    // Every small letter to its own capital, as a name written in capitals is
+    // spelled: the Cyrillic і becomes the Cyrillic І (U+0406). The exact
+    // inverse of Lower(); what the search matches names against.
+    static string UpperExact(string s)
     {
         Build();
         string r = s;
         for (int i = 0; i < s_Lower.Count(); i++)
             r.Replace(s_Lower.Get(i), s_Upper.Get(i));
+        return r;
+    }
+
+    // The capitals of a header, for the vanilla faces: UpperExact() with the
+    // Cyrillic І (U+0406) then written as the Latin I (U+0049), so the і in
+    // a name and the І that starts one both come out as a letter the faces
+    // can draw. Replace works on bytes; U+0406 is the two bytes D0 86 and a
+    // lead byte never stands where a continuation byte does, so the match is a
+    // whole letter, never the tail of another. (This swap is two bytes for one,
+    // the table's are two for two.)
+    static string Upper(string s)
+    {
+        string r = UpperExact(s);
+        r.Replace("І", "I");
         return r;
     }
 
