@@ -168,7 +168,8 @@ class OZS_ParkAnswer
 
 // Declares every storage route neutral: an unknown route counts as a write
 // and clears the whole read cache of the bridge client, which would empty
-// the PDA's pages on every batch of events.
+// the PDA's pages on every batch of events -- and, for ROUTE_OP, on every
+// turn of every session, the busiest route of them all.
 class OZS_BridgeSink : OZ_BridgeSink
 {
     override void Neutral(array<string> routes)
@@ -180,6 +181,7 @@ class OZS_BridgeSink : OZ_BridgeSink
         routes.Insert(OZS_Const.ROUTE_OPENED);
         routes.Insert(OZS_Const.ROUTE_PARK);
         routes.Insert(OZS_Const.ROUTE_EVENTS);
+        routes.Insert(OZS_Const.ROUTE_OP);
     }
 
     // A live command of the admin side (design section 3.5): close, remove,
